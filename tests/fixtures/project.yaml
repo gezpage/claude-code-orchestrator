@@ -1,0 +1,3 @@
+repo-root: /tmp/test-repo
+project: test-project
+log_level: DEBUG
