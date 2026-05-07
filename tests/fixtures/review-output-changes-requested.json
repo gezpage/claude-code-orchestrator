@@ -1,0 +1,10 @@
+{
+  "stage": "review",
+  "status": "passed",
+  "reviewer_statuses": {
+    "architecture": "approved",
+    "implementation": "changes-requested",
+    "tests": "approved"
+  },
+  "changes_requested": ["implementation"]
+}

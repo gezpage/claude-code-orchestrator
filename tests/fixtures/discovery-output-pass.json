@@ -1,0 +1,5 @@
+{
+  "stage": "discovery",
+  "status": "passed",
+  "findings_files": ["projects/myproject/workflow/runs/feature/2026-05-08-run-1/findings.md"]
+}

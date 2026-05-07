@@ -1,0 +1,14 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "required": ["stage", "status"],
+  "properties": {
+    "stage": {"type": "string"},
+    "status": {"type": "string", "enum": ["passed", "blocked", "failed"]},
+    "message": {"type": "string"},
+    "alignment_log": {"type": "string"},
+    "qa_pair_count": {"type": "integer"},
+    "qualifying_decisions": {"type": "integer"}
+  },
+  "additionalProperties": true
+}

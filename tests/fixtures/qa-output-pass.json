@@ -1,0 +1,7 @@
+{
+  "stage": "qa",
+  "status": "passed",
+  "outcome": "pass",
+  "confidence": "high",
+  "regression_risk": "low"
+}

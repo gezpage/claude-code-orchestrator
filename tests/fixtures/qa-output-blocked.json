@@ -1,0 +1,6 @@
+{
+  "stage": "qa",
+  "status": "blocked",
+  "message": "Tests could not run — missing test database",
+  "outcome": "fail"
+}
