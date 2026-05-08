@@ -199,8 +199,9 @@ def run_pipeline(docs_root, project, feature_path, branch, profile_name, resume=
             for reviewer, prompt_path in prompts.items():
                 impl = _impl_from_prompt(prompt_path)
                 sig = run_stage(stage_name, impl, variables, run_folder, docs_root, project, project_log_path)
-                reviewer_statuses[reviewer] = sig.get("status", "unknown")
-                if sig.get("status") == "changes-requested":
+                verdict = sig.get("reviewer_statuses", {}).get(reviewer, sig.get("status", "unknown"))
+                reviewer_statuses[reviewer] = verdict
+                if verdict == "changes-requested":
                     changes_requested.append(reviewer)
             review_signal = {
                 "status": "passed",
