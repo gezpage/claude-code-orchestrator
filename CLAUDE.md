@@ -20,7 +20,7 @@ Developer-facing reference. Read before touching any orchestrator code.
 
 - **Fix cycles run in the current run folder — do not create a new run.** `_state.yaml`, `review.md`, and all fix-cycle output accumulate in the existing run folder.
 
-- **The fix cycle limit is 2 and is enforced in `orchestrate.py`.** Not configurable via `project.yaml`.
+- **The fix cycle limit is 2 and is enforced in `review_cycle.py` via `_MAX_CYCLES`.** Not configurable via `project.yaml`.
 
 ---
 
@@ -35,3 +35,27 @@ Developer-facing reference. Read before touching any orchestrator code.
 - Project prompt extensions: `workflow/prompts/{stage}.md` in the docs repo; appended to core prompt if present, ignored silently if absent.
 
 Python pre-validates all required paths before any Claude invocation. Missing required files are hard failures.
+
+---
+
+## Bugfix Workflow
+
+1. Read this file (done).
+2. Read the bug's `overview.md` in `team-hub/projects/orchestrator/bugs/{slug}/` —
+   it identifies the affected file, the related ADR, and the recommended fix.
+3. Read the related ADR(s) from `team-hub/projects/orchestrator/adrs/`.
+4. Read only the affected module file(s) — not the whole package.
+5. Fix and verify (run `pytest tests/` from the repo root).
+6. If the fix changes an architectural decision: update the ADR and note it in
+   `team-hub/projects/orchestrator/progress.md`.
+7. Commit: `git -C ~/Dev/tools/orchestrator commit -m "fix: ..."`
+
+If a fix introduces a new decision (hard to reverse, surprising without context,
+genuine trade-off): write a new ADR before implementing.
+
+---
+
+## Reference
+
+Full development guide, ADR index, and open bug list:
+`team-hub/projects/orchestrator/DEVELOPMENT.md`
