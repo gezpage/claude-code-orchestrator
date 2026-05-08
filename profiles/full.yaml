@@ -1,0 +1,21 @@
+name: full
+stages:
+  - stage: discovery
+    prompt: prompts/discovery/default.md
+  - stage: alignment
+    mode: interactive
+  - stage: specification
+    prompt: prompts/specification/default.md
+  - stage: decomposition
+    prompt: prompts/decomposition/default.md
+  - stage: implementation
+    prompt: prompts/implementation/default.md
+  - stage: qa
+    prompt: prompts/qa/default.md
+  - stage: review
+    prompts:
+      architecture: prompts/review/architecture.md
+      implementation: prompts/review/implementation.md
+      tests: prompts/review/tests.md
+  - stage: harvest
+    prompt: prompts/harvest/default.md
