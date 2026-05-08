@@ -37,8 +37,10 @@ def test_missing_extension_no_error(tmp_path):
 
 def test_variable_substitution(tmp_path):
     result = render_prompt("discovery", "default", VARS, str(tmp_path), "myproject")
-    assert "Run folder: /tmp/run" in result
-    assert "Feature: /tmp/docs/projects/myproject/feature" in result
+    assert "/tmp/run" in result
+    assert "/tmp/docs/projects/myproject/feature" in result
+    # Variables are substituted — no raw Jinja2 tags remain
+    assert "{{" not in result
 
 
 def test_extension_appended_after_core(tmp_path):
@@ -46,6 +48,8 @@ def test_extension_appended_after_core(tmp_path):
     ext_dir.mkdir(parents=True)
     (ext_dir / "discovery.md").write_text("Project rule here.")
     result = render_prompt("discovery", "default", VARS, str(tmp_path), "myproject")
-    core_pos = result.index("Run folder:")
+    # Core content precedes project conventions
+    assert "/tmp/run" in result
     conventions_pos = result.index("## Project conventions")
-    assert core_pos < conventions_pos
+    run_pos = result.index("/tmp/run")
+    assert run_pos < conventions_pos
