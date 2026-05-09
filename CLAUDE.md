@@ -68,6 +68,7 @@ Run `uv run pytest tests/` from the repo root.
 
 After completing each discrete task, stage and commit all modified files before reporting done.
 
+- Append an entry to `CHANGELOG.md` before committing — one line summarising what changed and why, under the current date heading.
 - Stage specific files by name — never `git add -A` or `git add .`
 - Use `git -C ~/Dev/tools/orchestrator` for all git commands
 - Commit message: conventional format (`fix:`, `feat:`, `chore:`, `docs:`, etc.), one concise sentence, no ticket refs, no emoji

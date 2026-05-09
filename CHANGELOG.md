@@ -7,6 +7,21 @@ Format: [Unreleased] at the top, dated releases below, newest first.
 
 ## [Unreleased]
 
+### Changed
+- `CLAUDE.md`: "Bugfix Workflow" renamed to "Change Workflow" and made applicable to
+  all changes (bugfix, feature, refactor). Bug-specific `overview.md` lookup step
+  removed. ADR gate promoted to an explicit numbered step with template reference and
+  frontmatter requirements. Changelog update added as a mandatory pre-commit step.
+- `CLAUDE.md`: `--bare` invariant added alongside `--dangerously-skip-permissions`.
+
+### Added
+- `projects/orchestrator/adrs/ADR-012-bare-flag-on-stage-invocations.md` — documents
+  the decision to pass `--bare` to all stage subprocess invocations.
+- `projects/orchestrator/adrs/_template.md` — ADR template with required YAML
+  frontmatter (`status`, `date`, `affects`) for all new ADRs.
+- `projects/orchestrator/DEVELOPMENT.md`: "When to Write a New ADR" expanded into a
+  five-step process pointing at the template; ADR-012 added to the index.
+
 ### Added
 - Parallel implementation slice dispatch via `slice_groups`. Decomposition agent now
   emits an ordered list of execution waves alongside `slice_files`; the orchestrator
