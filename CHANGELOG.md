@@ -8,6 +8,13 @@ Format: [Unreleased] at the top, dated releases below, newest first.
 ## [Unreleased]
 
 ### Added
+- Parallel implementation slice dispatch via `slice_groups`. Decomposition agent now
+  emits an ordered list of execution waves alongside `slice_files`; the orchestrator
+  dispatches slices within each wave concurrently using `ThreadPoolExecutor`, falling
+  back to sequential order when `slice_groups` is absent. `plan.md` writes are guarded
+  by a threading lock; each parallel slice writes to a unique stage output file via
+  `output_suffix`.
+- `slice_groups` field added to `orchestrator/schemas/decomposition.json`.
 - `orchestrator/plan.py` — extracted Mermaid plan generation out of `orchestrate.py`
   into three public functions: `init_plan_md`, `expand_impl_nodes`, `update_plan_md`.
   Flowchart direction changed to left-to-right (`LR`); node styles use a named
@@ -36,6 +43,9 @@ Format: [Unreleased] at the top, dated releases below, newest first.
 ### Removed
 - Inlined `_STYLE_MAP`, `_format_elapsed`, `_node_label`, `_init_plan_md`, and
   related helpers removed from `orchestrate.py` (now live in `plan.py`).
+- Root-level `prompts/` and `schemas/` directories deleted. All runtime path resolution
+  uses `Path(__file__).parent` within the package; the root copies were unreferenced
+  stale duplicates (some behind the package copies).
 
 ---
 
