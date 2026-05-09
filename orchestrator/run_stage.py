@@ -6,11 +6,6 @@ from pathlib import Path
 from orchestrator import renderer, signal as signal_mod, validator
 from orchestrator.logger import OrchestratorLogger
 
-_GRACE_PROMPT = (
-    "Your output did not include a SIGNAL_JSON: line. "
-    "Please emit one now."
-)
-
 
 def _format_stage_output(stdout: str, sig: dict) -> str:
     lines = stdout.splitlines(keepends=True)
@@ -64,7 +59,16 @@ def run_stage(
 
     if sig is None:
         logger.log(stage, "DEBUG", "no SIGNAL_JSON found — retrying")
-        retry_stdout = _run_claude(_GRACE_PROMPT)
+        grace_prompt = (
+            f"Your previous output did not include a SIGNAL_JSON: line. "
+            f"You were executing the '{stage}' stage.\n"
+            f"If the work is complete, emit:\n"
+            f'SIGNAL_JSON: {{"stage": "{stage}", "status": "passed", ...}}\n'
+            f"If the work could not be completed, emit:\n"
+            f'SIGNAL_JSON: {{"stage": "{stage}", "status": "blocked", "message": "<reason>"}}\n'
+            f"Emit the SIGNAL_JSON line now, with no other output."
+        )
+        retry_stdout = _run_claude(grace_prompt)
         sig = signal_mod.extract_signal(retry_stdout)
 
     if sig is None:

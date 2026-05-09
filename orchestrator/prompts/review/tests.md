@@ -14,6 +14,8 @@ You are a tests reviewer. Assess the test coverage and quality.
    - Test quality: are tests independent, deterministic, and readable?
    - Test isolation: no shared mutable state, no order dependencies
    - Appropriate test level: unit vs. integration vs. end-to-end
+   - Interface coupling: do tests use the public API only? Flag any test asserting on private methods, internal state, or call counts on non-boundary collaborators.
+   - Refactor survivability: would these tests still pass after an internal rename or restructure that doesn't change observable behavior? If renaming an internal function would break a test, that test is testing implementation, not behavior.
 3. Add your review as `## Tests Review — Round {{ round }}` to `{{ review_md }}`.
 4. Set your status: `approved` if no blocking issues; `changes-requested` if changes are required.
 
