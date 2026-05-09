@@ -8,6 +8,8 @@ Developer-facing reference. Read before touching any orchestrator code.
 
 - **`--dangerously-skip-permissions` is mandatory in every `run_stage()` call.** Not a shortcut — it is the documented use case for unattended, trusted pipeline execution. Removing it breaks all unattended stage dispatch.
 
+- **`--bare` is mandatory in every `run_stage()` call.** Skips MCP server loading and hook execution at stage startup. Stage agents have no access to MCP tools by design. See ADR-012.
+
 - **The main orchestration session never reads stage output file contents.** `orchestrate.py` receives file paths and status values via signal JSON only. It must not `open()` or `Read` any stage output file. Adding a file read to `orchestrate.py` violates the token-minimisation invariant and will cause unbounded context growth across long pipelines.
 
 - **All context a downstream stage needs must be surfaced in the signal JSON.** Stage output schemas are designed around this constraint. If a downstream stage appears to need file content from a prior stage, the solution is to add a reference field to the upstream signal JSON — not to read the file in `orchestrate.py`.
@@ -46,12 +48,13 @@ Python pre-validates all required paths before any Claude invocation. Missing re
 3. Read the related ADR(s) from `team-hub/projects/orchestrator/adrs/`.
 4. Read only the affected module file(s) — not the whole package.
 5. Fix and verify (run `uv run pytest tests/` from the repo root).
-6. If the fix changes an architectural decision: update the ADR and note it in
-   `team-hub/projects/orchestrator/progress.md`.
+6. **ADR gate** — before committing, ask: is this decision hard to reverse, surprising
+   without context, and the result of genuine trade-offs? If yes to all three, write an
+   ADR first. Use the template at `team-hub/projects/orchestrator/adrs/_template.md`.
+   New ADRs must have YAML frontmatter (`status`, `date`, `affects`) and a row added
+   to the index in `DEVELOPMENT.md`. If the decision is load-bearing for everyday edits,
+   add an invariant here too.
 7. Commit: `git -C ~/Dev/tools/orchestrator commit -m "fix: ..."`
-
-If a fix introduces a new decision (hard to reverse, surprising without context,
-genuine trade-off): write a new ADR before implementing.
 
 ---
 
