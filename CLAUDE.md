@@ -40,21 +40,21 @@ Python pre-validates all required paths before any Claude invocation. Missing re
 
 ---
 
-## Bugfix Workflow
+## Change Workflow
+
+Follow this for every change — bugfix, feature, or refactor.
 
 1. Read this file (done).
-2. Read the bug's `overview.md` in `team-hub/projects/orchestrator/bugs/{slug}/` —
-   it identifies the affected file, the related ADR, and the recommended fix.
-3. Read the related ADR(s) from `team-hub/projects/orchestrator/adrs/`.
-4. Read only the affected module file(s) — not the whole package.
-5. Fix and verify (run `uv run pytest tests/` from the repo root).
-6. **ADR gate** — before committing, ask: is this decision hard to reverse, surprising
+2. Read the relevant ADR(s) from `team-hub/projects/orchestrator/adrs/`.
+3. Read only the affected module file(s) — not the whole package.
+4. Make the change and verify (`uv run pytest tests/` from repo root).
+5. **ADR gate** — before committing, ask: is this decision hard to reverse, surprising
    without context, and the result of genuine trade-offs? If yes to all three, write an
    ADR first. Use the template at `team-hub/projects/orchestrator/adrs/_template.md`.
    New ADRs must have YAML frontmatter (`status`, `date`, `affects`) and a row added
    to the index in `DEVELOPMENT.md`. If the decision is load-bearing for everyday edits,
    add an invariant here too.
-7. Commit: `git -C ~/Dev/tools/orchestrator commit -m "fix: ..."`
+6. Commit: `git -C ~/Dev/tools/orchestrator commit -m "fix|feat|docs: ..."`
 
 ---
 
