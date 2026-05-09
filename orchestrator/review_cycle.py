@@ -61,7 +61,7 @@ def _update_review_md(review_md_path: Path, reviewer: str, verdict: str, round_n
     review_md_path.write_text(_write_frontmatter(meta, body + section))
 
 
-def run(run_folder, docs_root, project, branch, review_signal, project_log_path) -> dict:
+def run(run_folder, docs_root, project, branch, review_signal, project_log_path, repo_root: str = "") -> dict:
     run_folder = Path(run_folder)
     logger = OrchestratorLogger(run_folder, str(project_log_path))
 
@@ -86,10 +86,12 @@ def run(run_folder, docs_root, project, branch, review_signal, project_log_path)
             "run_folder": str(run_folder),
             "branch": branch,
             "changes_brief": changes_brief,
+            "repo_root": repo_root,
         }
         fix_sig = run_stage(
             "fix-implementation", "default", fix_vars,
             run_folder, docs_root, project, str(project_log_path),
+            cwd=repo_root or None,
         )
         logger.log("review-cycle", "INFO", f"fix-implementation round {round_num} status={fix_sig.get('status')}")
 

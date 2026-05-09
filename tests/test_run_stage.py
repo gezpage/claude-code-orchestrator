@@ -77,6 +77,17 @@ def test_stage_output_written_before_signal_extraction(tmp_path):
     assert (run_folder / "stages" / "discovery.md").exists()
 
 
+def test_cwd_forwarded_to_popen(tmp_path):
+    run_folder, log_path = _setup_run_folder(tmp_path)
+    stdout = f"SIGNAL_JSON: {GOOD_SIGNAL}"
+    mock_proc = MagicMock()
+    mock_proc.stdout = iter([stdout])
+    mock_proc.wait.return_value = 0
+    with patch("subprocess.Popen", return_value=mock_proc) as mock_popen:
+        run_stage("discovery", "default", VARS, run_folder, str(tmp_path), "myproject", str(log_path), cwd="/repo")
+    assert mock_popen.call_args.kwargs.get("cwd") == "/repo"
+
+
 def test_run_stage_does_not_read_stage_output_files(tmp_path):
     run_folder, log_path = _setup_run_folder(tmp_path)
     stdout = f"SIGNAL_JSON: {GOOD_SIGNAL}"

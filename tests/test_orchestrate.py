@@ -122,7 +122,7 @@ def test_full_happy_path(tmp_path):
     ]
     signal_iter = iter(stage_signals)
 
-    def fake_run_stage(stage, impl, variables, run_folder, docs_root, project, log_path, output_suffix=""):
+    def fake_run_stage(stage, impl, variables, run_folder, docs_root, project, log_path, output_suffix="", cwd=None):
         if stage == "review":
             assert "review_md" in variables
             assert "diff" in variables
@@ -239,7 +239,7 @@ def test_resume_skips_completed_stages(tmp_path):
 
     called_stages = []
 
-    def fake_run_stage(stage, impl, variables, run_folder, docs_root, project, log_path, output_suffix=""):
+    def fake_run_stage(stage, impl, variables, run_folder, docs_root, project, log_path, output_suffix="", cwd=None):
         called_stages.append(stage)
         return SPEC_SIGNAL
 
@@ -270,14 +270,16 @@ def test_branch_created_at_implementation_start(tmp_path):
 
     discovery_with_slices = dict(DISCOVERY_SIGNAL, slice_files=["s1.md"])
     call_order = []
+    git_cmds = []
 
-    def fake_run_stage(stage, impl, variables, run_folder, docs_root, project, log_path, output_suffix=""):
+    def fake_run_stage(stage, impl, variables, run_folder, docs_root, project, log_path, output_suffix="", cwd=None):
         call_order.append(("run_stage", stage))
         if stage == "discovery":
             return discovery_with_slices
         return IMPL_SIGNAL
 
     def fake_git(cmd, **kwargs):
+        git_cmds.append(cmd)
         if "checkout" in cmd:
             call_order.append(("git_checkout",))
         return _git_ok()
@@ -297,6 +299,11 @@ def test_branch_created_at_implementation_start(tmp_path):
     discovery_pos = call_order.index(("run_stage", "discovery"))
     assert discovery_pos < git_pos < impl_pos
 
+    # branch creation must target repo_root via -C, not the orchestrator's cwd
+    checkout_cmd = next(cmd for cmd in git_cmds if "checkout" in cmd)
+    assert "-C" in checkout_cmd
+    assert "/tmp" in checkout_cmd  # repo-root from project.yaml fixture
+
 
 # ── alignment never dispatched through run_stage ──────────────────────────────
 
@@ -313,7 +320,7 @@ def test_alignment_never_dispatched_through_run_stage(tmp_path):
 
     called_stages = []
 
-    def fake_run_stage(stage, impl, variables, run_folder, docs_root, project, log_path, output_suffix=""):
+    def fake_run_stage(stage, impl, variables, run_folder, docs_root, project, log_path, output_suffix="", cwd=None):
         called_stages.append(stage)
         return SPEC_SIGNAL
 

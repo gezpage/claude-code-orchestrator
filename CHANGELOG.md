@@ -7,6 +7,14 @@ Format: [Unreleased] at the top, dated releases below, newest first.
 
 ## [Unreleased]
 
+### Fixed
+- `_create_branch()` now uses `git -C repo_root checkout -b` instead of bare `git checkout -b`, preventing branch creation in the orchestrator's own working directory instead of the target project repo.
+
+### Changed
+- `run_stage()` and `_run_claude()` accept an optional `cwd` parameter forwarded to `subprocess.Popen`, so implementation, QA, and fix-implementation stage agents run with `repo_root` as their working directory — unqualified git commands can no longer silently target the wrong repository.
+- `review_cycle.run()` now receives and passes `repo_root` so the fix-implementation stage resolves the `{{ repo_root }}` template variable it already referenced.
+- Implementation and QA prompts now include an explicit constraint requiring `git -C {{ repo_root }}` for all git operations.
+
 ### Changed
 - `CLAUDE.md`: "Bugfix Workflow" renamed to "Change Workflow" and made applicable to
   all changes (bugfix, feature, refactor). Bug-specific `overview.md` lookup step

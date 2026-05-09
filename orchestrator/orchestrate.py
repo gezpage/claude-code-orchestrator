@@ -91,9 +91,9 @@ def _build_variables(stage, signals, branch, feature_path, docs_root, project, r
     return vars_dict
 
 
-def _create_branch(branch, logger):
+def _create_branch(branch, repo_root, logger):
     result = subprocess.run(
-        ["git", "checkout", "-b", branch],
+        ["git", "-C", repo_root, "checkout", "-b", branch],
         capture_output=True,
         text=True,
     )
@@ -219,7 +219,7 @@ def run_pipeline(docs_root, project, feature_path, branch, profile_name, resume=
 
         if stage_name == "implementation":
             logger.log(stage_name, "INFO", "stage starting")
-            _create_branch(branch, logger)
+            _create_branch(branch, variables["repo_root"], logger)
             slice_files = []
             slice_groups = []
             for sig in signals.values():
@@ -242,7 +242,7 @@ def run_pipeline(docs_root, project, feature_path, branch, profile_name, resume=
                     variables["slice_file"] = slice_file
                     update_plan_md(run_folder, sub_id, "in_progress")
                     t0 = time.monotonic()
-                    sig = run_stage(stage_name, impl, variables, run_folder, docs_root, project, project_log_path, output_suffix=sub_id)
+                    sig = run_stage(stage_name, impl, variables, run_folder, docs_root, project, project_log_path, output_suffix=sub_id, cwd=variables.get("repo_root"))
                     elapsed = time.monotonic() - t0
                     if sig.get("status") != "passed":
                         st = state_mod.load_state(run_folder)
@@ -270,6 +270,7 @@ def run_pipeline(docs_root, project, feature_path, branch, profile_name, resume=
                                 run_stage, stage_name, impl, vars_copy,
                                 run_folder, docs_root, project, project_log_path,
                                 sub_id,
+                                cwd=variables.get("repo_root"),
                             )
                             futures[fut] = (sub_id, slice_file)
                     elapsed = time.monotonic() - t0
@@ -337,7 +338,8 @@ def run_pipeline(docs_root, project, feature_path, branch, profile_name, resume=
             signals[stage_name] = review_signal
             if changes_requested:
                 result = review_cycle_mod.run(
-                    run_folder, docs_root, project, branch, review_signal, project_log_path
+                    run_folder, docs_root, project, branch, review_signal, project_log_path,
+                    repo_root=variables.get("repo_root", ""),
                 )
                 if not result.get("all_passed"):
                     st = state_mod.load_state(run_folder)
@@ -355,7 +357,8 @@ def run_pipeline(docs_root, project, feature_path, branch, profile_name, resume=
         update_plan_md(run_folder, stage_name, "in_progress")
         impl = _impl_from_prompt(stage_def.get("prompt", f"prompts/{stage_name}/default.md"))
         t0 = time.monotonic()
-        sig = run_stage(stage_name, impl, variables, run_folder, docs_root, project, project_log_path)
+        stage_cwd = variables.get("repo_root") if stage_name == "qa" else None
+        sig = run_stage(stage_name, impl, variables, run_folder, docs_root, project, project_log_path, cwd=stage_cwd)
         elapsed = time.monotonic() - t0
         signals[stage_name] = sig
 

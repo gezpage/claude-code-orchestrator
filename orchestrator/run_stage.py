@@ -18,12 +18,13 @@ def _format_stage_output(stdout: str, sig: dict) -> str:
     return "".join(result)
 
 
-def _run_claude(prompt: str) -> str:
+def _run_claude(prompt: str, cwd: str | None = None) -> str:
     proc = subprocess.Popen(
         ["claude", "-p", prompt, "--dangerously-skip-permissions", "--bare"],
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         text=True,
+        cwd=cwd,
     )
     lines = []
     for line in proc.stdout:
@@ -42,6 +43,7 @@ def run_stage(
     project: str,
     project_log_path: str,
     output_suffix: str = "",
+    cwd: str | None = None,
 ) -> dict:
     run_folder = Path(run_folder)
     logger = OrchestratorLogger(run_folder, project_log_path)
@@ -54,7 +56,7 @@ def run_stage(
     tag = f"-{output_suffix}" if output_suffix else ""
     (output_dir / f"{stage}{tag}-prompt.md").write_text(prompt)
 
-    stdout = _run_claude(prompt)
+    stdout = _run_claude(prompt, cwd=cwd)
     (output_dir / f"{stage}{tag}.md").write_text(stdout)
 
     sig = signal_mod.extract_signal(stdout)
@@ -70,7 +72,7 @@ def run_stage(
             f'SIGNAL_JSON: {{"stage": "{stage}", "status": "blocked", "message": "<reason>"}}\n'
             f"Emit the SIGNAL_JSON line now, with no other output."
         )
-        retry_stdout = _run_claude(grace_prompt)
+        retry_stdout = _run_claude(grace_prompt, cwd=cwd)
         sig = signal_mod.extract_signal(retry_stdout)
 
     if sig is None:
