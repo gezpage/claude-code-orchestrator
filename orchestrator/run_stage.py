@@ -20,7 +20,7 @@ def _format_stage_output(stdout: str, sig: dict) -> str:
 
 def _run_claude(prompt: str) -> str:
     proc = subprocess.Popen(
-        ["claude", "-p", prompt, "--dangerously-skip-permissions"],
+        ["claude", "-p", prompt, "--dangerously-skip-permissions", "--bare"],
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         text=True,

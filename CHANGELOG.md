@@ -17,6 +17,11 @@ Format: [Unreleased] at the top, dated releases below, newest first.
   time / output summary rendering.
 
 ### Changed
+- `run_stage.py`: `--bare` added to every `claude` subprocess invocation. Skips
+  MCP server connections, CLAUDE.md loading, hooks, skills, and auto-memory at
+  stage startup; Bash and file tools remain fully available. Reduces per-stage
+  startup overhead with no functional impact (stages use only direct file writes
+  and shell commands, not MCP).
 - Grace prompt (emitted when a stage omits `SIGNAL_JSON`) now includes the stage
   name and explicit examples for both `passed` and `blocked` outcomes, replacing
   the generic one-liner.
