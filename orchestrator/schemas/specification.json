@@ -1,0 +1,14 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "required": ["stage", "status"],
+  "properties": {
+    "stage": {"type": "string"},
+    "status": {"type": "string", "enum": ["passed", "blocked", "failed"]},
+    "message": {"type": "string"},
+    "prd_path": {"type": "string"},
+    "context_path": {"type": "string"},
+    "adr_paths": {"type": "array", "items": {"type": "string"}}
+  },
+  "additionalProperties": true
+}

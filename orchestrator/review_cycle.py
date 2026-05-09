@@ -1,3 +1,4 @@
+# Review cycle manager; runs reviewer feedback rounds up to the configured cycle limit (_MAX_CYCLES).
 import re
 from pathlib import Path
 

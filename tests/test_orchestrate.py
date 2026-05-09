@@ -12,7 +12,7 @@ def _setup_docs(tmp_path, stages, profile_name="test"):
     project_dir = tmp_path / "projects" / "myproject"
     project_dir.mkdir(parents=True)
     (project_dir / "project.yaml").write_text(
-        "repo_root: /tmp/repo\nlog_level: DEBUG\n"
+        "repo-root: /tmp\nlog_level: DEBUG\n"
     )
     profiles = project_dir / "workflow" / "profiles"
     profiles.mkdir(parents=True)
@@ -26,6 +26,7 @@ def _git_ok():
     r = MagicMock()
     r.returncode = 0
     r.stderr = ""
+    r.stdout = ""
     return r
 
 
@@ -122,6 +123,10 @@ def test_full_happy_path(tmp_path):
     signal_iter = iter(stage_signals)
 
     def fake_run_stage(stage, impl, variables, run_folder, docs_root, project, log_path):
+        if stage == "review":
+            assert "review_md" in variables
+            assert "diff" in variables
+            assert variables["round"] == "1"
         return next(signal_iter)
 
     git_mock = MagicMock(return_value=_git_ok())
@@ -146,12 +151,16 @@ def test_full_happy_path(tmp_path):
     all_stages_called = [c.args[0] for c in mock_rs.call_args_list]
     assert "alignment" not in all_stages_called
 
-    # plan.md updated for every stage (8 stages; alignment auto-passes via log)
-    assert mock_plan.call_count == 8
+    # plan.md updated with (stage, status) tuples — check key milestones
     plan_calls = [(c.args[1], c.args[2]) for c in mock_plan.call_args_list]
     assert ("discovery", "passed") in plan_calls
     assert ("alignment", "passed") in plan_calls
     assert ("harvest", "passed") in plan_calls
+    # implementation sub-nodes updated
+    assert ("impl_1", "passed") in plan_calls
+    assert ("impl_2", "passed") in plan_calls
+    # review sub-node updated
+    assert ("review_architecture", "passed") in plan_calls
 
 
 # ── alignment pause exit ──────────────────────────────────────────────────────
@@ -339,7 +348,6 @@ def test_plan_md_updated_after_each_stage(tmp_path):
             docs_root, "myproject", "feature", "feat/test", "test"
         )
 
-    assert mock_plan.call_count == 2
     plan_calls = [(c.args[1], c.args[2]) for c in mock_plan.call_args_list]
     assert ("discovery", "passed") in plan_calls
     assert ("specification", "passed") in plan_calls

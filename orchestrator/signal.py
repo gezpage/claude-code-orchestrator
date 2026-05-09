@@ -1,3 +1,4 @@
+# Signal extractor; parses the SIGNAL_JSON: sentinel line from Claude stdout into a structured dict.
 import json
 
 SENTINEL = "SIGNAL_JSON:"
@@ -5,8 +6,9 @@ SENTINEL = "SIGNAL_JSON:"
 
 def extract_signal(stdout: str) -> dict | None:
     for line in stdout.splitlines():
-        if line.startswith(SENTINEL):
-            payload = line[len(SENTINEL):].strip()
+        stripped = line.strip().strip("`")
+        if stripped.startswith(SENTINEL):
+            payload = stripped[len(SENTINEL):].strip()
             try:
                 return json.loads(payload)
             except json.JSONDecodeError:

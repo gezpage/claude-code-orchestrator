@@ -1,3 +1,4 @@
+# CLI entry point; defines the run command that drives the full orchestration pipeline.
 import json
 import sys
 
@@ -67,11 +68,13 @@ def resume(run_folder, docs_root):
     if not blocked_at:
         raise click.UsageError("No blocked_at in state — nothing to resume.")
 
-    run_folder_path = Path(run_folder)
-    # Derive project, feature_path, branch from state; fall back to prompting
-    project = st.get("project") or click.prompt("Project name")
-    feature_path = st.get("feature_path") or click.prompt("Feature path")
-    branch = st.get("branch") or click.prompt("Branch name")
+    for key in ("project", "feature_path", "branch"):
+        if not st.get(key):
+            raise click.UsageError(f"State is missing '{key}' — run folder may predate state persistence.")
+
+    project = st["project"]
+    feature_path = st["feature_path"]
+    branch = st["branch"]
     profile = st.get("profile", "full")
 
     orchestrate.run_pipeline(docs_root, project, feature_path, branch, profile, resume=True)

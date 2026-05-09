@@ -1,3 +1,4 @@
+# Path utilities; resolves and validates all well-known orchestrator filesystem locations.
 from pathlib import Path
 
 

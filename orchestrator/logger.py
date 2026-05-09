@@ -1,7 +1,8 @@
+# Dual-sink logger; writes timestamped entries to both the per-run log and the project-wide log.
 from datetime import datetime, timezone
 from pathlib import Path
 
-_INFO_LEVELS = {"INFO", "ERROR"}
+_PRINT_LEVELS = {"INFO", "WARN", "ERROR"}
 
 
 class OrchestratorLogger:
@@ -21,8 +22,11 @@ class OrchestratorLogger:
         with run_log.open("a") as f:
             f.write(line)
 
-        if level in _INFO_LEVELS:
-            proj_log = self.project_log_path / "orchestrator.log"
-            proj_log.parent.mkdir(parents=True, exist_ok=True)
-            with proj_log.open("a") as f:
-                f.write(line)
+        proj_log = self.project_log_path / "orchestrator.log"
+        proj_log.parent.mkdir(parents=True, exist_ok=True)
+        with proj_log.open("a") as f:
+            f.write(line)
+
+        if level in _PRINT_LEVELS:
+            lvl_tag = f" [{level}]" if level != "INFO" else ""
+            print(f"[orchestrator]{lvl_tag} [{stage}] {message}", flush=True)

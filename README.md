@@ -7,7 +7,7 @@ Claude Code agents at each stage via the `orchestrator` CLI.
 ## Install
 
 ```bash
-pip install -e ~/Dev/tools/orchestrator
+pipx install -e ~/Dev/tools/orchestrator
 ```
 
 ## Usage
@@ -50,5 +50,5 @@ no copy step needed.
 ## Tests
 
 ```bash
-pytest tests/
+uv run pytest tests/
 ```

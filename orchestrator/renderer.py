@@ -1,7 +1,8 @@
+# Prompt renderer; merges Jinja2 stage templates with optional project-specific convention extensions.
 from pathlib import Path
 from jinja2 import Environment, FileSystemLoader, StrictUndefined
 
-_PROMPTS_DIR = Path(__file__).parent.parent / "prompts"
+_PROMPTS_DIR = Path(__file__).parent / "prompts"
 
 
 def render_prompt(stage: str, implementation: str, variables: dict, docs_root: str, project: str) -> str:

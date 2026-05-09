@@ -1,3 +1,5 @@
+# Stage executor; invokes Claude via CLI, extracts the SIGNAL_JSON sentinel, and validates stage output.
+import json
 import subprocess
 from pathlib import Path
 
@@ -8,6 +10,32 @@ _GRACE_PROMPT = (
     "Your output did not include a SIGNAL_JSON: line. "
     "Please emit one now."
 )
+
+
+def _format_stage_output(stdout: str, sig: dict) -> str:
+    lines = stdout.splitlines(keepends=True)
+    result = []
+    for line in lines:
+        if line.strip().strip("`").startswith(signal_mod.SENTINEL):
+            result.append("```json\n" + json.dumps(sig, indent=2) + "\n```\n")
+        else:
+            result.append(line)
+    return "".join(result)
+
+
+def _run_claude(prompt: str) -> str:
+    proc = subprocess.Popen(
+        ["claude", "-p", prompt, "--dangerously-skip-permissions"],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+    )
+    lines = []
+    for line in proc.stdout:
+        print(line, end="", flush=True)
+        lines.append(line)
+    proc.wait()
+    return "".join(lines)
 
 
 def run_stage(
@@ -22,37 +50,34 @@ def run_stage(
     run_folder = Path(run_folder)
     logger = OrchestratorLogger(run_folder, project_log_path)
 
+    logger.log(stage, "INFO", f"stage {stage} dispatched (implementation={implementation})")
     prompt = renderer.render_prompt(stage, implementation, variables, docs_root, project)
 
-    output_dir = run_folder / "stage-output"
+    output_dir = run_folder / "stages"
     output_dir.mkdir(parents=True, exist_ok=True)
-    (output_dir / f"{stage}-prompt.txt").write_text(prompt)
+    (output_dir / f"{stage}-prompt.md").write_text(prompt)
 
-    result = subprocess.run(
-        ["claude", "-p", prompt, "--dangerously-skip-permissions"],
-        capture_output=True,
-        text=True,
-    )
-    stdout = result.stdout
-    (output_dir / f"{stage}.txt").write_text(stdout)
+    stdout = _run_claude(prompt)
+    (output_dir / f"{stage}.md").write_text(stdout)
 
     sig = signal_mod.extract_signal(stdout)
 
     if sig is None:
         logger.log(stage, "DEBUG", "no SIGNAL_JSON found — retrying")
-        retry_result = subprocess.run(
-            ["claude", "-p", _GRACE_PROMPT, "--dangerously-skip-permissions"],
-            capture_output=True,
-            text=True,
-        )
-        sig = signal_mod.extract_signal(retry_result.stdout)
+        retry_stdout = _run_claude(_GRACE_PROMPT)
+        sig = signal_mod.extract_signal(retry_stdout)
 
     if sig is None:
         logger.log(stage, "ERROR", "signal missing after grace retry — treating as blocked")
         return {"stage": stage, "status": "blocked", "message": "No signal emitted"}
 
+    (output_dir / f"{stage}.md").write_text(_format_stage_output(stdout, sig))
+
     validator.validate_output(stage, sig)
     logger.log(stage, "INFO", f"stage {stage} completed with status={sig['status']}")
+    for key, value in sig.items():
+        v = json.dumps(value) if isinstance(value, (dict, list)) else str(value)
+        logger.log(stage, "INFO", f"  {key}: {v}")
     return sig
 
 

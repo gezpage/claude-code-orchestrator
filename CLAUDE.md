@@ -45,13 +45,19 @@ Python pre-validates all required paths before any Claude invocation. Missing re
    it identifies the affected file, the related ADR, and the recommended fix.
 3. Read the related ADR(s) from `team-hub/projects/orchestrator/adrs/`.
 4. Read only the affected module file(s) — not the whole package.
-5. Fix and verify (run `pytest tests/` from the repo root).
+5. Fix and verify (run `uv run pytest tests/` from the repo root).
 6. If the fix changes an architectural decision: update the ADR and note it in
    `team-hub/projects/orchestrator/progress.md`.
 7. Commit: `git -C ~/Dev/tools/orchestrator commit -m "fix: ..."`
 
 If a fix introduces a new decision (hard to reverse, surprising without context,
 genuine trade-off): write a new ADR before implementing.
+
+---
+
+## Tests
+
+Run `uv run pytest tests/` from the repo root.
 
 ---
 

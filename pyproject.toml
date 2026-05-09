@@ -19,3 +19,6 @@ orchestrator = "orchestrator.cli:main"
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["orchestrator*"]
+
+[tool.setuptools.package-data]
+orchestrator = ["prompts/**/*.md", "schemas/*.json"]
