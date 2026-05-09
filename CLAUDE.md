@@ -61,6 +61,18 @@ Run `uv run pytest tests/` from the repo root.
 
 ---
 
+## Auto-Commit
+
+After completing each discrete task, stage and commit all modified files before reporting done.
+
+- Stage specific files by name — never `git add -A` or `git add .`
+- Use `git -C ~/Dev/tools/orchestrator` for all git commands
+- Commit message: conventional format (`fix:`, `feat:`, `chore:`, `docs:`, etc.), one concise sentence, no ticket refs, no emoji
+- "Task complete" means the repo is in a working state — do not commit mid-edit or with failing tests
+- Docs-repo changes (managed by Forge MCP) are excluded — this rule covers the orchestrator codebase only
+
+---
+
 ## Reference
 
 Full development guide, ADR index, and open bug list:
