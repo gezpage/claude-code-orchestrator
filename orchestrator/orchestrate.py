@@ -1,3 +1,4 @@
+import concurrent.futures
 import datetime
 import subprocess
 import sys
@@ -220,31 +221,75 @@ def run_pipeline(docs_root, project, feature_path, branch, profile_name, resume=
             logger.log(stage_name, "INFO", "stage starting")
             _create_branch(branch, logger)
             slice_files = []
+            slice_groups = []
             for sig in signals.values():
                 if isinstance(sig, dict) and "slice_files" in sig:
                     slice_files = sig["slice_files"]
+                    slice_groups = sig.get("slice_groups", [])
                     break
-            expand_impl_nodes(run_folder, slice_files)
+            if not slice_groups:
+                slice_groups = [[sf] for sf in slice_files]
+            # Flatten groups to get canonical ordered list (for sub_id assignment)
+            all_slices = [sf for group in slice_groups for sf in group]
+            slice_to_id = {sf: f"impl_{i+1}" for i, sf in enumerate(all_slices)}
+            expand_impl_nodes(run_folder, all_slices)
             impl = _impl_from_prompt(stage_def.get("prompt", "prompts/implementation/default.md"))
             all_commits = []
-            for i, slice_file in enumerate(slice_files):
-                variables["slice_file"] = slice_file
-                sub_id = f"impl_{i+1}"
-                update_plan_md(run_folder, sub_id, "in_progress")
-                t0 = time.monotonic()
-                sig = run_stage(stage_name, impl, variables, run_folder, docs_root, project, project_log_path)
-                elapsed = time.monotonic() - t0
-                if sig.get("status") != "passed":
-                    st = state_mod.load_state(run_folder)
-                    st["blocked_at"] = stage_name
-                    state_mod.save_state(run_folder, st)
-                    update_plan_md(run_folder, sub_id, sig["status"])
-                    logger.log(stage_name, "ERROR", f"pipeline stopped: stage {stage_name} {sig['status']} on slice {slice_file}: {sig.get('message', '')}")
-                    sys.exit(1)
-                commits = sig.get("commit_hashes", [])
-                all_commits.extend(commits)
-                update_plan_md(run_folder, sub_id, "passed", elapsed_secs=elapsed,
-                               output_summary=f"{len(commits)} commit{'s' if len(commits) != 1 else ''}" if commits else None)
+            for group in slice_groups:
+                if len(group) == 1:
+                    slice_file = group[0]
+                    sub_id = slice_to_id[slice_file]
+                    variables["slice_file"] = slice_file
+                    update_plan_md(run_folder, sub_id, "in_progress")
+                    t0 = time.monotonic()
+                    sig = run_stage(stage_name, impl, variables, run_folder, docs_root, project, project_log_path, output_suffix=sub_id)
+                    elapsed = time.monotonic() - t0
+                    if sig.get("status") != "passed":
+                        st = state_mod.load_state(run_folder)
+                        st["blocked_at"] = stage_name
+                        state_mod.save_state(run_folder, st)
+                        update_plan_md(run_folder, sub_id, sig["status"])
+                        logger.log(stage_name, "ERROR", f"pipeline stopped: stage {stage_name} {sig['status']} on slice {slice_file}: {sig.get('message', '')}")
+                        sys.exit(1)
+                    commits = sig.get("commit_hashes", [])
+                    all_commits.extend(commits)
+                    update_plan_md(run_folder, sub_id, "passed", elapsed_secs=elapsed,
+                                   output_summary=f"{len(commits)} commit{'s' if len(commits) != 1 else ''}" if commits else None)
+                else:
+                    logger.log(stage_name, "INFO", f"dispatching {len(group)} slices in parallel")
+                    for sf in group:
+                        update_plan_md(run_folder, slice_to_id[sf], "in_progress")
+                    t0 = time.monotonic()
+                    futures: dict[concurrent.futures.Future, tuple[str, str]] = {}
+                    with concurrent.futures.ThreadPoolExecutor(max_workers=len(group)) as executor:
+                        for slice_file in group:
+                            sub_id = slice_to_id[slice_file]
+                            vars_copy = dict(variables)
+                            vars_copy["slice_file"] = slice_file
+                            fut = executor.submit(
+                                run_stage, stage_name, impl, vars_copy,
+                                run_folder, docs_root, project, project_log_path,
+                                sub_id,
+                            )
+                            futures[fut] = (sub_id, slice_file)
+                    elapsed = time.monotonic() - t0
+                    failed = False
+                    for fut, (sub_id, slice_file) in futures.items():
+                        sig = fut.result()
+                        if sig.get("status") != "passed":
+                            st = state_mod.load_state(run_folder)
+                            st["blocked_at"] = stage_name
+                            state_mod.save_state(run_folder, st)
+                            update_plan_md(run_folder, sub_id, sig["status"])
+                            logger.log(stage_name, "ERROR", f"pipeline stopped: stage {stage_name} {sig['status']} on slice {slice_file}: {sig.get('message', '')}")
+                            failed = True
+                        else:
+                            commits = sig.get("commit_hashes", [])
+                            all_commits.extend(commits)
+                            update_plan_md(run_folder, sub_id, "passed", elapsed_secs=elapsed,
+                                           output_summary=f"{len(commits)} commit{'s' if len(commits) != 1 else ''}" if commits else None)
+                    if failed:
+                        sys.exit(1)
             signals[stage_name] = {"status": "passed", "commit_hashes": all_commits, "branch": branch}
             state_mod.update_stage_status(run_folder, stage_name, "passed")
             state_mod.save_stage_signal(run_folder, stage_name, signals[stage_name])

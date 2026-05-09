@@ -1,4 +1,5 @@
 import re
+import threading
 from pathlib import Path
 
 _STATUS_CLASS = {
@@ -18,6 +19,8 @@ _STATUS_ICON = {
     "in_progress": "⏳",
     "skipped":     "-",
 }
+
+_plan_lock = threading.Lock()
 
 _CLASSDEFS = [
     "    classDef complete fill:#2d6a4f,color:#fff,stroke:none",
@@ -140,6 +143,11 @@ def expand_impl_nodes(run_folder, slice_files):
 
 
 def update_plan_md(run_folder, stage, status, elapsed_secs=None, output_summary=None):
+    with _plan_lock:
+        _update_plan_md(run_folder, stage, status, elapsed_secs, output_summary)
+
+
+def _update_plan_md(run_folder, stage, status, elapsed_secs=None, output_summary=None):
     run_folder = Path(run_folder)
     plan_path = run_folder / "plan.md"
     css_class = _STATUS_CLASS.get(status, "pending")

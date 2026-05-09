@@ -41,6 +41,7 @@ def run_stage(
     docs_root: str,
     project: str,
     project_log_path: str,
+    output_suffix: str = "",
 ) -> dict:
     run_folder = Path(run_folder)
     logger = OrchestratorLogger(run_folder, project_log_path)
@@ -50,10 +51,11 @@ def run_stage(
 
     output_dir = run_folder / "stages"
     output_dir.mkdir(parents=True, exist_ok=True)
-    (output_dir / f"{stage}-prompt.md").write_text(prompt)
+    tag = f"-{output_suffix}" if output_suffix else ""
+    (output_dir / f"{stage}{tag}-prompt.md").write_text(prompt)
 
     stdout = _run_claude(prompt)
-    (output_dir / f"{stage}.md").write_text(stdout)
+    (output_dir / f"{stage}{tag}.md").write_text(stdout)
 
     sig = signal_mod.extract_signal(stdout)
 
@@ -75,7 +77,7 @@ def run_stage(
         logger.log(stage, "ERROR", "signal missing after grace retry — treating as blocked")
         return {"stage": stage, "status": "blocked", "message": "No signal emitted"}
 
-    (output_dir / f"{stage}.md").write_text(_format_stage_output(stdout, sig))
+    (output_dir / f"{stage}{tag}.md").write_text(_format_stage_output(stdout, sig))
 
     validator.validate_output(stage, sig)
     logger.log(stage, "INFO", f"stage {stage} completed with status={sig['status']}")

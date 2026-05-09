@@ -122,7 +122,7 @@ def test_full_happy_path(tmp_path):
     ]
     signal_iter = iter(stage_signals)
 
-    def fake_run_stage(stage, impl, variables, run_folder, docs_root, project, log_path):
+    def fake_run_stage(stage, impl, variables, run_folder, docs_root, project, log_path, output_suffix=""):
         if stage == "review":
             assert "review_md" in variables
             assert "diff" in variables
@@ -239,7 +239,7 @@ def test_resume_skips_completed_stages(tmp_path):
 
     called_stages = []
 
-    def fake_run_stage(stage, impl, variables, run_folder, docs_root, project, log_path):
+    def fake_run_stage(stage, impl, variables, run_folder, docs_root, project, log_path, output_suffix=""):
         called_stages.append(stage)
         return SPEC_SIGNAL
 
@@ -271,7 +271,7 @@ def test_branch_created_at_implementation_start(tmp_path):
     discovery_with_slices = dict(DISCOVERY_SIGNAL, slice_files=["s1.md"])
     call_order = []
 
-    def fake_run_stage(stage, impl, variables, run_folder, docs_root, project, log_path):
+    def fake_run_stage(stage, impl, variables, run_folder, docs_root, project, log_path, output_suffix=""):
         call_order.append(("run_stage", stage))
         if stage == "discovery":
             return discovery_with_slices
@@ -313,7 +313,7 @@ def test_alignment_never_dispatched_through_run_stage(tmp_path):
 
     called_stages = []
 
-    def fake_run_stage(stage, impl, variables, run_folder, docs_root, project, log_path):
+    def fake_run_stage(stage, impl, variables, run_folder, docs_root, project, log_path, output_suffix=""):
         called_stages.append(stage)
         return SPEC_SIGNAL
 

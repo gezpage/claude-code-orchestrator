@@ -6,7 +6,11 @@
     "stage": {"type": "string"},
     "status": {"type": "string", "enum": ["passed", "blocked", "failed"]},
     "message": {"type": "string"},
-    "slice_files": {"type": "array", "items": {"type": "string"}}
+    "slice_files": {"type": "array", "items": {"type": "string"}},
+    "slice_groups": {
+      "type": "array",
+      "items": {"type": "array", "items": {"type": "string"}}
+    }
   },
   "additionalProperties": true
 }
