@@ -7,6 +7,7 @@ VARS = {
     "run_folder": "/tmp/run",
     "feature_path": "/tmp/docs/projects/myproject/feature",
     "docs_root": "/tmp/docs",
+    "repo_root": "/tmp/repo",
 }
 
 

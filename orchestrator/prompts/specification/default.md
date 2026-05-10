@@ -4,6 +4,7 @@ You are a specification agent. Your task is to write the PRD, context doc, and a
 
 **Alignment log:** `{{ alignment_log }}`
 **Run folder:** `{{ run_folder }}`
+**Repo root:** `{{ repo_root }}`
 
 ## Instructions
 

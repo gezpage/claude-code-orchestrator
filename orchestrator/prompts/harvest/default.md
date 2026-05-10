@@ -4,6 +4,7 @@ You are a harvest agent. Your task is to extract reusable knowledge from this fe
 
 **Run folder:** `{{ run_folder }}`
 **Review document:** `{{ review_md }}`
+**Repo root:** `{{ repo_root }}`
 
 ## Instructions
 

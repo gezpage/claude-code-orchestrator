@@ -5,6 +5,7 @@ You are a discovery planning agent. Analyse the feature request and design a set
 **Run folder:** `{{ run_folder }}`
 **Feature path:** `{{ feature_path }}`
 **Docs root:** `{{ docs_root }}`
+**Repo root:** `{{ repo_root }}`
 
 ## Instructions
 
@@ -15,6 +16,7 @@ You are a discovery planning agent. Analyse the feature request and design a set
    - `observability` — existing metrics, logs, alerts relevant to this area
    - `risk` — side-effects, breaking changes, failure modes
 3. For each track, write a prompt file to `{{ run_folder }}/stages/discovery-{name}-prompt.md`.
+4. For tracks that explore source code, include targeted `find` or `grep` instructions scoped to `{{ repo_root }}` — not the docs root.
 
 ## Track prompt format
 
@@ -25,13 +27,14 @@ Each prompt must be bullet-point instructions only — no prose paragraphs. Use 
 
 **Run folder:** {{ run_folder }}
 **Feature path:** {{ feature_path }}
+**Repo root:** {{ repo_root }}
 
 ## Focus
 - [one bullet per specific question or area]
 
 ## Instructions
 - Read `{{ docs_root }}/{{ feature_path }}/overview.md` for feature context
-- [targeted read instructions — specific files, directories, or patterns]
+- [targeted read instructions — specific files, directories, or patterns scoped to {{ repo_root }}]
 - Write findings to `{{ run_folder }}/discovery-{name}.md`
 - Bullet points only. Max 3 sentences per finding. No prose.
 

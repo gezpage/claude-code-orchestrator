@@ -13,6 +13,7 @@ Format: [Unreleased] at the top, dated releases below, newest first.
 - README rewritten with concepts table, profiles reference, and full parameter docs for all three commands. CLI help text for `--profile` updated to reflect new behaviour.
 
 ### Fixed
+- `repo_root` is now surfaced in the header of all stage prompts that may need to read source code (discovery/default, discovery/planning, specification, harvest); discovery/planning also injects it into the track prompt format it writes, so generated track prompts carry the correct source path. Test fixtures updated to include `repo_root`.
 - Alignment prompt templates now iterate over the `findings_files` array instead of referencing a hardcoded `findings.md` path; the hardcoded path only exists in single-shot discovery runs, not multi-track planning runs.
 - Discovery planning prompt now renders the feature overview read path as an absolute path (`docs_root/feature_path/overview.md`); previously used a relative path that stage agents (no MCP access) could not resolve with the Read tool.
 - QA prompt now lists individual `slice_files` paths (from the decomposition signal) instead of instructing the agent to read a directory path, which the Read tool does not support.
