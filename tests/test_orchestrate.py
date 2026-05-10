@@ -14,11 +14,8 @@ def _setup_docs(tmp_path, stages, profile_name="test", feature_path="feature"):
     (project_dir / "project.yaml").write_text(
         "repo-root: /tmp\nlog_level: DEBUG\n"
     )
-    profiles = project_dir / "workflow" / "profiles"
-    profiles.mkdir(parents=True)
-    (profiles / f"{profile_name}.yaml").write_text(
-        yaml.dump({"name": profile_name, "stages": stages})
-    )
+    profile_path = tmp_path / f"{profile_name}.yaml"
+    profile_path.write_text(yaml.dump({"name": profile_name, "stages": stages}))
     feature_dir = tmp_path / feature_path
     feature_dir.mkdir(parents=True, exist_ok=True)
     (feature_dir / "overview.md").write_text("# Feature Overview\n")
@@ -167,7 +164,7 @@ def test_full_happy_path(tmp_path):
 
         with patch("orchestrator.orchestrate._resolve_run_folder", return_value=run_folder_path):
             orchestrate.run_pipeline(
-                docs_root, "myproject", "feature-xyz", "feat/test", "test"
+                docs_root, "myproject", "feature-xyz", "feat/test", str(tmp_path / "test.yaml")
             )
 
     # run_stage called for: discovery-planning, discovery-track, specification, decomposition,
@@ -211,7 +208,7 @@ def test_alignment_pause_exits(tmp_path):
          patch("orchestrator.orchestrate._resolve_run_folder", return_value=run_folder_path):
         with pytest.raises(SystemExit) as exc_info:
             orchestrate.run_pipeline(
-                docs_root, "myproject", "feature", "feat/test", "test"
+                docs_root, "myproject", "feature", "feat/test", str(tmp_path / "test.yaml")
             )
 
     assert exc_info.value.code == 0
@@ -240,7 +237,7 @@ def test_blocked_stage_exits(tmp_path):
          patch("orchestrator.orchestrate._resolve_run_folder", return_value=run_folder_path):
         with pytest.raises(SystemExit) as exc_info:
             orchestrate.run_pipeline(
-                docs_root, "myproject", "feature", "feat/test", "test"
+                docs_root, "myproject", "feature", "feat/test", str(tmp_path / "test.yaml")
             )
 
     assert exc_info.value.code == 1
@@ -277,7 +274,7 @@ def test_resume_skips_completed_stages(tmp_path):
          patch("orchestrator.orchestrate.update_plan_md"), \
          patch("orchestrator.orchestrate._resolve_run_folder", return_value=run_folder_path):
         orchestrate.run_pipeline(
-            docs_root, "myproject", "feature", "feat/test", "test", resume=True
+            docs_root, "myproject", "feature", "feat/test", str(tmp_path / "test.yaml"), resume=True
         )
 
     assert "discovery" not in called_stages
@@ -315,7 +312,7 @@ def test_branch_created_at_implementation_start(tmp_path):
          patch("orchestrator.orchestrate.subprocess.run", side_effect=fake_git), \
          patch("orchestrator.orchestrate._resolve_run_folder", return_value=run_folder_path):
         orchestrate.run_pipeline(
-            docs_root, "myproject", "feature", "feat/test", "test"
+            docs_root, "myproject", "feature", "feat/test", str(tmp_path / "test.yaml")
         )
 
     # git checkout should come after discovery but before implementation
@@ -355,7 +352,7 @@ def test_interactive_stage_not_dispatched_through_run_stage(tmp_path):
          patch("orchestrator.orchestrate.update_plan_md"), \
          patch("orchestrator.orchestrate._resolve_run_folder", return_value=run_folder_path):
         orchestrate.run_pipeline(
-            docs_root, "myproject", "feature", "feat/test", "test"
+            docs_root, "myproject", "feature", "feat/test", str(tmp_path / "test.yaml")
         )
 
     assert "alignment" not in called_stages
@@ -380,7 +377,7 @@ def test_plan_md_updated_after_each_stage(tmp_path):
          patch("orchestrator.orchestrate.update_plan_md") as mock_plan, \
          patch("orchestrator.orchestrate._resolve_run_folder", return_value=run_folder_path):
         orchestrate.run_pipeline(
-            docs_root, "myproject", "feature", "feat/test", "test"
+            docs_root, "myproject", "feature", "feat/test", str(tmp_path / "test.yaml")
         )
 
     plan_calls = [(c.args[1], c.args[2]) for c in mock_plan.call_args_list]
@@ -420,7 +417,7 @@ def test_discovery_fanout_calls_planning_then_tracks(tmp_path):
     with patch("orchestrator.orchestrate.run_stage", side_effect=fake_run_stage), \
          patch("orchestrator.orchestrate.update_plan_md"), \
          patch("orchestrator.orchestrate._resolve_run_folder", return_value=run_folder_path):
-        orchestrate.run_pipeline(docs_root, "myproject", "feature", "feat/test", "test")
+        orchestrate.run_pipeline(docs_root, "myproject", "feature", "feat/test", str(tmp_path / "test.yaml"))
 
     # Planning call: schema_name=discovery_planning, output_suffix=planning
     assert call_log[0]["output_suffix"] == "planning"
@@ -457,7 +454,7 @@ def test_discovery_blocked_when_planning_fails(tmp_path):
          patch("orchestrator.orchestrate.update_plan_md") as mock_plan, \
          patch("orchestrator.orchestrate._resolve_run_folder", return_value=run_folder_path):
         with pytest.raises(SystemExit) as exc_info:
-            orchestrate.run_pipeline(docs_root, "myproject", "feature", "feat/test", "test")
+            orchestrate.run_pipeline(docs_root, "myproject", "feature", "feat/test", str(tmp_path / "test.yaml"))
 
     assert exc_info.value.code == 1
     plan_calls = [(c.args[1], c.args[2]) for c in mock_plan.call_args_list]
@@ -489,7 +486,7 @@ def test_discovery_blocked_when_any_track_fails(tmp_path):
          patch("orchestrator.orchestrate.update_plan_md") as mock_plan, \
          patch("orchestrator.orchestrate._resolve_run_folder", return_value=run_folder_path):
         with pytest.raises(SystemExit) as exc_info:
-            orchestrate.run_pipeline(docs_root, "myproject", "feature", "feat/test", "test")
+            orchestrate.run_pipeline(docs_root, "myproject", "feature", "feat/test", str(tmp_path / "test.yaml"))
 
     assert exc_info.value.code == 1
     plan_calls = [(c.args[1], c.args[2]) for c in mock_plan.call_args_list]
@@ -532,7 +529,7 @@ def test_implementation_filters_non_slice_files(tmp_path):
          patch("orchestrator.orchestrate.subprocess.run", return_value=_git_ok()), \
          patch("orchestrator.orchestrate._resolve_run_folder", return_value=run_folder_path):
         orchestrate.run_pipeline(
-            docs_root, "myproject", "feature", "feat/test", "test"
+            docs_root, "myproject", "feature", "feat/test", str(tmp_path / "test.yaml")
         )
 
     assert called_with == [real_slice], (

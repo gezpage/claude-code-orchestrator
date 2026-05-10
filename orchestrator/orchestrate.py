@@ -69,10 +69,20 @@ def _load_project_config(docs_root, project):
     return yaml.safe_load(config_path.read_text())
 
 
-def _load_profile(docs_root, project, profile_name):
-    profiles_dir = paths.resolve_profiles_dir(docs_root, project)
-    profile_path = paths.require_file(profiles_dir / f"{profile_name}.yaml")
-    return yaml.safe_load(profile_path.read_text())
+_BUNDLED_PROFILES_DIR = Path(__file__).parent / "profiles"
+
+
+def _load_profile(profile):
+    if profile.endswith((".yaml", ".yml")):
+        p = Path(profile)
+        if not p.is_file():
+            raise FileNotFoundError(f"Profile file not found: {p}")
+        return yaml.safe_load(p.read_text())
+    bundled = _BUNDLED_PROFILES_DIR / f"{profile}.yaml"
+    if not bundled.is_file():
+        available = ", ".join(p.stem for p in sorted(_BUNDLED_PROFILES_DIR.glob("*.yaml")))
+        raise FileNotFoundError(f"Unknown profile '{profile}'. Available: {available}")
+    return yaml.safe_load(bundled.read_text())
 
 
 def _impl_from_prompt(prompt_path):
@@ -144,7 +154,7 @@ def run_pipeline(docs_root, project, feature_path, branch, profile_name, resume=
     if not Path(project_config["repo-root"]).exists():
         print(f"ERROR: project.yaml repo-root does not exist: {project_config['repo-root']}")
         sys.exit(1)
-    profile = _load_profile(docs_root, project, profile_name)
+    profile = _load_profile(profile_name)
 
     project_log_path = str(Path(docs_root) / "projects" / project)
     log_level = project_config.get("log_level", "DEBUG")

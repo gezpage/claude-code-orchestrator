@@ -1,7 +1,6 @@
 name: full
 stages:
   - stage: discovery
-    prompt: prompts/discovery/default.md
   - stage: alignment
     mode: interactive
     artifact: alignment-log.md

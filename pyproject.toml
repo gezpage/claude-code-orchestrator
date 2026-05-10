@@ -21,4 +21,4 @@ where = ["."]
 include = ["orchestrator*"]
 
 [tool.setuptools.package-data]
-orchestrator = ["prompts/**/*.md", "schemas/*.json"]
+orchestrator = ["prompts/**/*.md", "schemas/*.json", "profiles/*.yaml"]

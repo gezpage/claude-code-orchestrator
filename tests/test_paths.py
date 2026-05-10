@@ -3,7 +3,7 @@ from pathlib import Path
 from orchestrator.paths import (
     require_file, require_dir,
     resolve_workflow_root, resolve_run_folder,
-    resolve_profiles_dir, resolve_prompts_dir,
+    resolve_prompts_dir,
 )
 
 
@@ -55,13 +55,6 @@ def test_resolve_run_folder(tmp_path):
     result = resolve_run_folder(tmp_path, "myproject", "my-feature", "2026-05-08", 1)
     expected = tmp_path / "projects" / "myproject" / "workflow" / "runs" / "my-feature" / "2026-05-08-run-1"
     assert result == expected
-
-
-def test_resolve_profiles_dir_happy(tmp_path):
-    pd = tmp_path / "projects" / "myproject" / "workflow" / "profiles"
-    pd.mkdir(parents=True)
-    result = resolve_profiles_dir(tmp_path, "myproject")
-    assert result == pd
 
 
 def test_resolve_prompts_dir(tmp_path):
