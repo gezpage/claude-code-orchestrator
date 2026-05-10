@@ -13,7 +13,7 @@ from orchestrator import paths, state as state_mod
 _SLICE_RE = re.compile(r'S-\d+-')
 from orchestrator.logger import OrchestratorLogger
 from orchestrator.plan import init_plan_md, expand_impl_nodes, update_plan_md
-from orchestrator.run_stage import run_stage, run_interactive_stage
+from orchestrator.run_stage import run_stage, run_interactive_stage, _fmt_elapsed
 import orchestrator.review_cycle as review_cycle_mod
 
 
@@ -191,11 +191,10 @@ def run_pipeline(docs_root, project, feature_path, branch, profile_name, resume=
         stage_name = stage_def["stage"]
 
         if stage_name in completed:
-            logger.log(stage_name, "INFO", "already passed — skipping")
+            logger.log(stage_name, "DEBUG", "already passed — skipping")
             continue
 
         if stage_def.get("mode") == "interactive":
-            logger.log(stage_name, "INFO", "stage starting (interactive)")
             artifact_name = stage_def.get("artifact")
             if not artifact_name:
                 print(f"ERROR: interactive stage '{stage_name}' missing required 'artifact' field in profile")
@@ -245,7 +244,6 @@ def run_pipeline(docs_root, project, feature_path, branch, profile_name, resume=
         )
 
         if stage_name == "discovery":
-            logger.log(stage_name, "INFO", "stage starting")
             update_plan_md(run_folder, stage_name, "in_progress")
             t0 = time.monotonic()
 
@@ -337,10 +335,13 @@ def run_pipeline(docs_root, project, feature_path, branch, profile_name, resume=
             state_mod.update_stage_status(run_folder, stage_name, "passed")
             state_mod.save_stage_signal(run_folder, stage_name, discovery_sig)
             update_plan_md(run_folder, stage_name, "passed", elapsed_secs=elapsed, output_summary=_output_summary(stage_name, discovery_sig))
+            n_tracks = len(tracks)
+            n_findings = len(findings_files)
+            logger.log(stage_name, "INFO",
+                f"discovery passed ({_fmt_elapsed(elapsed)}) — {n_tracks} track{'s' if n_tracks != 1 else ''}, {n_findings} findings file{'s' if n_findings != 1 else ''}")
             continue
 
         if stage_name == "implementation":
-            logger.log(stage_name, "INFO", "stage starting")
             _create_branch(branch, variables["repo_root"], logger)
             slice_files = []
             slice_groups = []
@@ -427,10 +428,12 @@ def run_pipeline(docs_root, project, feature_path, branch, profile_name, resume=
             signals[stage_name] = {"status": "passed", "commit_hashes": all_commits, "branch": branch}
             state_mod.update_stage_status(run_folder, stage_name, "passed")
             state_mod.save_stage_signal(run_folder, stage_name, signals[stage_name])
+            n_commits = len(all_commits)
+            logger.log(stage_name, "INFO",
+                f"implementation passed — {n_commits} commit{'s' if n_commits != 1 else ''} on {branch}")
             continue
 
         if stage_name == "review":
-            logger.log(stage_name, "INFO", "stage starting")
             review_md_path = run_folder / "review.md"
             variables["review_md"] = str(review_md_path)
             variables["round"] = "1"
@@ -471,6 +474,7 @@ def run_pipeline(docs_root, project, feature_path, branch, profile_name, resume=
             }
             signals[stage_name] = review_signal
             if changes_requested:
+                logger.log(stage_name, "WARN", f"changes requested by: {', '.join(changes_requested)}")
                 result = review_cycle_mod.run(
                     run_folder, docs_root, project, branch, review_signal, project_log_path,
                     repo_root=variables.get("repo_root", ""),
@@ -487,7 +491,6 @@ def run_pipeline(docs_root, project, feature_path, branch, profile_name, resume=
             update_plan_md(run_folder, stage_name, "passed", output_summary=_output_summary(stage_name, review_signal))
             continue
 
-        logger.log(stage_name, "INFO", "stage starting")
         update_plan_md(run_folder, stage_name, "in_progress")
         impl = _impl_from_prompt(stage_def.get("prompt", f"prompts/{stage_name}/default.md"))
         t0 = time.monotonic()

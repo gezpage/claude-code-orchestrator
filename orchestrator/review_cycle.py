@@ -93,7 +93,7 @@ def run(run_folder, docs_root, project, branch, review_signal, project_log_path,
             run_folder, docs_root, project, str(project_log_path),
             cwd=repo_root or None,
         )
-        logger.log("review-cycle", "INFO", f"fix-implementation round {round_num} status={fix_sig.get('status')}")
+        logger.log("review-cycle", "INFO", f"fix-implementation round {round_num}: {fix_sig.get('status')}")
 
         for reviewer in list(changes_requested):
             review_vars = {
@@ -109,7 +109,7 @@ def run(run_folder, docs_root, project, branch, review_signal, project_log_path,
             verdict = sig.get("reviewer_statuses", {}).get(reviewer, sig.get("status", "unknown"))
             reviewer_statuses[reviewer] = verdict
             _update_review_md(review_md_path, reviewer, verdict, round_num, sig.get("message", ""))
-            logger.log("review-cycle", "INFO", f"{reviewer} round {round_num} verdict={verdict}")
+            logger.log("review-cycle", "INFO", f"reviewer {reviewer} round {round_num}: {verdict}")
 
         state_mod.update_stage_status(run_folder, f"review-cycle-{cycle}", "passed")
 

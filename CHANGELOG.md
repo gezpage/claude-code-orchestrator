@@ -8,6 +8,7 @@ Format: [Unreleased] at the top, dated releases below, newest first.
 ## [Unreleased]
 
 ### Changed
+- Logging overhauled for clarity and scannability: stage column padded to 14 chars for alignment; "stage starting" logs removed (redundant before dispatch); per-field signal dump replaced with a single timed completion line including a human-readable summary derived from the signal; dispatch messages now include track/slice/implementation name rather than the stage name again; "already passed — skipping" demoted to DEBUG; WARN emitted when review requests changes; stage-level completion logs added for discovery and implementation (previously silent); review-cycle log messages clarified; signal fields preserved at DEBUG level for diagnostics.
 - `--profile` now accepts a built-in name (`full`, `spike`) or a path to a YAML file; docs-repo `workflow/profiles/` lookup removed. Built-in profiles moved into the package at `orchestrator/profiles/` and included in package data. `profiles/full.yaml` had misleading `prompt` field on discovery stage removed. New `spike` profile added (discovery only). Tests updated; `test_load_profile.py` added.
 - README rewritten with concepts table, profiles reference, and full parameter docs for all three commands. CLI help text for `--profile` updated to reflect new behaviour.
 

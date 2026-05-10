@@ -2,10 +2,41 @@
 import json
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 from orchestrator import renderer, signal as signal_mod, validator
 from orchestrator.logger import OrchestratorLogger
+
+
+def _fmt_elapsed(secs: float) -> str:
+    if secs < 60:
+        return f"{secs:.0f}s"
+    return f"{int(secs) // 60}m {int(secs) % 60:02d}s"
+
+
+def _signal_summary(sig: dict) -> str:
+    if "summary" in sig:
+        s = sig["summary"]
+        return s.split(".")[0].strip() if "." in s[:200] else s[:200].strip()
+    if "commit_hashes" in sig:
+        h = sig["commit_hashes"]
+        return f"{len(h)} commit{'s' if len(h) != 1 else ''}: {', '.join(h)}"
+    if "slice_files" in sig:
+        return f"{len(sig['slice_files'])} slices"
+    if "reviewer_statuses" in sig:
+        return ", ".join(f"{r}={v}" for r, v in sig["reviewer_statuses"].items())
+    if "qa_pair_count" in sig:
+        return f"{sig['qa_pair_count']} QA pairs, {sig.get('qualifying_decisions', 0)} qualifying decisions"
+    if "outcome" in sig:
+        parts = [f"outcome={sig['outcome']}"]
+        for k in ("confidence", "regression_risk"):
+            if k in sig:
+                parts.append(f"{k}={sig[k]}")
+        return " ".join(parts)
+    if "message" in sig:
+        return sig["message"][:200]
+    return ""
 
 
 def _format_stage_output(stdout: str, sig: dict) -> str:
@@ -51,7 +82,8 @@ def run_stage(
     run_folder = Path(run_folder)
     logger = OrchestratorLogger(run_folder, project_log_path)
 
-    logger.log(stage, "INFO", f"stage {stage} dispatched (implementation={implementation})")
+    label = output_suffix or implementation
+    logger.log(stage, "INFO", f"dispatching {label}")
     if prompt_file is not None:
         prompt = Path(prompt_file).read_text()
     else:
@@ -62,7 +94,9 @@ def run_stage(
     tag = f"-{output_suffix}" if output_suffix else ""
     (output_dir / f"{stage}{tag}-prompt.md").write_text(prompt)
 
+    t0 = time.monotonic()
     stdout = _run_claude(prompt, cwd=cwd)
+    elapsed = time.monotonic() - t0
     (output_dir / f"{stage}{tag}.md").write_text(stdout)
 
     sig = signal_mod.extract_signal(stdout)
@@ -88,10 +122,16 @@ def run_stage(
     (output_dir / f"{stage}{tag}.md").write_text(_format_stage_output(stdout, sig))
 
     validator.validate_output(schema_name if schema_name else stage, sig)
-    logger.log(stage, "INFO", f"stage {stage} completed with status={sig['status']}")
+    elapsed_str = _fmt_elapsed(elapsed)
+    summary = _signal_summary(sig)
+    tag_label = output_suffix or stage
+    completion_msg = f"{tag_label} {sig['status']} ({elapsed_str})"
+    if summary:
+        completion_msg += f" — {summary}"
+    logger.log(stage, "INFO", completion_msg)
     for key, value in sig.items():
         v = json.dumps(value) if isinstance(value, (dict, list)) else str(value)
-        logger.log(stage, "INFO", f"  {key}: {v}")
+        logger.log(stage, "DEBUG", f"signal.{key}={v}")
     return sig
 
 
@@ -113,7 +153,7 @@ def run_interactive_stage(
     run_folder = Path(run_folder)
     artifact_path = Path(artifact_path)
     logger = OrchestratorLogger(run_folder, project_log_path)
-    logger.log(stage, "INFO", f"interactive stage {stage} dispatched")
+    logger.log(stage, "INFO", "dispatching interactive")
 
     cmd = ["claude"]
     if prompt_path is not None:
@@ -128,9 +168,9 @@ def run_interactive_stage(
 
     artifact_key = artifact_path.stem.replace("-", "_")
     if artifact_path.exists():
-        logger.log(stage, "INFO", f"interactive stage {stage} completed: artifact found")
+        logger.log(stage, "INFO", f"interactive passed — artifact {artifact_path.name}")
         return {"stage": stage, "status": "passed", artifact_key: str(artifact_path)}
-    logger.log(stage, "WARN", f"interactive stage {stage} incomplete: {artifact_path.name} not created")
+    logger.log(stage, "WARN", f"interactive incomplete — {artifact_path.name} not created")
     return {"stage": stage, "status": "blocked", "message": f"Artifact not created: {artifact_path.name}"}
 
 

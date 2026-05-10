@@ -15,7 +15,7 @@ class OrchestratorLogger:
         level = level.upper()
         ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
         run_id = self.run_folder.name
-        line = f"{ts} {run_id} [{level}] [{stage}] {message}\n"
+        line = f"{ts} {run_id} [{level}] [{stage:<14}] {message}\n"
 
         run_log = self.run_folder / "run.log"
         run_log.parent.mkdir(parents=True, exist_ok=True)
