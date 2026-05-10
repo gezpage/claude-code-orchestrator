@@ -80,6 +80,7 @@ def _build_variables(stage, signals, branch, feature_path, docs_root, project, r
     """Collect variables from config and prior signal fields only — no file reads."""
     vars_dict = {
         "run_folder": str(run_folder),
+        "review_md": str(run_folder / "review.md"),
         "docs_root": docs_root,
         "project": project,
         "branch": branch,
