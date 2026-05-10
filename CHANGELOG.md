@@ -8,6 +8,7 @@ Format: [Unreleased] at the top, dated releases below, newest first.
 ## [Unreleased]
 
 ### Added
+- `plan.md` now appends a `## Stage` section below the mermaid diagram each time a stage passes, containing the output summary and relative-path markdown links to any files the stage produced (findings, PRD, slices, review log, ADRs, KB files, alignment log).
 - Engineering standards injection: `orchestrator/standards.py` discovers `harsh-*-engineering-standards` skills from `.claude/skills/` and injects their content (frontmatter stripped) into stage prompts. The `general` standard is always included first; per-project standards are declared in `project.yaml` under a `standards:` list. Per-stage opt-in is controlled by `standards: true` in the profile YAML — added to `implementation` and `qa` in the built-in `full` profile. Six harsh-* skill symlinks added to `.claude/skills/` pointing to the docs repo.
 
 ### Changed

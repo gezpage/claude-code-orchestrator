@@ -211,7 +211,7 @@ def run_pipeline(docs_root, project, feature_path, branch, profile_name, resume=
                 signals[stage_name] = sig
                 state_mod.update_stage_status(run_folder, stage_name, "passed")
                 state_mod.save_stage_signal(run_folder, stage_name, sig)
-                update_plan_md(run_folder, stage_name, "passed")
+                update_plan_md(run_folder, stage_name, "passed", signal=sig)
                 logger.log(stage_name, "INFO", "artifact exists — skipping interactive session")
                 continue
             update_plan_md(run_folder, stage_name, "in_progress")
@@ -236,7 +236,7 @@ def run_pipeline(docs_root, project, feature_path, branch, profile_name, resume=
             signals[stage_name] = sig
             state_mod.update_stage_status(run_folder, stage_name, "passed")
             state_mod.save_stage_signal(run_folder, stage_name, sig)
-            update_plan_md(run_folder, stage_name, "passed", elapsed_secs=elapsed)
+            update_plan_md(run_folder, stage_name, "passed", elapsed_secs=elapsed, signal=sig)
             continue
 
         variables = _build_variables(
@@ -335,7 +335,7 @@ def run_pipeline(docs_root, project, feature_path, branch, profile_name, resume=
             signals[stage_name] = discovery_sig
             state_mod.update_stage_status(run_folder, stage_name, "passed")
             state_mod.save_stage_signal(run_folder, stage_name, discovery_sig)
-            update_plan_md(run_folder, stage_name, "passed", elapsed_secs=elapsed, output_summary=_output_summary(stage_name, discovery_sig))
+            update_plan_md(run_folder, stage_name, "passed", elapsed_secs=elapsed, output_summary=_output_summary(stage_name, discovery_sig), signal=discovery_sig)
             n_tracks = len(tracks)
             n_findings = len(findings_files)
             logger.log(stage_name, "INFO",
@@ -390,7 +390,8 @@ def run_pipeline(docs_root, project, feature_path, branch, profile_name, resume=
                     commits = sig.get("commit_hashes", [])
                     all_commits.extend(commits)
                     update_plan_md(run_folder, sub_id, "passed", elapsed_secs=elapsed,
-                                   output_summary=f"{len(commits)} commit{'s' if len(commits) != 1 else ''}" if commits else None)
+                                   output_summary=f"{len(commits)} commit{'s' if len(commits) != 1 else ''}" if commits else None,
+                                   signal=sig)
                 else:
                     logger.log(stage_name, "INFO", f"dispatching {len(group)} slices in parallel")
                     for sf in group:
@@ -425,7 +426,8 @@ def run_pipeline(docs_root, project, feature_path, branch, profile_name, resume=
                             commits = sig.get("commit_hashes", [])
                             all_commits.extend(commits)
                             update_plan_md(run_folder, sub_id, "passed", elapsed_secs=elapsed,
-                                           output_summary=f"{len(commits)} commit{'s' if len(commits) != 1 else ''}" if commits else None)
+                                           output_summary=f"{len(commits)} commit{'s' if len(commits) != 1 else ''}" if commits else None,
+                                           signal=sig)
                     if failed:
                         sys.exit(1)
             signals[stage_name] = {"status": "passed", "commit_hashes": all_commits, "branch": branch}
@@ -492,7 +494,7 @@ def run_pipeline(docs_root, project, feature_path, branch, profile_name, resume=
                     sys.exit(1)
             state_mod.update_stage_status(run_folder, stage_name, "passed")
             state_mod.save_stage_signal(run_folder, stage_name, review_signal)
-            update_plan_md(run_folder, stage_name, "passed", output_summary=_output_summary(stage_name, review_signal))
+            update_plan_md(run_folder, stage_name, "passed", output_summary=_output_summary(stage_name, review_signal), signal=review_signal)
             continue
 
         update_plan_md(run_folder, stage_name, "in_progress")
@@ -514,6 +516,6 @@ def run_pipeline(docs_root, project, feature_path, branch, profile_name, resume=
 
         state_mod.update_stage_status(run_folder, stage_name, "passed")
         state_mod.save_stage_signal(run_folder, stage_name, sig)
-        update_plan_md(run_folder, stage_name, "passed", elapsed_secs=elapsed, output_summary=_output_summary(stage_name, sig))
+        update_plan_md(run_folder, stage_name, "passed", elapsed_secs=elapsed, output_summary=_output_summary(stage_name, sig), signal=sig)
 
     logger.log("pipeline", "INFO", "pipeline completed successfully")

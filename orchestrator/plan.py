@@ -1,3 +1,4 @@
+import os
 import re
 import threading
 from pathlib import Path
@@ -31,6 +32,20 @@ _CLASSDEFS = [
     "    classDef gate fill:#fff3cd,color:#664d03,stroke:#ffc107,stroke-width:2px",
     "    classDef fannode fill:#dee2e6,color:#495057,stroke:#adb5bd,stroke-width:1px",
 ]
+
+
+def _stage_files(signal: dict) -> list[str]:
+    """Extract output file paths from a signal, keeping only those that exist on disk."""
+    files = []
+    for key in ("findings_files", "adr_paths", "kb_files", "adr_files", "slice_files"):
+        val = signal.get(key)
+        if isinstance(val, list):
+            files.extend(v for v in val if v)
+    for key in ("prd_path", "context_path", "alignment_log", "review_md"):
+        val = signal.get(key)
+        if val:
+            files.append(val)
+    return [f for f in files if Path(f).exists()]
 
 
 def _read_slice_title(path):
@@ -227,12 +242,44 @@ def expand_impl_nodes(run_folder, slice_files, slice_groups=None):
     plan_path.write_text(content)
 
 
-def update_plan_md(run_folder, stage, status, elapsed_secs=None, output_summary=None):
+def _append_stage_section(plan_path, stage, summary, signal, run_folder):
+    """Append a stage-completion section below the mermaid block."""
+    content = plan_path.read_text()
+
+    # Derive heading from mermaid node label (matches the diagram text exactly)
+    node_pattern = rf'    {re.escape(stage)}\["([^"]*)"\]'
+    m = re.search(node_pattern, content)
+    if m:
+        parts = m.group(1).split("\\n")
+        heading = re.sub(r'\s+(?:✅|⏳|🔴|-)\s*$', '', parts[0]).strip()
+    else:
+        heading = stage.replace("_", " ").title()
+
+    section = [f"\n## {heading}\n"]
+    if summary:
+        section.append(f"{summary}\n")
+
+    files = _stage_files(signal)
+    if files:
+        section.append("")
+        run_folder = Path(run_folder)
+        for f in files:
+            try:
+                rel = Path(f).relative_to(run_folder)
+            except ValueError:
+                rel = os.path.relpath(f, run_folder)
+            section.append(f"- [{Path(f).name}]({rel})")
+        section.append("")
+
+    plan_path.write_text(content + "\n".join(section))
+
+
+def update_plan_md(run_folder, stage, status, elapsed_secs=None, output_summary=None, signal=None):
     with _plan_lock:
-        _update_plan_md(run_folder, stage, status, elapsed_secs, output_summary)
+        _update_plan_md(run_folder, stage, status, elapsed_secs, output_summary, signal)
 
 
-def _update_plan_md(run_folder, stage, status, elapsed_secs=None, output_summary=None):
+def _update_plan_md(run_folder, stage, status, elapsed_secs=None, output_summary=None, signal=None):
     run_folder = Path(run_folder)
     plan_path = run_folder / "plan.md"
     css_class = _STATUS_CLASS.get(status, "pending")
@@ -274,3 +321,6 @@ def _update_plan_md(run_folder, stage, status, elapsed_secs=None, output_summary
         content = content[:m.start()] + f'    {stage}["{new_label}"]' + content[m.end():]
 
     plan_path.write_text(content)
+
+    if status == "passed" and signal is not None:
+        _append_stage_section(plan_path, stage, output_summary, signal, run_folder)
