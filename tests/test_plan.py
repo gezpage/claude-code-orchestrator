@@ -21,7 +21,7 @@ def test_init_plan_md_creates_file(tmp_path):
     profile = _simple_profile("discovery", "specification")
     init_plan_md(run_folder, profile)
     content = (run_folder / "plan.md").read_text()
-    assert "flowchart LR" in content
+    assert "flowchart TD" in content
     assert 'discovery[' in content
     assert 'specification[' in content
     assert "classDef pending" in content
@@ -120,6 +120,6 @@ def test_update_plan_md_creates_file_when_missing(tmp_path):
     run_folder = _make_run_folder(tmp_path)
     update_plan_md(run_folder, "discovery", "in_progress")
     content = (run_folder / "plan.md").read_text()
-    assert "flowchart LR" in content
+    assert "flowchart TD" in content
     assert "class discovery active" in content
     assert "classDef active" in content
