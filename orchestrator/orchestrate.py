@@ -435,6 +435,7 @@ def run_pipeline(docs_root, project, feature_path, branch, profile_name, resume=
                 "status": "passed",
                 "reviewer_statuses": reviewer_statuses,
                 "changes_requested": changes_requested,
+                "review_md": str(review_md_path),
             }
             signals[stage_name] = review_signal
             if changes_requested:

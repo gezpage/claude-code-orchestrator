@@ -7,7 +7,8 @@
     "status": {"type": "string", "enum": ["passed", "blocked", "failed"]},
     "message": {"type": "string"},
     "reviewer_statuses": {"type": "object"},
-    "changes_requested": {"type": "array", "items": {"type": "string"}}
+    "changes_requested": {"type": "array", "items": {"type": "string"}},
+    "review_md": {"type": "string"}
   },
   "additionalProperties": true
 }

@@ -7,6 +7,9 @@ Format: [Unreleased] at the top, dated releases below, newest first.
 
 ## [Unreleased]
 
+### Fixed
+- Harvest stage crash: `review_md` is now included in the review signal so it propagates to `_build_variables` for downstream stages. Previously the variable was set only in the local `variables` dict during the review block and was lost before harvest ran.
+
 ### Added
 - Interactive stage support: stages with `mode: interactive` in the profile YAML now launch a `claude` interactive session (inheriting the terminal) instead of pausing and requiring manual pipeline resume. A new `artifact` field declares the expected output file; after the session exits the pipeline checks for it and continues or blocks. `run_interactive_stage()` added to `run_stage.py`; the alignment special-case in `orchestrate.py` is replaced by a generic `mode: interactive` handler.
 - `profiles/full.yaml` updated with `artifact: alignment-log.md` and `prompt: prompts/alignment/interactive.md` on the alignment stage.
