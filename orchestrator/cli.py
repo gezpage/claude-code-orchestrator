@@ -20,7 +20,7 @@ def main():
 @click.option("--project", required=True, help="Project name under docs-root/projects/.")
 @click.option("--feature-path", required=True, help="Docs-relative path to the feature directory (must contain overview.md).")
 @click.option("--branch", required=True, help="Git branch name to create for implementation.")
-@click.option("--profile", default="full", show_default=True, help="Profile YAML name.")
+@click.option("--profile", default="full", show_default=True, help="Built-in profile name (full, spike) or path to a profile YAML file.")
 def run(docs_root, project, feature_path, branch, profile):
     """Run the full pipeline for a feature."""
     try:

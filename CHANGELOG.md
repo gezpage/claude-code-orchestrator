@@ -9,6 +9,7 @@ Format: [Unreleased] at the top, dated releases below, newest first.
 
 ### Changed
 - `--profile` now accepts a built-in name (`full`, `spike`) or a path to a YAML file; docs-repo `workflow/profiles/` lookup removed. Built-in profiles moved into the package at `orchestrator/profiles/` and included in package data. `profiles/full.yaml` had misleading `prompt` field on discovery stage removed. New `spike` profile added (discovery only). Tests updated; `test_load_profile.py` added.
+- README rewritten with concepts table, profiles reference, and full parameter docs for all three commands. CLI help text for `--profile` updated to reflect new behaviour.
 
 ### Fixed
 - Implementation stage now filters non-slice artifacts (e.g. `dependency-graph.md`) from `slice_files` before dispatch; decomposition prompt updated to explicitly prohibit including the dependency graph in `slice_files`.
