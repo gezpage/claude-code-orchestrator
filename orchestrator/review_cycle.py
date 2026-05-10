@@ -71,7 +71,8 @@ def run(run_folder, docs_root, project, branch, review_signal, project_log_path,
     if not changes_requested:
         return {"all_passed": True}
 
-    review_md_path = run_folder / "review.md"
+    review_md_path = run_folder / "review" / "review-log.md"
+    review_md_path.parent.mkdir(parents=True, exist_ok=True)
 
     for cycle in range(1, _MAX_CYCLES + 1):
         round_num = cycle + 1  # Round 2 for first cycle, Round 3 for second

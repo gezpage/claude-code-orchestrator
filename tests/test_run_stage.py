@@ -32,7 +32,7 @@ def test_happy_path(tmp_path):
         result = run_stage("discovery", "default", VARS, run_folder, str(tmp_path), "myproject", str(log_path))
     assert result["status"] == "passed"
     assert result["stage"] == "discovery"
-    assert (run_folder / "stages" / "discovery.md").exists()
+    assert (run_folder / "discovery" / "discovery.md").exists()
 
 
 def test_dangerously_skip_permissions_present(tmp_path):
@@ -75,7 +75,7 @@ def test_stage_output_written_before_signal_extraction(tmp_path):
     stdout = f"SIGNAL_JSON: {GOOD_SIGNAL}"
     with patch("orchestrator.run_stage._run_claude", return_value=stdout):
         run_stage("discovery", "default", VARS, run_folder, str(tmp_path), "myproject", str(log_path))
-    assert (run_folder / "stages" / "discovery.md").exists()
+    assert (run_folder / "discovery" / "discovery.md").exists()
 
 
 def test_cwd_forwarded_to_popen(tmp_path):
@@ -129,5 +129,15 @@ def test_run_stage_does_not_read_stage_output_files(tmp_path):
         with patch("builtins.open", side_effect=tracking_open):
             run_stage("discovery", "default", VARS, run_folder, str(tmp_path), "myproject", str(log_path))
 
-    stage_output_reads = [f for f in opened_files if "stages" in f and f.endswith(".md") and "prompt" not in f]
+    stage_output_reads = [f for f in opened_files if str(run_folder) in f and f.endswith(".md") and "prompt" not in f]
     assert stage_output_reads == [], f"run_stage read stage output files: {stage_output_reads}"
+
+
+def test_output_files_in_stage_subfolder(tmp_path):
+    run_folder, log_path = _setup_run_folder(tmp_path)
+    stdout = f"SIGNAL_JSON: {GOOD_SIGNAL}"
+    with patch("orchestrator.run_stage._run_claude", return_value=stdout):
+        run_stage("discovery", "default", VARS, run_folder, str(tmp_path), "myproject", str(log_path))
+    assert (run_folder / "discovery" / "discovery-prompt.md").exists()
+    assert (run_folder / "discovery" / "discovery.md").exists()
+    assert not (run_folder / "stages").exists()

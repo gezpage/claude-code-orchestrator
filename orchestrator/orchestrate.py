@@ -93,7 +93,7 @@ def _build_variables(stage, signals, branch, feature_path, docs_root, project, r
     """Collect variables from config and prior signal fields only — no file reads."""
     vars_dict = {
         "run_folder": str(run_folder),
-        "review_md": str(run_folder / "review.md"),
+        "review_md": str(run_folder / "review" / "review-log.md"),
         "docs_root": docs_root,
         "project": project,
         "branch": branch,
@@ -199,7 +199,7 @@ def run_pipeline(docs_root, project, feature_path, branch, profile_name, resume=
             if not artifact_name:
                 print(f"ERROR: interactive stage '{stage_name}' missing required 'artifact' field in profile")
                 sys.exit(1)
-            artifact_path = run_folder / artifact_name
+            artifact_path = run_folder / stage_name / artifact_name
             variables = _build_variables(
                 stage_name, signals, branch, feature_path,
                 docs_root, project, run_folder, project_config,
@@ -434,7 +434,8 @@ def run_pipeline(docs_root, project, feature_path, branch, profile_name, resume=
             continue
 
         if stage_name == "review":
-            review_md_path = run_folder / "review.md"
+            review_md_path = run_folder / "review" / "review-log.md"
+            review_md_path.parent.mkdir(parents=True, exist_ok=True)
             variables["review_md"] = str(review_md_path)
             variables["round"] = "1"
             impl_sig = signals.get("implementation", {})
@@ -445,7 +446,7 @@ def run_pipeline(docs_root, project, feature_path, branch, profile_name, resume=
                     ["git", "-C", variables["repo_root"], "diff", f"{first}^..{last}"],
                     capture_output=True, text=True,
                 )
-                diff_path = run_folder / "diff-round-1.patch"
+                diff_path = run_folder / "review" / "diff-round-1.patch"
                 diff_path.write_text(diff_result.stdout)
                 variables["diff"] = str(diff_path)
             else:

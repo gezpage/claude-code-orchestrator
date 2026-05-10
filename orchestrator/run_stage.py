@@ -89,7 +89,7 @@ def run_stage(
     else:
         prompt = renderer.render_prompt(stage, implementation, variables, docs_root, project)
 
-    output_dir = run_folder / "stages"
+    output_dir = run_folder / stage
     output_dir.mkdir(parents=True, exist_ok=True)
     tag = f"-{output_suffix}" if output_suffix else ""
     (output_dir / f"{stage}{tag}-prompt.md").write_text(prompt)
@@ -159,7 +159,7 @@ def run_interactive_stage(
     if prompt_path is not None:
         implementation = Path(prompt_path).stem
         rendered = renderer.render_prompt(stage, implementation, variables, docs_root, project)
-        output_dir = run_folder / "stages"
+        output_dir = run_folder / stage
         output_dir.mkdir(parents=True, exist_ok=True)
         (output_dir / f"{stage}-prompt.md").write_text(rendered)
         cmd = ["claude", rendered]

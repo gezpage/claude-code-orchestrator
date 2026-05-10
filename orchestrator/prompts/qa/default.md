@@ -15,7 +15,7 @@ You are a QA agent. Your task is to verify the implementation against the accept
 3. Run all tests referenced in the acceptance criteria.
 4. Verify each acceptance criterion is met — state pass/fail for each one.
 5. Assess regression risk: scan for changes to shared utilities, interfaces, or high-traffic code paths.
-6. Write a QA summary at `{{ run_folder }}/qa-report.md`.
+6. Write a QA summary at `{{ run_folder }}/qa/qa-report.md`.
 
 ## Output
 

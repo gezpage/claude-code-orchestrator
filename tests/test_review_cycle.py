@@ -207,9 +207,25 @@ def test_review_md_round_numbering(tmp_path):
     with patch("orchestrator.review_cycle.run_stage", side_effect=lambda *a, **kw: next(ret_iter)):
         review_cycle.run(run_folder, "/docs", "proj", "feat/x", signal, log_path)
 
-    content = (run_folder / "review.md").read_text()
+    content = (run_folder / "review" / "review-log.md").read_text()
     assert "Round 2" in content
     assert "Round 3" in content
+
+
+# ── review log written to review/review-log.md, not run root ─────────────────
+
+def test_review_log_in_review_subfolder(tmp_path):
+    run_folder, log_path = _setup(tmp_path)
+    signal = _review_signal({"architecture": "changes-requested"})
+
+    stage_returns = [_fix_sig(), _reviewer_sig("architecture", "approved")]
+    ret_iter = iter(stage_returns)
+
+    with patch("orchestrator.review_cycle.run_stage", side_effect=lambda *a, **kw: next(ret_iter)):
+        review_cycle.run(run_folder, "/docs", "proj", "feat/x", signal, log_path)
+
+    assert (run_folder / "review" / "review-log.md").exists(), "review-log.md should be in review/ subfolder"
+    assert not (run_folder / "review.md").exists(), "review.md must not appear at run root"
 
 
 # ── no new run folder created ─────────────────────────────────────────────────

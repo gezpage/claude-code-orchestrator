@@ -15,7 +15,7 @@ You are a discovery planning agent. Analyse the feature request and design a set
    - `product-requirements` — acceptance criteria, edge cases, constraints
    - `observability` — existing metrics, logs, alerts relevant to this area
    - `risk` — side-effects, breaking changes, failure modes
-3. For each track, write a prompt file to `{{ run_folder }}/stages/discovery-{name}-prompt.md`.
+3. For each track, write a prompt file to `{{ run_folder }}/discovery/discovery-{name}-prompt.md`.
 4. For tracks that explore source code, include targeted `find` or `grep` instructions scoped to `{{ repo_root }}` — not the docs root.
 
 ## Track prompt format
@@ -35,13 +35,13 @@ Each prompt must be bullet-point instructions only — no prose paragraphs. Use 
 ## Instructions
 - Read `{{ docs_root }}/{{ feature_path }}/overview.md` for feature context
 - [targeted read instructions — specific files, directories, or patterns scoped to {{ repo_root }}]
-- Write findings to `{{ run_folder }}/discovery-{name}.md`
+- Write findings to `{{ run_folder }}/discovery/discovery-{name}.md`
 - Bullet points only. Max 3 sentences per finding. No prose.
 
 ## Output
 
 When complete, emit exactly:
-SIGNAL_JSON: {"stage": "discovery-{name}", "status": "passed", "findings_file": "{{ run_folder }}/discovery-{name}.md", "summary": "<2–3 sentence summary of key findings>"}
+SIGNAL_JSON: {"stage": "discovery-{name}", "status": "passed", "findings_file": "{{ run_folder }}/discovery/discovery-{name}.md", "summary": "<2–3 sentence summary of key findings>"}
 
 If blocked:
 SIGNAL_JSON: {"stage": "discovery-{name}", "status": "blocked", "message": "<reason>"}
@@ -54,7 +54,7 @@ Replace `{name}` and `{track-name}` with the actual track name (lowercase, hyphe
 When all prompt files are written, emit:
 
 ```
-SIGNAL_JSON: {"stage": "discovery-planning", "status": "passed", "tracks": [{"name": "{name}", "prompt_file": "{{ run_folder }}/stages/discovery-{name}-prompt.md", "focus": "<one sentence>"}]}
+SIGNAL_JSON: {"stage": "discovery-planning", "status": "passed", "tracks": [{"name": "{name}", "prompt_file": "{{ run_folder }}/discovery/discovery-{name}-prompt.md", "focus": "<one sentence>"}]}
 ```
 
 If you cannot proceed (missing overview, access error):

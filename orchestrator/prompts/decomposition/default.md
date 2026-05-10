@@ -11,9 +11,9 @@ You are a decomposition agent. Your task is to break the PRD into implementation
 1. Read the PRD at `{{ prd_path }}` and the context doc at `{{ context_path }}`.
 2. Break the work into **tracer-bullet vertical slices** — each slice is a thin but complete path through all relevant integration layers (e.g. schema → API → UI → tests for a web app; config → command → output for a CLI). Do not cut horizontally across a single layer.
 3. Each slice must be independently committable (≤ 1 day of work) and demoable or verifiable on its own. Prefer many thin slices over few thick ones.
-4. Write each slice to `{{ run_folder }}/slices/S-NN-slug.md` using the template below.
+4. Write each slice to `{{ run_folder }}/decomposition/S-NN-slug.md` using the template below.
 5. Order slices by dependency. A slice may depend on prior slices but must not create circular dependencies.
-6. Write a dependency graph in Mermaid format at `{{ run_folder }}/slices/dependency-graph.md`.
+6. Write a dependency graph in Mermaid format at `{{ run_folder }}/decomposition/dependency-graph.md`.
 7. `dependency-graph.md` is a reference artifact — do **not** include it in `slice_files`.
 
 ### Slice file template
@@ -42,7 +42,7 @@ Do not implement anything. This stage is planning only.
 Emit exactly one line:
 
 ```
-SIGNAL_JSON: {"stage": "decomposition", "status": "passed", "slice_files": ["{{ run_folder }}/slices/S-01-slug.md", "..."]}
+SIGNAL_JSON: {"stage": "decomposition", "status": "passed", "slice_files": ["{{ run_folder }}/decomposition/S-01-slug.md", "..."]}
 ```
 
 `slice_files` must contain only `S-NN-slug.md` paths — not `dependency-graph.md`.

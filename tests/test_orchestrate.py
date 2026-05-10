@@ -160,7 +160,8 @@ def test_full_happy_path(tmp_path):
         # alignment-log.md must exist inside the actual run folder; patch resolve to a known path
         run_folder_path = runs_base / "feature-xyz" / "2026-01-01-run-1"
         run_folder_path.mkdir(parents=True)
-        (run_folder_path / "alignment-log.md").write_text("# Alignment\n")
+        (run_folder_path / "alignment").mkdir()
+        (run_folder_path / "alignment" / "alignment-log.md").write_text("# Alignment\n")
 
         with patch("orchestrator.orchestrate._resolve_run_folder", return_value=run_folder_path):
             orchestrate.run_pipeline(
@@ -339,7 +340,8 @@ def test_interactive_stage_not_dispatched_through_run_stage(tmp_path):
     run_folder_path = tmp_path / "projects" / "myproject" / "workflow" / "runs" / "feat" / "2026-01-01-run-1"
     run_folder_path.mkdir(parents=True)
     # alignment-log.md present → alignment auto-skipped (no interactive session launched)
-    (run_folder_path / "alignment-log.md").write_text("# Alignment\n")
+    (run_folder_path / "alignment").mkdir()
+    (run_folder_path / "alignment" / "alignment-log.md").write_text("# Alignment\n")
 
     called_stages = []
 
@@ -503,8 +505,8 @@ def test_implementation_filters_non_slice_files(tmp_path):
     run_folder_path = tmp_path / "projects" / "myproject" / "workflow" / "runs" / "feat" / "2026-01-01-run-1"
     run_folder_path.mkdir(parents=True)
 
-    real_slice = str(run_folder_path / "slices" / "S-01-do-the-thing.md")
-    artifact = str(run_folder_path / "slices" / "dependency-graph.md")
+    real_slice = str(run_folder_path / "decomposition" / "S-01-do-the-thing.md")
+    artifact = str(run_folder_path / "decomposition" / "dependency-graph.md")
 
     import yaml as _yaml
     (run_folder_path / "_state.yaml").write_text(_yaml.dump({
@@ -536,6 +538,68 @@ def test_implementation_filters_non_slice_files(tmp_path):
         f"Expected only the real slice to be dispatched, got: {called_with}"
     )
     assert artifact not in called_with
+
+
+# ── review_md points to review/review-log.md ─────────────────────────────────
+
+def test_review_md_path_uses_stage_subfolder(tmp_path):
+    stages = [
+        {"stage": "review", "prompts": {"architecture": "prompts/review/architecture.md"}},
+    ]
+    docs_root = _setup_docs(tmp_path, stages)
+    run_folder_path = tmp_path / "projects" / "myproject" / "workflow" / "runs" / "feat" / "2026-01-01-run-1"
+    run_folder_path.mkdir(parents=True)
+
+    captured_vars = {}
+
+    def fake_run_stage(stage, impl, variables, run_folder, docs_root, project, log_path, output_suffix="", cwd=None, prompt_file=None, schema_name=None):
+        captured_vars.update(variables)
+        return REVIEW_ARCH_SIGNAL
+
+    with patch("orchestrator.orchestrate.run_stage", side_effect=fake_run_stage), \
+         patch("orchestrator.orchestrate.update_plan_md"), \
+         patch("orchestrator.orchestrate.subprocess.run", return_value=_git_ok()), \
+         patch("orchestrator.orchestrate._resolve_run_folder", return_value=run_folder_path):
+        orchestrate.run_pipeline(
+            docs_root, "myproject", "feature", "feat/test", str(tmp_path / "test.yaml")
+        )
+
+    expected = str(run_folder_path / "review" / "review-log.md")
+    assert captured_vars.get("review_md") == expected, (
+        f"review_md should be {expected!r}, got {captured_vars.get('review_md')!r}"
+    )
+
+
+# ── interactive artifact placed inside stage subfolder ────────────────────────
+
+def test_interactive_artifact_path_in_stage_subfolder(tmp_path):
+    stages = [
+        {"stage": "alignment", "mode": "interactive", "artifact": "alignment-log.md"},
+        {"stage": "specification", "prompt": "prompts/specification/default.md"},
+    ]
+    docs_root = _setup_docs(tmp_path, stages)
+    run_folder_path = tmp_path / "projects" / "myproject" / "workflow" / "runs" / "feat" / "2026-01-01-run-1"
+    run_folder_path.mkdir(parents=True)
+
+    captured_artifact = {}
+
+    def fake_interactive(stage, prompt_path, variables, run_folder, artifact_path, docs_root, project, log_path):
+        captured_artifact["path"] = artifact_path
+        return {"stage": stage, "status": "blocked", "message": "Artifact not created: alignment-log.md"}
+
+    with patch("orchestrator.orchestrate.run_stage", return_value=SPEC_SIGNAL), \
+         patch("orchestrator.orchestrate.run_interactive_stage", side_effect=fake_interactive), \
+         patch("orchestrator.orchestrate.update_plan_md"), \
+         patch("orchestrator.orchestrate._resolve_run_folder", return_value=run_folder_path):
+        with pytest.raises(SystemExit):
+            orchestrate.run_pipeline(
+                docs_root, "myproject", "feature", "feat/test", str(tmp_path / "test.yaml")
+            )
+
+    expected = run_folder_path / "alignment" / "alignment-log.md"
+    assert captured_artifact.get("path") == expected, (
+        f"artifact_path should be {expected}, got {captured_artifact.get('path')}"
+    )
 
 
 # ── orchestrate.py source contains no open() calls ───────────────────────────
