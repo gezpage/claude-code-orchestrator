@@ -14,6 +14,7 @@ You are a decomposition agent. Your task is to break the PRD into implementation
 4. Write each slice to `{{ run_folder }}/slices/S-NN-slug.md` using the template below.
 5. Order slices by dependency. A slice may depend on prior slices but must not create circular dependencies.
 6. Write a dependency graph in Mermaid format at `{{ run_folder }}/slices/dependency-graph.md`.
+7. `dependency-graph.md` is a reference artifact — do **not** include it in `slice_files`.
 
 ### Slice file template
 
@@ -41,8 +42,10 @@ Do not implement anything. This stage is planning only.
 Emit exactly one line:
 
 ```
-SIGNAL_JSON: {"stage": "decomposition", "status": "passed", "slice_files": ["{{ run_folder }}/slices/S-01-slug.md"]}
+SIGNAL_JSON: {"stage": "decomposition", "status": "passed", "slice_files": ["{{ run_folder }}/slices/S-01-slug.md", "..."]}
 ```
+
+`slice_files` must contain only `S-NN-slug.md` paths — not `dependency-graph.md`.
 
 If decomposition cannot proceed:
 

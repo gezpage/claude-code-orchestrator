@@ -71,7 +71,7 @@ SPEC_SIGNAL = {
 DECOMP_SIGNAL = {
     "stage": "decomposition",
     "status": "passed",
-    "slice_files": ["slice-01.md", "slice-02.md"],
+    "slice_files": ["S-01-slice.md", "S-02-slice.md"],
 }
 
 IMPL_SIGNAL = {
@@ -494,6 +494,51 @@ def test_discovery_blocked_when_any_track_fails(tmp_path):
     assert exc_info.value.code == 1
     plan_calls = [(c.args[1], c.args[2]) for c in mock_plan.call_args_list]
     assert ("discovery", "blocked") in plan_calls
+
+
+# ── non-slice artifacts are filtered from slice_files before implementation ───
+
+def test_implementation_filters_non_slice_files(tmp_path):
+    stages = [
+        {"stage": "implementation", "prompt": "prompts/implementation/default.md"},
+    ]
+    docs_root = _setup_docs(tmp_path, stages)
+    run_folder_path = tmp_path / "projects" / "myproject" / "workflow" / "runs" / "feat" / "2026-01-01-run-1"
+    run_folder_path.mkdir(parents=True)
+
+    real_slice = str(run_folder_path / "slices" / "S-01-do-the-thing.md")
+    artifact = str(run_folder_path / "slices" / "dependency-graph.md")
+
+    import yaml as _yaml
+    (run_folder_path / "_state.yaml").write_text(_yaml.dump({
+        "stages": {},
+        "signals": {
+            "decomposition": {
+                "stage": "decomposition",
+                "status": "passed",
+                "slice_files": [real_slice, artifact],
+            }
+        },
+    }))
+
+    called_with = []
+
+    def fake_run_stage(stage, impl, variables, run_folder, docs_root, project, log_path, output_suffix="", cwd=None, prompt_file=None, schema_name=None):
+        called_with.append(variables.get("slice_file"))
+        return IMPL_SIGNAL
+
+    with patch("orchestrator.orchestrate.run_stage", side_effect=fake_run_stage), \
+         patch("orchestrator.orchestrate.update_plan_md"), \
+         patch("orchestrator.orchestrate.subprocess.run", return_value=_git_ok()), \
+         patch("orchestrator.orchestrate._resolve_run_folder", return_value=run_folder_path):
+        orchestrate.run_pipeline(
+            docs_root, "myproject", "feature", "feat/test", "test"
+        )
+
+    assert called_with == [real_slice], (
+        f"Expected only the real slice to be dispatched, got: {called_with}"
+    )
+    assert artifact not in called_with
 
 
 # ── orchestrate.py source contains no open() calls ───────────────────────────

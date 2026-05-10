@@ -1,5 +1,6 @@
 import concurrent.futures
 import datetime
+import re
 import subprocess
 import sys
 import time
@@ -8,6 +9,8 @@ from pathlib import Path
 import yaml
 
 from orchestrator import paths, state as state_mod
+
+_SLICE_RE = re.compile(r'S-\d+-')
 from orchestrator.logger import OrchestratorLogger
 from orchestrator.plan import init_plan_md, expand_impl_nodes, update_plan_md
 from orchestrator.run_stage import run_stage, run_interactive_stage
@@ -336,6 +339,17 @@ def run_pipeline(docs_root, project, feature_path, branch, profile_name, resume=
                     slice_files = sig["slice_files"]
                     slice_groups = sig.get("slice_groups", [])
                     break
+            pre_count = len(slice_files)
+            slice_files = [sf for sf in slice_files if _SLICE_RE.search(Path(sf).name)]
+            if len(slice_files) != pre_count:
+                logger.log(stage_name, "WARN",
+                           f"filtered {pre_count - len(slice_files)} non-slice file(s) from slice_files")
+            if slice_groups:
+                slice_groups = [
+                    [sf for sf in g if _SLICE_RE.search(Path(sf).name)]
+                    for g in slice_groups
+                ]
+                slice_groups = [g for g in slice_groups if g]
             if not slice_groups:
                 slice_groups = [[sf] for sf in slice_files]
             # Flatten groups to get canonical ordered list (for sub_id assignment)
