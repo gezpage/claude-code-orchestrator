@@ -112,7 +112,7 @@ BLOCKED_SIGNAL = {
 def test_full_happy_path(tmp_path):
     stages = [
         {"stage": "discovery", "prompt": "prompts/discovery/default.md"},
-        {"stage": "alignment", "mode": "interactive"},
+        {"stage": "alignment", "mode": "interactive", "artifact": "alignment-log.md", "prompt": "prompts/alignment/interactive.md"},
         {"stage": "specification", "prompt": "prompts/specification/default.md"},
         {"stage": "decomposition", "prompt": "prompts/decomposition/default.md"},
         {
@@ -128,7 +128,7 @@ def test_full_happy_path(tmp_path):
     ]
     docs_root = _setup_docs(tmp_path, stages)
 
-    # Create alignment-log.md so alignment is skipped
+    # Create alignment-log.md so alignment auto-skips (simulates resumed run)
     runs_base = tmp_path / "projects" / "myproject" / "workflow" / "runs"
 
     stage_signals = [
@@ -154,6 +154,7 @@ def test_full_happy_path(tmp_path):
     git_mock = MagicMock(return_value=_git_ok())
 
     with patch("orchestrator.orchestrate.run_stage", side_effect=fake_run_stage) as mock_rs, \
+         patch("orchestrator.orchestrate.run_interactive_stage") as mock_ris, \
          patch("orchestrator.orchestrate.update_plan_md") as mock_plan, \
          patch("orchestrator.orchestrate.subprocess.run", return_value=_git_ok()):
         # alignment-log.md must exist inside the actual run folder; patch resolve to a known path
@@ -170,9 +171,10 @@ def test_full_happy_path(tmp_path):
     # 2x implementation, qa, review, harvest = 9
     assert mock_rs.call_count == 9
 
-    # alignment never passed to run_stage
+    # alignment auto-skipped (artifact existed) — run_stage and run_interactive_stage not called
     all_stages_called = [c.args[0] for c in mock_rs.call_args_list]
     assert "alignment" not in all_stages_called
+    mock_ris.assert_not_called()
 
     # plan.md updated with (stage, status) tuples — check key milestones
     plan_calls = [(c.args[1], c.args[2]) for c in mock_plan.call_args_list]
@@ -191,15 +193,17 @@ def test_full_happy_path(tmp_path):
 def test_alignment_pause_exits(tmp_path):
     stages = [
         {"stage": "discovery", "prompt": "prompts/discovery/default.md"},
-        {"stage": "alignment", "mode": "interactive"},
+        {"stage": "alignment", "mode": "interactive", "artifact": "alignment-log.md"},
         {"stage": "specification", "prompt": "prompts/specification/default.md"},
     ]
     docs_root = _setup_docs(tmp_path, stages)
     run_folder_path = tmp_path / "projects" / "myproject" / "workflow" / "runs" / "feat" / "2026-01-01-run-1"
     run_folder_path.mkdir(parents=True)
-    # No alignment-log.md → should pause
+    # No alignment-log.md → interactive session launched but returns blocked (user didn't create artifact)
+    blocked_signal = {"stage": "alignment", "status": "blocked", "message": "Artifact not created: alignment-log.md"}
 
     with patch("orchestrator.orchestrate.run_stage", side_effect=[DISCOVERY_PLANNING_SIGNAL, DISCOVERY_TRACK_SIGNAL]) as mock_rs, \
+         patch("orchestrator.orchestrate.run_interactive_stage", return_value=blocked_signal), \
          patch("orchestrator.orchestrate.update_plan_md"), \
          patch("orchestrator.orchestrate._resolve_run_folder", return_value=run_folder_path):
         with pytest.raises(SystemExit) as exc_info:
@@ -324,17 +328,17 @@ def test_branch_created_at_implementation_start(tmp_path):
     assert "/tmp" in checkout_cmd  # repo-root from project.yaml fixture
 
 
-# ── alignment never dispatched through run_stage ──────────────────────────────
+# ── interactive stage not dispatched through run_stage ────────────────────────
 
-def test_alignment_never_dispatched_through_run_stage(tmp_path):
+def test_interactive_stage_not_dispatched_through_run_stage(tmp_path):
     stages = [
-        {"stage": "alignment", "mode": "interactive"},
+        {"stage": "alignment", "mode": "interactive", "artifact": "alignment-log.md"},
         {"stage": "specification", "prompt": "prompts/specification/default.md"},
     ]
     docs_root = _setup_docs(tmp_path, stages)
     run_folder_path = tmp_path / "projects" / "myproject" / "workflow" / "runs" / "feat" / "2026-01-01-run-1"
     run_folder_path.mkdir(parents=True)
-    # alignment-log.md present → alignment auto-skipped
+    # alignment-log.md present → alignment auto-skipped (no interactive session launched)
     (run_folder_path / "alignment-log.md").write_text("# Alignment\n")
 
     called_stages = []
@@ -344,6 +348,7 @@ def test_alignment_never_dispatched_through_run_stage(tmp_path):
         return SPEC_SIGNAL
 
     with patch("orchestrator.orchestrate.run_stage", side_effect=fake_run_stage), \
+         patch("orchestrator.orchestrate.run_interactive_stage") as mock_ris, \
          patch("orchestrator.orchestrate.update_plan_md"), \
          patch("orchestrator.orchestrate._resolve_run_folder", return_value=run_folder_path):
         orchestrate.run_pipeline(
@@ -351,6 +356,7 @@ def test_alignment_never_dispatched_through_run_stage(tmp_path):
         )
 
     assert "alignment" not in called_stages
+    mock_ris.assert_not_called()
 
 
 # ── update_plan_md called after each stage ────────────────────────────────────

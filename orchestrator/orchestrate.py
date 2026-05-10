@@ -10,7 +10,7 @@ import yaml
 from orchestrator import paths, state as state_mod
 from orchestrator.logger import OrchestratorLogger
 from orchestrator.plan import init_plan_md, expand_impl_nodes, update_plan_md
-from orchestrator.run_stage import run_stage
+from orchestrator.run_stage import run_stage, run_interactive_stage
 import orchestrator.review_cycle as review_cycle_mod
 
 
@@ -172,49 +172,50 @@ def run_pipeline(docs_root, project, feature_path, branch, profile_name, resume=
             logger.log(stage_name, "INFO", "already passed — skipping")
             continue
 
-        if stage_name == "alignment":
-            logger.log(stage_name, "INFO", "stage starting")
-            if "prompt" in stage_def:
-                variables = _build_variables(
-                    stage_name, signals, branch, feature_path,
-                    docs_root, project, run_folder, project_config,
-                )
-                impl = _impl_from_prompt(stage_def["prompt"])
-                t0 = time.monotonic()
-                sig = run_stage(stage_name, impl, variables, run_folder, docs_root, project, project_log_path)
-                elapsed = time.monotonic() - t0
+        if stage_def.get("mode") == "interactive":
+            logger.log(stage_name, "INFO", "stage starting (interactive)")
+            artifact_name = stage_def.get("artifact")
+            if not artifact_name:
+                print(f"ERROR: interactive stage '{stage_name}' missing required 'artifact' field in profile")
+                sys.exit(1)
+            artifact_path = run_folder / artifact_name
+            variables = _build_variables(
+                stage_name, signals, branch, feature_path,
+                docs_root, project, run_folder, project_config,
+            )
+            if artifact_path.exists():
+                artifact_key = Path(artifact_name).stem.replace("-", "_")
+                sig = {artifact_key: str(artifact_path)}
                 signals[stage_name] = sig
-                if sig.get("status") in ("blocked", "failed"):
-                    st = state_mod.load_state(run_folder)
-                    st["blocked_at"] = stage_name
-                    state_mod.save_state(run_folder, st)
-                    update_plan_md(run_folder, stage_name, sig["status"])
-                    logger.log(stage_name, "ERROR", f"pipeline stopped: stage {stage_name} {sig['status']}: {sig.get('message', '')}")
-                    sys.exit(1)
                 state_mod.update_stage_status(run_folder, stage_name, "passed")
                 state_mod.save_stage_signal(run_folder, stage_name, sig)
-                update_plan_md(run_folder, stage_name, "passed", elapsed_secs=elapsed, output_summary=_output_summary(stage_name, sig))
-                continue
-
-            alignment_log = run_folder / "alignment-log.md"
-            if alignment_log.exists():
-                signals[stage_name] = {"alignment_log": str(alignment_log)}
-                state_mod.update_stage_status(run_folder, stage_name, "passed")
-                state_mod.save_stage_signal(run_folder, stage_name, signals[stage_name])
                 update_plan_md(run_folder, stage_name, "passed")
+                logger.log(stage_name, "INFO", "artifact exists — skipping interactive session")
                 continue
-            st = state_mod.load_state(run_folder)
-            st["blocked_at"] = "alignment"
-            state_mod.save_state(run_folder, st)
-            update_plan_md(run_folder, stage_name, "blocked")
-            logger.log(stage_name, "INFO", "pipeline paused: waiting for human to create alignment-log.md")
-            print(
-                f"\n[orchestrator] Alignment pause.\n"
-                f"  Run folder : {run_folder}\n"
-                f"  Create     : {run_folder}/alignment-log.md\n"
-                f"  Then resume: orchestrator resume --run-folder {run_folder} --docs-root {docs_root}\n"
+            update_plan_md(run_folder, stage_name, "in_progress")
+            t0 = time.monotonic()
+            sig = run_interactive_stage(
+                stage_name, stage_def.get("prompt"), variables,
+                run_folder, artifact_path, docs_root, project, project_log_path,
             )
-            sys.exit(0)
+            elapsed = time.monotonic() - t0
+            if sig.get("status") != "passed":
+                st = state_mod.load_state(run_folder)
+                st["blocked_at"] = stage_name
+                state_mod.save_state(run_folder, st)
+                update_plan_md(run_folder, stage_name, "blocked")
+                logger.log(stage_name, "WARN", f"interactive stage '{stage_name}' incomplete: {artifact_name} not created")
+                print(
+                    f"\n[orchestrator] Stage '{stage_name}' incomplete.\n"
+                    f"  Expected : {artifact_path}\n"
+                    f"  Resume   : orchestrator resume --run-folder {run_folder} --docs-root {docs_root}\n"
+                )
+                sys.exit(0)
+            signals[stage_name] = sig
+            state_mod.update_stage_status(run_folder, stage_name, "passed")
+            state_mod.save_stage_signal(run_folder, stage_name, sig)
+            update_plan_md(run_folder, stage_name, "passed", elapsed_secs=elapsed)
+            continue
 
         variables = _build_variables(
             stage_name, signals, branch, feature_path,

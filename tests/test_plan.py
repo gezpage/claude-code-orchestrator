@@ -40,7 +40,7 @@ def test_init_plan_md_alignment_gate_shape(tmp_path):
     run_folder = _make_run_folder(tmp_path)
     profile = {"stages": [
         {"stage": "specification", "prompt": "prompts/specification/default.md"},
-        {"stage": "alignment"},
+        {"stage": "alignment", "mode": "interactive", "artifact": "alignment-log.md"},
         {"stage": "decomposition", "prompt": "prompts/decomposition/default.md"},
     ]}
     init_plan_md(run_folder, profile)

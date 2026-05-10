@@ -16,7 +16,7 @@ Developer-facing reference. Read before touching any orchestrator code.
 
 - **`workflow/` paths are fixed convention — do not add config for them.** Python derives all orchestrator paths from `{docs-root}/projects/{project}/workflow/`. Do not introduce a `project.yaml.folders` key or any path override mechanism.
 
-- **Alignment is not dispatched through `run_stage.py`.** When Python encounters the alignment stage in the profile, it pauses and surfaces manual instructions. It does not call `subprocess.run()` for alignment.
+- **Interactive stages (`mode: interactive`) are dispatched through `run_interactive_stage()` in `run_stage.py` — not `run_stage()`.** Python launches an interactive `claude` session (no `--bare`, no `--dangerously-skip-permissions`), waits for it to exit, then checks for the declared `artifact` file. The `--bare`/`--dangerously-skip-permissions` invariants apply only to `run_stage()`.
 
 - **Stage output schemas are the interface contract — they belong to the stage, not the implementation.** All implementations of a stage must satisfy the same schema.
 

@@ -107,11 +107,16 @@ def init_plan_md(run_folder, profile):
                 lines.append(f'    {sub_id}["{label}"]')
                 review_sub_ids.append((name, sub_id))
                 class_assignments.append(f"    class {sub_id} pending")
-        else:
-            # Interactive gate
+        elif stage_def.get("mode") == "interactive":
             lines.append(f'    {name}{{{{\"✋ {name.title()}\"}}}}')
             chain_ids.append(name)
             class_assignments.append(f"    class {name} gate")
+        else:
+            impl = Path(stage_def.get("prompt", f"prompts/{name}/default.md")).stem
+            label = _node_label(name.title(), impl)
+            lines.append(f'    {name}["{label}"]')
+            chain_ids.append(name)
+            class_assignments.append(f"    class {name} pending")
 
     if len(chain_ids) > 1:
         lines.append("    " + " --> ".join(chain_ids))

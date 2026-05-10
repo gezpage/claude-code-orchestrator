@@ -1,6 +1,7 @@
 # Stage executor; invokes Claude via CLI, extracts the SIGNAL_JSON sentinel, and validates stage output.
 import json
 import subprocess
+import sys
 from pathlib import Path
 
 from orchestrator import renderer, signal as signal_mod, validator
@@ -92,6 +93,45 @@ def run_stage(
         v = json.dumps(value) if isinstance(value, (dict, list)) else str(value)
         logger.log(stage, "INFO", f"  {key}: {v}")
     return sig
+
+
+def run_interactive_stage(
+    stage: str,
+    prompt_path: str | None,
+    variables: dict,
+    run_folder,
+    artifact_path,
+    docs_root: str,
+    project: str,
+    project_log_path: str,
+) -> dict:
+    """Launch an interactive Claude session for a stage that requires human participation.
+
+    Unlike run_stage(), this does not use --bare or --dangerously-skip-permissions.
+    Completion is determined by the existence of artifact_path after the session exits.
+    """
+    run_folder = Path(run_folder)
+    artifact_path = Path(artifact_path)
+    logger = OrchestratorLogger(run_folder, project_log_path)
+    logger.log(stage, "INFO", f"interactive stage {stage} dispatched")
+
+    cmd = ["claude"]
+    if prompt_path is not None:
+        implementation = Path(prompt_path).stem
+        rendered = renderer.render_prompt(stage, implementation, variables, docs_root, project)
+        output_dir = run_folder / "stages"
+        output_dir.mkdir(parents=True, exist_ok=True)
+        (output_dir / f"{stage}-prompt.md").write_text(rendered)
+        cmd = ["claude", rendered]
+
+    subprocess.run(cmd, stdin=sys.stdin, stdout=sys.stdout, stderr=sys.stderr)
+
+    artifact_key = artifact_path.stem.replace("-", "_")
+    if artifact_path.exists():
+        logger.log(stage, "INFO", f"interactive stage {stage} completed: artifact found")
+        return {"stage": stage, "status": "passed", artifact_key: str(artifact_path)}
+    logger.log(stage, "WARN", f"interactive stage {stage} incomplete: {artifact_path.name} not created")
+    return {"stage": stage, "status": "blocked", "message": f"Artifact not created: {artifact_path.name}"}
 
 
 if __name__ == "__main__":

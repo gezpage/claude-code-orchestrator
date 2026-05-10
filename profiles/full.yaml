@@ -4,6 +4,8 @@ stages:
     prompt: prompts/discovery/default.md
   - stage: alignment
     mode: interactive
+    artifact: alignment-log.md
+    prompt: prompts/alignment/interactive.md
   - stage: specification
     prompt: prompts/specification/default.md
   - stage: decomposition
