@@ -10,14 +10,14 @@
       "type": "array",
       "items": {
         "type": "object",
+        "required": ["name", "prompt_file", "focus"],
         "properties": {
           "name": {"type": "string"},
-          "summary": {"type": "string"},
-          "findings_file": {"type": "string"}
+          "prompt_file": {"type": "string"},
+          "focus": {"type": "string"}
         }
       }
-    },
-    "findings_files": {"type": "array", "items": {"type": "string"}}
+    }
   },
   "additionalProperties": true
 }

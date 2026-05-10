@@ -44,12 +44,17 @@ def run_stage(
     project_log_path: str,
     output_suffix: str = "",
     cwd: str | None = None,
+    prompt_file: str | None = None,
+    schema_name: str | None = None,
 ) -> dict:
     run_folder = Path(run_folder)
     logger = OrchestratorLogger(run_folder, project_log_path)
 
     logger.log(stage, "INFO", f"stage {stage} dispatched (implementation={implementation})")
-    prompt = renderer.render_prompt(stage, implementation, variables, docs_root, project)
+    if prompt_file is not None:
+        prompt = Path(prompt_file).read_text()
+    else:
+        prompt = renderer.render_prompt(stage, implementation, variables, docs_root, project)
 
     output_dir = run_folder / "stages"
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -81,7 +86,7 @@ def run_stage(
 
     (output_dir / f"{stage}{tag}.md").write_text(_format_stage_output(stdout, sig))
 
-    validator.validate_output(stage, sig)
+    validator.validate_output(schema_name if schema_name else stage, sig)
     logger.log(stage, "INFO", f"stage {stage} completed with status={sig['status']}")
     for key, value in sig.items():
         v = json.dumps(value) if isinstance(value, (dict, list)) else str(value)

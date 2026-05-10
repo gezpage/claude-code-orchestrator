@@ -16,7 +16,11 @@ import orchestrator.review_cycle as review_cycle_mod
 
 def _output_summary(stage, signal):
     if stage == "discovery":
+        tracks = signal.get("tracks", [])
         n = len(signal.get("findings_files", []))
+        if tracks:
+            t = len(tracks)
+            return f"{t} track{'s' if t != 1 else ''}, {n} finding{'s' if n != 1 else ''}"
         return f"{n} research file{'s' if n != 1 else ''}" if n else None
     if stage == "specification":
         parts = []
@@ -217,6 +221,102 @@ def run_pipeline(docs_root, project, feature_path, branch, profile_name, resume=
             docs_root, project, run_folder, project_config,
         )
 
+        if stage_name == "discovery":
+            logger.log(stage_name, "INFO", "stage starting")
+            update_plan_md(run_folder, stage_name, "in_progress")
+            impl = _impl_from_prompt(stage_def.get("prompt", "prompts/discovery/planning.md"))
+            t0 = time.monotonic()
+
+            # Phase 1: planning agent decides tracks and writes track prompt files
+            planning_sig = run_stage(
+                "discovery", impl, variables, run_folder, docs_root, project, project_log_path,
+                output_suffix="planning", schema_name="discovery_planning",
+            )
+            if planning_sig.get("status") != "passed":
+                st = state_mod.load_state(run_folder)
+                st["blocked_at"] = stage_name
+                state_mod.save_state(run_folder, st)
+                update_plan_md(run_folder, stage_name, planning_sig["status"])
+                logger.log(stage_name, "ERROR", f"pipeline stopped: discovery planning {planning_sig['status']}: {planning_sig.get('message', '')}")
+                sys.exit(1)
+
+            tracks = planning_sig.get("tracks", [])
+            if not tracks:
+                st = state_mod.load_state(run_folder)
+                st["blocked_at"] = stage_name
+                state_mod.save_state(run_folder, st)
+                update_plan_md(run_folder, stage_name, "blocked")
+                logger.log(stage_name, "ERROR", "pipeline stopped: discovery planning produced no tracks")
+                sys.exit(1)
+
+            logger.log(stage_name, "INFO", f"planning complete: {len(tracks)} track{'s' if len(tracks) != 1 else ''}")
+
+            # Phase 2: run all tracks in parallel
+            if len(tracks) == 1:
+                track = tracks[0]
+                sig = run_stage(
+                    "discovery", "pregenerated", dict(variables),
+                    run_folder, docs_root, project, project_log_path,
+                    output_suffix=track["name"],
+                    prompt_file=track["prompt_file"],
+                    schema_name="discovery_track",
+                )
+                track_results = {track["name"]: sig}
+            else:
+                logger.log(stage_name, "INFO", f"dispatching {len(tracks)} tracks in parallel")
+                futures: dict[concurrent.futures.Future, str] = {}
+                with concurrent.futures.ThreadPoolExecutor(max_workers=len(tracks)) as executor:
+                    for track in tracks:
+                        fut = executor.submit(
+                            run_stage,
+                            "discovery", "pregenerated", dict(variables),
+                            run_folder, docs_root, project, project_log_path,
+                            track["name"],        # output_suffix
+                            None,                 # cwd
+                            track["prompt_file"], # prompt_file
+                            "discovery_track",    # schema_name
+                        )
+                        futures[fut] = track["name"]
+                track_results = {name: fut.result() for fut, name in futures.items()}
+
+            failed_tracks = [n for n, s in track_results.items() if s.get("status") != "passed"]
+            if failed_tracks:
+                for name in failed_tracks:
+                    s = track_results[name]
+                    logger.log(stage_name, "ERROR", f"discovery track '{name}' {s.get('status')}: {s.get('message', '')}")
+                st = state_mod.load_state(run_folder)
+                st["blocked_at"] = stage_name
+                state_mod.save_state(run_folder, st)
+                update_plan_md(run_folder, stage_name, "blocked")
+                sys.exit(1)
+
+            # Phase 3: aggregate
+            elapsed = time.monotonic() - t0
+            aggregated_tracks = []
+            findings_files = []
+            for track in tracks:
+                track_sig = track_results[track["name"]]
+                ff = track_sig.get("findings_file", "")
+                aggregated_tracks.append({
+                    "name": track["name"],
+                    "summary": track_sig.get("summary", ""),
+                    "findings_file": ff,
+                })
+                if ff:
+                    findings_files.append(ff)
+
+            discovery_sig = {
+                "stage": "discovery",
+                "status": "passed",
+                "tracks": aggregated_tracks,
+                "findings_files": findings_files,
+            }
+            signals[stage_name] = discovery_sig
+            state_mod.update_stage_status(run_folder, stage_name, "passed")
+            state_mod.save_stage_signal(run_folder, stage_name, discovery_sig)
+            update_plan_md(run_folder, stage_name, "passed", elapsed_secs=elapsed, output_summary=_output_summary(stage_name, discovery_sig))
+            continue
+
         if stage_name == "implementation":
             logger.log(stage_name, "INFO", "stage starting")
             _create_branch(branch, variables["repo_root"], logger)
@@ -232,7 +332,7 @@ def run_pipeline(docs_root, project, feature_path, branch, profile_name, resume=
             # Flatten groups to get canonical ordered list (for sub_id assignment)
             all_slices = [sf for group in slice_groups for sf in group]
             slice_to_id = {sf: f"impl_{i+1}" for i, sf in enumerate(all_slices)}
-            expand_impl_nodes(run_folder, all_slices)
+            expand_impl_nodes(run_folder, all_slices, slice_groups)
             impl = _impl_from_prompt(stage_def.get("prompt", "prompts/implementation/default.md"))
             all_commits = []
             for group in slice_groups:

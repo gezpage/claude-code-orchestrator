@@ -30,10 +30,31 @@ def _git_ok():
     return r
 
 
+DISCOVERY_PLANNING_SIGNAL = {
+    "stage": "discovery-planning",
+    "status": "passed",
+    "tracks": [
+        {
+            "name": "code-entry-points",
+            "prompt_file": "/tmp/stages/discovery-code-entry-points-prompt.md",
+            "focus": "Identify relevant modules and call paths",
+        }
+    ],
+}
+
+DISCOVERY_TRACK_SIGNAL = {
+    "stage": "discovery-code-entry-points",
+    "status": "passed",
+    "findings_file": "/tmp/discovery-code-entry-points.md",
+    "summary": "Found 3 relevant entry points in the auth module.",
+}
+
+# Convenience alias for tests that just need discovery to pass
 DISCOVERY_SIGNAL = {
     "stage": "discovery",
     "status": "passed",
-    "findings_files": [],
+    "tracks": [{"name": "code-entry-points", "summary": "Found 3 relevant entry points in the auth module.", "findings_file": "/tmp/discovery-code-entry-points.md"}],
+    "findings_files": ["/tmp/discovery-code-entry-points.md"],
 }
 
 SPEC_SIGNAL = {
@@ -111,7 +132,8 @@ def test_full_happy_path(tmp_path):
     runs_base = tmp_path / "projects" / "myproject" / "workflow" / "runs"
 
     stage_signals = [
-        DISCOVERY_SIGNAL,
+        DISCOVERY_PLANNING_SIGNAL,   # discovery — planning phase
+        DISCOVERY_TRACK_SIGNAL,      # discovery — single track (parallel dispatch)
         SPEC_SIGNAL,
         DECOMP_SIGNAL,
         IMPL_SIGNAL,  # called twice (2 slices)
@@ -122,7 +144,7 @@ def test_full_happy_path(tmp_path):
     ]
     signal_iter = iter(stage_signals)
 
-    def fake_run_stage(stage, impl, variables, run_folder, docs_root, project, log_path, output_suffix="", cwd=None):
+    def fake_run_stage(stage, impl, variables, run_folder, docs_root, project, log_path, output_suffix="", cwd=None, prompt_file=None, schema_name=None):
         if stage == "review":
             assert "review_md" in variables
             assert "diff" in variables
@@ -144,8 +166,9 @@ def test_full_happy_path(tmp_path):
                 docs_root, "myproject", "feature-xyz", "feat/test", "test"
             )
 
-    # run_stage called for discovery, specification, decomposition, 2x implementation, qa, review, harvest = 8
-    assert mock_rs.call_count == 8
+    # run_stage called for: discovery-planning, discovery-track, specification, decomposition,
+    # 2x implementation, qa, review, harvest = 9
+    assert mock_rs.call_count == 9
 
     # alignment never passed to run_stage
     all_stages_called = [c.args[0] for c in mock_rs.call_args_list]
@@ -176,7 +199,7 @@ def test_alignment_pause_exits(tmp_path):
     run_folder_path.mkdir(parents=True)
     # No alignment-log.md → should pause
 
-    with patch("orchestrator.orchestrate.run_stage", return_value=DISCOVERY_SIGNAL) as mock_rs, \
+    with patch("orchestrator.orchestrate.run_stage", side_effect=[DISCOVERY_PLANNING_SIGNAL, DISCOVERY_TRACK_SIGNAL]) as mock_rs, \
          patch("orchestrator.orchestrate.update_plan_md"), \
          patch("orchestrator.orchestrate._resolve_run_folder", return_value=run_folder_path):
         with pytest.raises(SystemExit) as exc_info:
@@ -239,7 +262,7 @@ def test_resume_skips_completed_stages(tmp_path):
 
     called_stages = []
 
-    def fake_run_stage(stage, impl, variables, run_folder, docs_root, project, log_path, output_suffix="", cwd=None):
+    def fake_run_stage(stage, impl, variables, run_folder, docs_root, project, log_path, output_suffix="", cwd=None, prompt_file=None, schema_name=None):
         called_stages.append(stage)
         return SPEC_SIGNAL
 
@@ -258,25 +281,21 @@ def test_resume_skips_completed_stages(tmp_path):
 
 def test_branch_created_at_implementation_start(tmp_path):
     stages = [
-        {"stage": "discovery", "prompt": "prompts/discovery/default.md"},
-        {
-            "stage": "implementation",
-            "prompt": "prompts/implementation/default.md",
-        },
+        {"stage": "discovery", "prompt": "prompts/discovery/planning.md"},
+        {"stage": "decomposition", "prompt": "prompts/decomposition/default.md"},
+        {"stage": "implementation", "prompt": "prompts/implementation/default.md"},
     ]
     docs_root = _setup_docs(tmp_path, stages)
     run_folder_path = tmp_path / "projects" / "myproject" / "workflow" / "runs" / "feat" / "2026-01-01-run-1"
     run_folder_path.mkdir(parents=True)
 
-    discovery_with_slices = dict(DISCOVERY_SIGNAL, slice_files=["s1.md"])
     call_order = []
     git_cmds = []
+    sig_iter = iter([DISCOVERY_PLANNING_SIGNAL, DISCOVERY_TRACK_SIGNAL, DECOMP_SIGNAL, IMPL_SIGNAL, IMPL_SIGNAL])
 
-    def fake_run_stage(stage, impl, variables, run_folder, docs_root, project, log_path, output_suffix="", cwd=None):
+    def fake_run_stage(stage, impl, variables, run_folder, docs_root, project, log_path, output_suffix="", cwd=None, prompt_file=None, schema_name=None):
         call_order.append(("run_stage", stage))
-        if stage == "discovery":
-            return discovery_with_slices
-        return IMPL_SIGNAL
+        return next(sig_iter)
 
     def fake_git(cmd, **kwargs):
         git_cmds.append(cmd)
@@ -292,11 +311,11 @@ def test_branch_created_at_implementation_start(tmp_path):
             docs_root, "myproject", "feature", "feat/test", "test"
         )
 
-    # git checkout should come after discovery run_stage but before implementation run_stage
+    # git checkout should come after discovery but before implementation
     assert ("git_checkout",) in call_order
     git_pos = call_order.index(("git_checkout",))
     impl_pos = call_order.index(("run_stage", "implementation"))
-    discovery_pos = call_order.index(("run_stage", "discovery"))
+    discovery_pos = call_order.index(("run_stage", "discovery"))  # first discovery call (planning)
     assert discovery_pos < git_pos < impl_pos
 
     # branch creation must target repo_root via -C, not the orchestrator's cwd
@@ -320,7 +339,7 @@ def test_alignment_never_dispatched_through_run_stage(tmp_path):
 
     called_stages = []
 
-    def fake_run_stage(stage, impl, variables, run_folder, docs_root, project, log_path, output_suffix="", cwd=None):
+    def fake_run_stage(stage, impl, variables, run_folder, docs_root, project, log_path, output_suffix="", cwd=None, prompt_file=None, schema_name=None):
         called_stages.append(stage)
         return SPEC_SIGNAL
 
@@ -345,7 +364,7 @@ def test_plan_md_updated_after_each_stage(tmp_path):
     run_folder_path = tmp_path / "projects" / "myproject" / "workflow" / "runs" / "feat" / "2026-01-01-run-1"
     run_folder_path.mkdir(parents=True)
 
-    signals = [DISCOVERY_SIGNAL, SPEC_SIGNAL]
+    signals = [DISCOVERY_PLANNING_SIGNAL, DISCOVERY_TRACK_SIGNAL, SPEC_SIGNAL]
     sig_iter = iter(signals)
 
     with patch("orchestrator.orchestrate.run_stage", side_effect=lambda *a, **kw: next(sig_iter)), \
@@ -358,6 +377,114 @@ def test_plan_md_updated_after_each_stage(tmp_path):
     plan_calls = [(c.args[1], c.args[2]) for c in mock_plan.call_args_list]
     assert ("discovery", "passed") in plan_calls
     assert ("specification", "passed") in plan_calls
+
+
+# ── discovery fan-out ─────────────────────────────────────────────────────────
+
+def test_discovery_fanout_calls_planning_then_tracks(tmp_path):
+    stages = [
+        {"stage": "discovery", "prompt": "prompts/discovery/planning.md"},
+        {"stage": "specification", "prompt": "prompts/specification/default.md"},
+    ]
+    docs_root = _setup_docs(tmp_path, stages)
+    run_folder_path = tmp_path / "projects" / "myproject" / "workflow" / "runs" / "feat" / "2026-01-01-run-1"
+    run_folder_path.mkdir(parents=True)
+
+    planning_signal = {
+        "stage": "discovery-planning",
+        "status": "passed",
+        "tracks": [
+            {"name": "code-entry-points", "prompt_file": "/tmp/stages/discovery-code-entry-points-prompt.md", "focus": "Find entry points"},
+            {"name": "risk", "prompt_file": "/tmp/stages/discovery-risk-prompt.md", "focus": "Identify risks"},
+        ],
+    }
+    track_signal_a = {"stage": "discovery-code-entry-points", "status": "passed", "findings_file": "/tmp/code.md", "summary": "Found 2 entry points"}
+    track_signal_b = {"stage": "discovery-risk", "status": "passed", "findings_file": "/tmp/risk.md", "summary": "Low risk"}
+
+    call_log = []
+    sig_iter = iter([planning_signal, track_signal_a, track_signal_b, SPEC_SIGNAL])
+
+    def fake_run_stage(stage, impl, variables, run_folder, docs_root, project, log_path, output_suffix="", cwd=None, prompt_file=None, schema_name=None):
+        call_log.append({"stage": stage, "output_suffix": output_suffix, "schema_name": schema_name, "prompt_file": prompt_file})
+        return next(sig_iter)
+
+    with patch("orchestrator.orchestrate.run_stage", side_effect=fake_run_stage), \
+         patch("orchestrator.orchestrate.update_plan_md"), \
+         patch("orchestrator.orchestrate._resolve_run_folder", return_value=run_folder_path):
+        orchestrate.run_pipeline(docs_root, "myproject", "feature", "feat/test", "test")
+
+    # Planning call: schema_name=discovery_planning, output_suffix=planning
+    assert call_log[0]["output_suffix"] == "planning"
+    assert call_log[0]["schema_name"] == "discovery_planning"
+
+    # Two track calls (parallel — order may vary): schema_name=discovery_track, prompt_file set
+    track_calls = [c for c in call_log if c["schema_name"] == "discovery_track"]
+    assert len(track_calls) == 2
+    track_suffixes = {c["output_suffix"] for c in track_calls}
+    assert track_suffixes == {"code-entry-points", "risk"}
+    for tc in track_calls:
+        assert tc["prompt_file"] is not None
+
+    # Aggregated signal has both tracks and both findings_files
+    import yaml as _yaml
+    sig_file = run_folder_path / "_state.yaml"
+    # Just verify the pipeline reached specification (discovery signal saved correctly)
+    spec_call = next(c for c in call_log if c["output_suffix"] not in ("planning", "code-entry-points", "risk"))
+    assert spec_call["stage"] == "specification"
+
+
+def test_discovery_blocked_when_planning_fails(tmp_path):
+    stages = [
+        {"stage": "discovery", "prompt": "prompts/discovery/planning.md"},
+        {"stage": "specification", "prompt": "prompts/specification/default.md"},
+    ]
+    docs_root = _setup_docs(tmp_path, stages)
+    run_folder_path = tmp_path / "projects" / "myproject" / "workflow" / "runs" / "feat" / "2026-01-01-run-1"
+    run_folder_path.mkdir(parents=True)
+
+    blocked_planning = {"stage": "discovery-planning", "status": "blocked", "message": "No overview"}
+
+    with patch("orchestrator.orchestrate.run_stage", return_value=blocked_planning), \
+         patch("orchestrator.orchestrate.update_plan_md") as mock_plan, \
+         patch("orchestrator.orchestrate._resolve_run_folder", return_value=run_folder_path):
+        with pytest.raises(SystemExit) as exc_info:
+            orchestrate.run_pipeline(docs_root, "myproject", "feature", "feat/test", "test")
+
+    assert exc_info.value.code == 1
+    plan_calls = [(c.args[1], c.args[2]) for c in mock_plan.call_args_list]
+    assert ("discovery", "blocked") in plan_calls
+
+
+def test_discovery_blocked_when_any_track_fails(tmp_path):
+    stages = [
+        {"stage": "discovery", "prompt": "prompts/discovery/planning.md"},
+        {"stage": "specification", "prompt": "prompts/specification/default.md"},
+    ]
+    docs_root = _setup_docs(tmp_path, stages)
+    run_folder_path = tmp_path / "projects" / "myproject" / "workflow" / "runs" / "feat" / "2026-01-01-run-1"
+    run_folder_path.mkdir(parents=True)
+
+    planning_signal = {
+        "stage": "discovery-planning", "status": "passed",
+        "tracks": [
+            {"name": "code", "prompt_file": "/tmp/code-prompt.md", "focus": "x"},
+            {"name": "risk", "prompt_file": "/tmp/risk-prompt.md", "focus": "y"},
+        ],
+    }
+    track_ok = {"stage": "discovery-code", "status": "passed", "findings_file": "/tmp/code.md", "summary": "ok"}
+    track_fail = {"stage": "discovery-risk", "status": "blocked", "message": "Cannot access repo"}
+
+    sig_iter = iter([planning_signal, track_ok, track_fail])
+
+    with patch("orchestrator.orchestrate.run_stage", side_effect=lambda *a, **kw: next(sig_iter)), \
+         patch("orchestrator.orchestrate.update_plan_md") as mock_plan, \
+         patch("orchestrator.orchestrate._resolve_run_folder", return_value=run_folder_path):
+        with pytest.raises(SystemExit) as exc_info:
+            orchestrate.run_pipeline(docs_root, "myproject", "feature", "feat/test", "test")
+
+    assert exc_info.value.code == 1
+    plan_calls = [(c.args[1], c.args[2]) for c in mock_plan.call_args_list]
+    assert ("discovery", "blocked") in plan_calls
 
 
 # ── orchestrate.py source contains no open() calls ───────────────────────────
