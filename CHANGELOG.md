@@ -8,6 +8,7 @@ Format: [Unreleased] at the top, dated releases below, newest first.
 ## [Unreleased]
 
 ### Fixed
+- Pipeline now fails immediately with a clear message when `--feature-path` does not resolve to a directory containing `overview.md`, rather than dispatching a planning agent that silently improvises and emits a non-conforming signal. CLI help text updated to clarify that `--feature-path` is a directory, not a file. "No tracks" error message improved to hint at the path issue.
 - Harvest stage crash: `review_md` (path to `review.md` in the run folder) is now seeded in `_build_variables` as a base variable derived from `run_folder`, so it is always available regardless of whether the run was freshly started or resumed from an older `_state.yaml` that predates the review-signal field.
 
 ### Added

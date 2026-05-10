@@ -18,7 +18,7 @@ def main():
 @main.command()
 @click.option("--docs-root", required=True, help="Path to the team-hub docs root.")
 @click.option("--project", required=True, help="Project name under docs-root/projects/.")
-@click.option("--feature-path", required=True, help="Docs-relative path to the feature file.")
+@click.option("--feature-path", required=True, help="Docs-relative path to the feature directory (must contain overview.md).")
 @click.option("--branch", required=True, help="Git branch name to create for implementation.")
 @click.option("--profile", default="full", show_default=True, help="Profile YAML name.")
 def run(docs_root, project, feature_path, branch, profile):

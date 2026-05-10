@@ -149,6 +149,14 @@ def run_pipeline(docs_root, project, feature_path, branch, profile_name, resume=
     run_folder = Path(_resolve_run_folder(docs_root, project, feature_path, resume))
     run_folder.mkdir(parents=True, exist_ok=True)
 
+    overview_path = Path(docs_root) / feature_path / "overview.md"
+    if not overview_path.exists():
+        sys.exit(
+            f"[orchestrator] [ERROR] overview.md not found at {overview_path}\n"
+            f"  --feature-path must be a docs-relative directory containing overview.md\n"
+            f"  Example: projects/{project}/features/my-feature"
+        )
+
     st = state_mod.load_state(run_folder)
     completed = {
         stage for stage, status in st.get("stages", {}).items() if status == "passed"
@@ -248,7 +256,7 @@ def run_pipeline(docs_root, project, feature_path, branch, profile_name, resume=
                 st["blocked_at"] = stage_name
                 state_mod.save_state(run_folder, st)
                 update_plan_md(run_folder, stage_name, "blocked")
-                logger.log(stage_name, "ERROR", "pipeline stopped: discovery planning produced no tracks")
+                logger.log(stage_name, "ERROR", "pipeline stopped: discovery planning produced no tracks — verify --feature-path is a directory containing overview.md")
                 sys.exit(1)
 
             logger.log(stage_name, "INFO", f"planning complete: {len(tracks)} track{'s' if len(tracks) != 1 else ''}")

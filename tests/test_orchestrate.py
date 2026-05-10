@@ -8,7 +8,7 @@ from orchestrator import orchestrate
 
 # ── helpers ──────────────────────────────────────────────────────────────────
 
-def _setup_docs(tmp_path, stages, profile_name="test"):
+def _setup_docs(tmp_path, stages, profile_name="test", feature_path="feature"):
     project_dir = tmp_path / "projects" / "myproject"
     project_dir.mkdir(parents=True)
     (project_dir / "project.yaml").write_text(
@@ -19,6 +19,9 @@ def _setup_docs(tmp_path, stages, profile_name="test"):
     (profiles / f"{profile_name}.yaml").write_text(
         yaml.dump({"name": profile_name, "stages": stages})
     )
+    feature_dir = tmp_path / feature_path
+    feature_dir.mkdir(parents=True, exist_ok=True)
+    (feature_dir / "overview.md").write_text("# Feature Overview\n")
     return str(tmp_path)
 
 
@@ -126,7 +129,7 @@ def test_full_happy_path(tmp_path):
         },
         {"stage": "harvest", "prompt": "prompts/harvest/default.md"},
     ]
-    docs_root = _setup_docs(tmp_path, stages)
+    docs_root = _setup_docs(tmp_path, stages, feature_path="feature-xyz")
 
     # Create alignment-log.md so alignment auto-skips (simulates resumed run)
     runs_base = tmp_path / "projects" / "myproject" / "workflow" / "runs"
