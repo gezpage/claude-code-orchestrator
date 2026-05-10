@@ -130,6 +130,8 @@ def run_stage(
         completion_msg += f" — {summary}"
     logger.log(stage, "INFO", completion_msg)
     for key, value in sig.items():
+        if key == "stage":
+            continue
         v = json.dumps(value) if isinstance(value, (dict, list)) else str(value)
         logger.log(stage, "DEBUG", f"signal.{key}={v}")
     return sig
