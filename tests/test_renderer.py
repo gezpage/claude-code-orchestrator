@@ -1,5 +1,6 @@
 import pytest
 from pathlib import Path
+from unittest.mock import patch
 from orchestrator.renderer import render_prompt
 
 
@@ -54,3 +55,59 @@ def test_extension_appended_after_core(tmp_path):
     conventions_pos = result.index("## Project conventions")
     run_pos = result.index("/tmp/run")
     assert run_pos < conventions_pos
+
+
+def _make_skill(skills_dir: Path, identifier: str, body: str) -> None:
+    d = skills_dir / f"harsh-{identifier}-engineering-standards"
+    d.mkdir(parents=True)
+    (d / "SKILL.md").write_text(f"---\nname: harsh-{identifier}-engineering-standards\n---\n\n{body}")
+
+
+def test_standards_none_produces_no_block(tmp_path):
+    result = render_prompt("discovery", "default", VARS, str(tmp_path), "myproject", standards=None)
+    assert "## Engineering Standards" not in result
+
+
+def test_standards_injected_when_provided(tmp_path):
+    skills_dir = tmp_path / ".claude" / "skills"
+    skills_dir.mkdir(parents=True)
+    _make_skill(skills_dir, "general", "# General Rules\nDo good work.\n")
+    _make_skill(skills_dir, "php", "# PHP Rules\nUse strict_types.\n")
+    with patch("orchestrator.standards._SKILLS_DIR", skills_dir):
+        result = render_prompt("discovery", "default", VARS, str(tmp_path), "myproject", standards=["php"])
+    assert "## Engineering Standards" in result
+    assert "General Rules" in result
+    assert "PHP Rules" in result
+
+
+def test_standards_block_before_project_conventions(tmp_path):
+    skills_dir = tmp_path / ".claude" / "skills"
+    skills_dir.mkdir(parents=True)
+    _make_skill(skills_dir, "general", "# General Rules\nDo good work.\n")
+    ext_dir = tmp_path / "projects" / "myproject" / "workflow" / "prompts"
+    ext_dir.mkdir(parents=True)
+    (ext_dir / "discovery.md").write_text("Project rule here.")
+    with patch("orchestrator.standards._SKILLS_DIR", skills_dir):
+        result = render_prompt("discovery", "default", VARS, str(tmp_path), "myproject", standards=[])
+    standards_pos = result.index("## Engineering Standards")
+    conventions_pos = result.index("## Project conventions")
+    assert standards_pos < conventions_pos
+
+
+def test_standards_empty_list_injects_only_general(tmp_path):
+    skills_dir = tmp_path / ".claude" / "skills"
+    skills_dir.mkdir(parents=True)
+    _make_skill(skills_dir, "general", "# General Rules\nDo good work.\n")
+    _make_skill(skills_dir, "php", "# PHP Rules\nUse strict_types.\n")
+    with patch("orchestrator.standards._SKILLS_DIR", skills_dir):
+        result = render_prompt("discovery", "default", VARS, str(tmp_path), "myproject", standards=[])
+    assert "General Rules" in result
+    assert "PHP Rules" not in result
+
+
+def test_standards_no_block_when_no_skills_available(tmp_path):
+    empty_skills_dir = tmp_path / ".claude" / "skills"
+    empty_skills_dir.mkdir(parents=True)
+    with patch("orchestrator.standards._SKILLS_DIR", empty_skills_dir):
+        result = render_prompt("discovery", "default", VARS, str(tmp_path), "myproject", standards=[])
+    assert "## Engineering Standards" not in result

@@ -78,6 +78,7 @@ def run_stage(
     cwd: str | None = None,
     prompt_file: str | None = None,
     schema_name: str | None = None,
+    standards: list[str] | None = None,
 ) -> dict:
     run_folder = Path(run_folder)
     logger = OrchestratorLogger(run_folder, project_log_path)
@@ -87,7 +88,7 @@ def run_stage(
     if prompt_file is not None:
         prompt = Path(prompt_file).read_text()
     else:
-        prompt = renderer.render_prompt(stage, implementation, variables, docs_root, project)
+        prompt = renderer.render_prompt(stage, implementation, variables, docs_root, project, standards=standards)
 
     output_dir = run_folder / stage
     output_dir.mkdir(parents=True, exist_ok=True)

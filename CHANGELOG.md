@@ -7,6 +7,9 @@ Format: [Unreleased] at the top, dated releases below, newest first.
 
 ## [Unreleased]
 
+### Added
+- Engineering standards injection: `orchestrator/standards.py` discovers `harsh-*-engineering-standards` skills from `.claude/skills/` and injects their content (frontmatter stripped) into stage prompts. The `general` standard is always included first; per-project standards are declared in `project.yaml` under a `standards:` list. Per-stage opt-in is controlled by `standards: true` in the profile YAML — added to `implementation` and `qa` in the built-in `full` profile. Six harsh-* skill symlinks added to `.claude/skills/` pointing to the docs repo.
+
 ### Changed
 - Run folder reorganized: every stage now writes its transcripts and artifacts into a dedicated subfolder named after the stage (e.g. `discovery/`, `alignment/`, `specification/`); only `_state.yaml`, `run.log`, and `plan.md` remain at the run root. The `stages/` flat directory and root-level `slices/`/`adrs/` directories are gone. The review artifact is renamed `review-log.md` to avoid collision with the stage transcript in the same folder. All prompt files, Python path construction, and tests updated accordingly.
 - Logging overhauled for clarity and scannability: stage column padded to 14 chars for alignment; "stage starting" logs removed (redundant before dispatch); per-field signal dump replaced with a single timed completion line including a human-readable summary derived from the signal; dispatch messages now include track/slice/implementation name rather than the stage name again; "already passed — skipping" demoted to DEBUG; WARN emitted when review requests changes; stage-level completion logs added for discovery and implementation (previously silent); review-cycle log messages clarified; signal fields preserved at DEBUG level for diagnostics.

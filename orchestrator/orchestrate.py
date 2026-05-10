@@ -158,6 +158,7 @@ def run_pipeline(docs_root, project, feature_path, branch, profile_name, resume=
 
     project_log_path = str(Path(docs_root) / "projects" / project)
     log_level = project_config.get("log_level", "DEBUG")
+    project_standards = project_config.get("standards", [])
 
     run_folder = Path(_resolve_run_folder(docs_root, project, feature_path, resume))
     run_folder.mkdir(parents=True, exist_ok=True)
@@ -342,6 +343,7 @@ def run_pipeline(docs_root, project, feature_path, branch, profile_name, resume=
             continue
 
         if stage_name == "implementation":
+            stage_standards = project_standards if stage_def.get("standards") else None
             _create_branch(branch, variables["repo_root"], logger)
             slice_files = []
             slice_groups = []
@@ -376,7 +378,7 @@ def run_pipeline(docs_root, project, feature_path, branch, profile_name, resume=
                     variables["slice_file"] = slice_file
                     update_plan_md(run_folder, sub_id, "in_progress")
                     t0 = time.monotonic()
-                    sig = run_stage(stage_name, impl, variables, run_folder, docs_root, project, project_log_path, output_suffix=sub_id, cwd=variables.get("repo_root"))
+                    sig = run_stage(stage_name, impl, variables, run_folder, docs_root, project, project_log_path, output_suffix=sub_id, cwd=variables.get("repo_root"), standards=stage_standards)
                     elapsed = time.monotonic() - t0
                     if sig.get("status") != "passed":
                         st = state_mod.load_state(run_folder)
@@ -405,6 +407,7 @@ def run_pipeline(docs_root, project, feature_path, branch, profile_name, resume=
                                 run_folder, docs_root, project, project_log_path,
                                 sub_id,
                                 cwd=variables.get("repo_root"),
+                                standards=stage_standards,
                             )
                             futures[fut] = (sub_id, slice_file)
                     elapsed = time.monotonic() - t0
@@ -496,7 +499,8 @@ def run_pipeline(docs_root, project, feature_path, branch, profile_name, resume=
         impl = _impl_from_prompt(stage_def.get("prompt", f"prompts/{stage_name}/default.md"))
         t0 = time.monotonic()
         stage_cwd = variables.get("repo_root") if stage_name == "qa" else None
-        sig = run_stage(stage_name, impl, variables, run_folder, docs_root, project, project_log_path, cwd=stage_cwd)
+        stage_standards = project_standards if stage_def.get("standards") else None
+        sig = run_stage(stage_name, impl, variables, run_folder, docs_root, project, project_log_path, cwd=stage_cwd, standards=stage_standards)
         elapsed = time.monotonic() - t0
         signals[stage_name] = sig
 

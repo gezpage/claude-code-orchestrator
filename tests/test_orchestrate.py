@@ -144,7 +144,7 @@ def test_full_happy_path(tmp_path):
     ]
     signal_iter = iter(stage_signals)
 
-    def fake_run_stage(stage, impl, variables, run_folder, docs_root, project, log_path, output_suffix="", cwd=None, prompt_file=None, schema_name=None):
+    def fake_run_stage(stage, impl, variables, run_folder, docs_root, project, log_path, output_suffix="", cwd=None, prompt_file=None, schema_name=None, standards=None):
         if stage == "review":
             assert "review_md" in variables
             assert "diff" in variables
@@ -267,7 +267,7 @@ def test_resume_skips_completed_stages(tmp_path):
 
     called_stages = []
 
-    def fake_run_stage(stage, impl, variables, run_folder, docs_root, project, log_path, output_suffix="", cwd=None, prompt_file=None, schema_name=None):
+    def fake_run_stage(stage, impl, variables, run_folder, docs_root, project, log_path, output_suffix="", cwd=None, prompt_file=None, schema_name=None, standards=None):
         called_stages.append(stage)
         return SPEC_SIGNAL
 
@@ -298,7 +298,7 @@ def test_branch_created_at_implementation_start(tmp_path):
     git_cmds = []
     sig_iter = iter([DISCOVERY_PLANNING_SIGNAL, DISCOVERY_TRACK_SIGNAL, DECOMP_SIGNAL, IMPL_SIGNAL, IMPL_SIGNAL])
 
-    def fake_run_stage(stage, impl, variables, run_folder, docs_root, project, log_path, output_suffix="", cwd=None, prompt_file=None, schema_name=None):
+    def fake_run_stage(stage, impl, variables, run_folder, docs_root, project, log_path, output_suffix="", cwd=None, prompt_file=None, schema_name=None, standards=None):
         call_order.append(("run_stage", stage))
         return next(sig_iter)
 
@@ -345,7 +345,7 @@ def test_interactive_stage_not_dispatched_through_run_stage(tmp_path):
 
     called_stages = []
 
-    def fake_run_stage(stage, impl, variables, run_folder, docs_root, project, log_path, output_suffix="", cwd=None, prompt_file=None, schema_name=None):
+    def fake_run_stage(stage, impl, variables, run_folder, docs_root, project, log_path, output_suffix="", cwd=None, prompt_file=None, schema_name=None, standards=None):
         called_stages.append(stage)
         return SPEC_SIGNAL
 
@@ -412,7 +412,7 @@ def test_discovery_fanout_calls_planning_then_tracks(tmp_path):
     call_log = []
     sig_iter = iter([planning_signal, track_signal_a, track_signal_b, SPEC_SIGNAL])
 
-    def fake_run_stage(stage, impl, variables, run_folder, docs_root, project, log_path, output_suffix="", cwd=None, prompt_file=None, schema_name=None):
+    def fake_run_stage(stage, impl, variables, run_folder, docs_root, project, log_path, output_suffix="", cwd=None, prompt_file=None, schema_name=None, standards=None):
         call_log.append({"stage": stage, "output_suffix": output_suffix, "schema_name": schema_name, "prompt_file": prompt_file})
         return next(sig_iter)
 
@@ -522,7 +522,7 @@ def test_implementation_filters_non_slice_files(tmp_path):
 
     called_with = []
 
-    def fake_run_stage(stage, impl, variables, run_folder, docs_root, project, log_path, output_suffix="", cwd=None, prompt_file=None, schema_name=None):
+    def fake_run_stage(stage, impl, variables, run_folder, docs_root, project, log_path, output_suffix="", cwd=None, prompt_file=None, schema_name=None, standards=None):
         called_with.append(variables.get("slice_file"))
         return IMPL_SIGNAL
 
@@ -552,7 +552,7 @@ def test_review_md_path_uses_stage_subfolder(tmp_path):
 
     captured_vars = {}
 
-    def fake_run_stage(stage, impl, variables, run_folder, docs_root, project, log_path, output_suffix="", cwd=None, prompt_file=None, schema_name=None):
+    def fake_run_stage(stage, impl, variables, run_folder, docs_root, project, log_path, output_suffix="", cwd=None, prompt_file=None, schema_name=None, standards=None):
         captured_vars.update(variables)
         return REVIEW_ARCH_SIGNAL
 

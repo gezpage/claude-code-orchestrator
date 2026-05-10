@@ -11,8 +11,10 @@ stages:
     prompt: prompts/decomposition/default.md
   - stage: implementation
     prompt: prompts/implementation/default.md
+    standards: true
   - stage: qa
     prompt: prompts/qa/default.md
+    standards: true
   - stage: review
     prompts:
       architecture: prompts/review/architecture.md
