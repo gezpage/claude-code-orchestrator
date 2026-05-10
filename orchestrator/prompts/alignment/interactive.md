@@ -9,7 +9,9 @@ The pipeline has launched this interactive session to conduct alignment before s
 
 Work through the following with the developer:
 
-1. Review the Discovery findings: `{{ run_folder }}/findings.md`
+1. Review the Discovery findings:
+{% for f in findings_files %}   - `{{ f }}`
+{% endfor %}
 2. Align on scope boundaries — what is explicitly in and out of scope
 3. Resolve key design decisions that will shape the specification
 4. Identify risks and agree on mitigations

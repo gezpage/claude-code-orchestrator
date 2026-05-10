@@ -6,7 +6,9 @@ You are an alignment agent. Your task is to produce an alignment log without int
 
 ## Instructions
 
-1. Read `{{ run_folder }}/findings.md` from the Discovery stage.
+1. Read the following Discovery findings files:
+{% for f in findings_files %}   - `{{ f }}`
+{% endfor %}
 2. For each ambiguity or open question identified, propose a resolution with reasoning.
 3. Identify the key design decisions required and document a recommended stance on each.
 4. Flag any decision that carries significant risk — mark it clearly so the developer can review.
