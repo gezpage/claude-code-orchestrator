@@ -8,7 +8,7 @@ You are a discovery planning agent. Analyse the feature request and design a set
 
 ## Instructions
 
-1. Read the feature overview at `{{ feature_path }}/overview.md`. Fail if absent.
+1. Read the feature overview at `{{ docs_root }}/{{ feature_path }}/overview.md`. Fail if absent.
 2. Decide which tracks to run. Suggested tracks (use what fits, invent others as needed, 2–6 total):
    - `code-entry-points` — relevant modules, call paths, and touch points
    - `product-requirements` — acceptance criteria, edge cases, constraints
@@ -30,7 +30,7 @@ Each prompt must be bullet-point instructions only — no prose paragraphs. Use 
 - [one bullet per specific question or area]
 
 ## Instructions
-- Read `{{ feature_path }}/overview.md` for feature context
+- Read `{{ docs_root }}/{{ feature_path }}/overview.md` for feature context
 - [targeted read instructions — specific files, directories, or patterns]
 - Write findings to `{{ run_folder }}/discovery-{name}.md`
 - Bullet points only. Max 3 sentences per finding. No prose.

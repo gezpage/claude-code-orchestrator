@@ -14,6 +14,8 @@ Format: [Unreleased] at the top, dated releases below, newest first.
 
 ### Fixed
 - Alignment prompt templates now iterate over the `findings_files` array instead of referencing a hardcoded `findings.md` path; the hardcoded path only exists in single-shot discovery runs, not multi-track planning runs.
+- Discovery planning prompt now renders the feature overview read path as an absolute path (`docs_root/feature_path/overview.md`); previously used a relative path that stage agents (no MCP access) could not resolve with the Read tool.
+- QA prompt now lists individual `slice_files` paths (from the decomposition signal) instead of instructing the agent to read a directory path, which the Read tool does not support.
 - Implementation stage now filters non-slice artifacts (e.g. `dependency-graph.md`) from `slice_files` before dispatch; decomposition prompt updated to explicitly prohibit including the dependency graph in `slice_files`.
 - Discovery planning phase now hardcodes `"planning"` as the prompt implementation instead of deriving it from the profile's `prompt` field; a profile specifying `prompts/discovery/default.md` previously caused the planning phase to run the single-shot discovery prompt, producing a `findings_files` signal instead of the required `tracks` signal.
 - Pipeline now fails immediately with a clear message when `--feature-path` does not resolve to a directory containing `overview.md`, rather than dispatching a planning agent that silently improvises and emits a non-conforming signal. CLI help text updated to clarify that `--feature-path` is a directory, not a file. "No tracks" error message improved to hint at the path issue.
