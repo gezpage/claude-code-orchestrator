@@ -234,12 +234,11 @@ def run_pipeline(docs_root, project, feature_path, branch, profile_name, resume=
         if stage_name == "discovery":
             logger.log(stage_name, "INFO", "stage starting")
             update_plan_md(run_folder, stage_name, "in_progress")
-            impl = _impl_from_prompt(stage_def.get("prompt", "prompts/discovery/planning.md"))
             t0 = time.monotonic()
 
-            # Phase 1: planning agent decides tracks and writes track prompt files
+            # Phase 1: planning agent always uses planning.md — profile prompt does not apply here
             planning_sig = run_stage(
-                "discovery", impl, variables, run_folder, docs_root, project, project_log_path,
+                "discovery", "planning", variables, run_folder, docs_root, project, project_log_path,
                 output_suffix="planning", schema_name="discovery_planning",
             )
             if planning_sig.get("status") != "passed":
