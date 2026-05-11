@@ -154,6 +154,15 @@ def run_pipeline(docs_root, project, feature_path, branch, profile_name, resume=
     if not Path(project_config["repo-root"]).exists():
         print(f"ERROR: project.yaml repo-root does not exist: {project_config['repo-root']}")
         sys.exit(1)
+    result = subprocess.run(
+        ["git", "-C", project_config["repo-root"], "rev-parse", "--git-dir"],
+        capture_output=True,
+    )
+    if result.returncode != 0:
+        sys.exit(
+            f"[orchestrator] [ERROR] repo-root is not a git repository: {project_config['repo-root']}\n"
+            f"  Ensure the path in project.yaml 'repo-root' points to the root of a git repository."
+        )
     profile = _load_profile(profile_name)
 
     project_log_path = str(Path(docs_root) / "projects" / project)

@@ -17,6 +17,7 @@ Format: [Unreleased] at the top, dated releases below, newest first.
 - `review_cycle.run()` now calls `plan_mod.add_fix_cycle_node` before each fix stage and `plan_mod.update_plan_md` after the fix and each re-review, with elapsed timing and verdict reflected in the diagram.
 
 ### Fixed
+- Pre-flight validation now checks that `repo-root` is a git repository (via `git rev-parse --git-dir`) immediately after verifying the path exists, so misconfigured projects fail fast before any stage is dispatched instead of surfacing a cryptic git error mid-pipeline.
 - `resume` no longer requires `blocked_at` in state; runs interrupted without an explicit stage failure (e.g. process killed mid-pipeline) can now be resumed using the completed-stages list that `run_pipeline` already skips correctly.
 - Stage response files now written as `{stage}{tag}-output.md` instead of `{stage}{tag}.md`, preventing the agent's stdout from overwriting artifact files the stage writes to the same path (e.g. `discovery-code-entry-points.md`).
 - `plan.md` "Orchestration Flow" is now a markdown `##` heading before the mermaid fence, not a mermaid `title:` directive.

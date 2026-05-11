@@ -206,6 +206,7 @@ def test_alignment_pause_exits(tmp_path):
     with patch("orchestrator.orchestrate.run_stage", side_effect=[DISCOVERY_PLANNING_SIGNAL, DISCOVERY_TRACK_SIGNAL]) as mock_rs, \
          patch("orchestrator.orchestrate.run_interactive_stage", return_value=blocked_signal), \
          patch("orchestrator.orchestrate.update_plan_md"), \
+         patch("orchestrator.orchestrate.subprocess.run", return_value=_git_ok()), \
          patch("orchestrator.orchestrate._resolve_run_folder", return_value=run_folder_path):
         with pytest.raises(SystemExit) as exc_info:
             orchestrate.run_pipeline(
@@ -235,6 +236,7 @@ def test_blocked_stage_exits(tmp_path):
 
     with patch("orchestrator.orchestrate.run_stage", return_value=BLOCKED_SIGNAL), \
          patch("orchestrator.orchestrate.update_plan_md") as mock_plan, \
+         patch("orchestrator.orchestrate.subprocess.run", return_value=_git_ok()), \
          patch("orchestrator.orchestrate._resolve_run_folder", return_value=run_folder_path):
         with pytest.raises(SystemExit) as exc_info:
             orchestrate.run_pipeline(
@@ -273,6 +275,7 @@ def test_resume_skips_completed_stages(tmp_path):
 
     with patch("orchestrator.orchestrate.run_stage", side_effect=fake_run_stage), \
          patch("orchestrator.orchestrate.update_plan_md"), \
+         patch("orchestrator.orchestrate.subprocess.run", return_value=_git_ok()), \
          patch("orchestrator.orchestrate._resolve_run_folder", return_value=run_folder_path):
         orchestrate.run_pipeline(
             docs_root, "myproject", "feature", "feat/test", str(tmp_path / "test.yaml"), resume=True
@@ -352,6 +355,7 @@ def test_interactive_stage_not_dispatched_through_run_stage(tmp_path):
     with patch("orchestrator.orchestrate.run_stage", side_effect=fake_run_stage), \
          patch("orchestrator.orchestrate.run_interactive_stage") as mock_ris, \
          patch("orchestrator.orchestrate.update_plan_md"), \
+         patch("orchestrator.orchestrate.subprocess.run", return_value=_git_ok()), \
          patch("orchestrator.orchestrate._resolve_run_folder", return_value=run_folder_path):
         orchestrate.run_pipeline(
             docs_root, "myproject", "feature", "feat/test", str(tmp_path / "test.yaml")
@@ -377,6 +381,7 @@ def test_plan_md_updated_after_each_stage(tmp_path):
 
     with patch("orchestrator.orchestrate.run_stage", side_effect=lambda *a, **kw: next(sig_iter)), \
          patch("orchestrator.orchestrate.update_plan_md") as mock_plan, \
+         patch("orchestrator.orchestrate.subprocess.run", return_value=_git_ok()), \
          patch("orchestrator.orchestrate._resolve_run_folder", return_value=run_folder_path):
         orchestrate.run_pipeline(
             docs_root, "myproject", "feature", "feat/test", str(tmp_path / "test.yaml")
@@ -418,6 +423,7 @@ def test_discovery_fanout_calls_planning_then_tracks(tmp_path):
 
     with patch("orchestrator.orchestrate.run_stage", side_effect=fake_run_stage), \
          patch("orchestrator.orchestrate.update_plan_md"), \
+         patch("orchestrator.orchestrate.subprocess.run", return_value=_git_ok()), \
          patch("orchestrator.orchestrate._resolve_run_folder", return_value=run_folder_path):
         orchestrate.run_pipeline(docs_root, "myproject", "feature", "feat/test", str(tmp_path / "test.yaml"))
 
@@ -454,6 +460,7 @@ def test_discovery_blocked_when_planning_fails(tmp_path):
 
     with patch("orchestrator.orchestrate.run_stage", return_value=blocked_planning), \
          patch("orchestrator.orchestrate.update_plan_md") as mock_plan, \
+         patch("orchestrator.orchestrate.subprocess.run", return_value=_git_ok()), \
          patch("orchestrator.orchestrate._resolve_run_folder", return_value=run_folder_path):
         with pytest.raises(SystemExit) as exc_info:
             orchestrate.run_pipeline(docs_root, "myproject", "feature", "feat/test", str(tmp_path / "test.yaml"))
@@ -486,6 +493,7 @@ def test_discovery_blocked_when_any_track_fails(tmp_path):
 
     with patch("orchestrator.orchestrate.run_stage", side_effect=lambda *a, **kw: next(sig_iter)), \
          patch("orchestrator.orchestrate.update_plan_md") as mock_plan, \
+         patch("orchestrator.orchestrate.subprocess.run", return_value=_git_ok()), \
          patch("orchestrator.orchestrate._resolve_run_folder", return_value=run_folder_path):
         with pytest.raises(SystemExit) as exc_info:
             orchestrate.run_pipeline(docs_root, "myproject", "feature", "feat/test", str(tmp_path / "test.yaml"))
@@ -590,6 +598,7 @@ def test_interactive_artifact_path_in_stage_subfolder(tmp_path):
     with patch("orchestrator.orchestrate.run_stage", return_value=SPEC_SIGNAL), \
          patch("orchestrator.orchestrate.run_interactive_stage", side_effect=fake_interactive), \
          patch("orchestrator.orchestrate.update_plan_md"), \
+         patch("orchestrator.orchestrate.subprocess.run", return_value=_git_ok()), \
          patch("orchestrator.orchestrate._resolve_run_folder", return_value=run_folder_path):
         with pytest.raises(SystemExit):
             orchestrate.run_pipeline(
