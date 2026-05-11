@@ -67,6 +67,9 @@ def run(run_folder, docs_root, project, branch, review_signal, project_log_path,
     run_folder = Path(run_folder)
     logger = OrchestratorLogger(run_folder, str(project_log_path))
 
+    signals = state_mod.load_signals(run_folder)
+    context_path = signals.get("specification", {}).get("context_path", "")
+
     reviewer_statuses = dict(review_signal.get("reviewer_statuses", {}))
     changes_requested = [r for r, s in reviewer_statuses.items() if s == "changes-requested"]
 
@@ -116,6 +119,7 @@ def run(run_folder, docs_root, project, branch, review_signal, project_log_path,
                 "review_md": str(review_md_path),
                 "diff": fix_sig.get("diff", ""),
                 "round": str(round_num),
+                "context_path": context_path,
             }
             review_t0 = time.monotonic()
             sig = run_stage(

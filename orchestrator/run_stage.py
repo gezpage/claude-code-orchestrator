@@ -88,7 +88,12 @@ def run_stage(
     if prompt_file is not None:
         prompt = Path(prompt_file).read_text()
     else:
-        prompt = renderer.render_prompt(stage, implementation, variables, docs_root, project, standards=standards)
+        try:
+            prompt = renderer.render_prompt(stage, implementation, variables, docs_root, project, standards=standards)
+        except Exception as exc:
+            import traceback as _tb
+            logger.log(stage, "ERROR", f"prompt render failed: {exc}\n{_tb.format_exc()}")
+            return {"stage": stage, "status": "blocked", "message": f"Prompt render failed: {exc}"}
 
     output_dir = run_folder / stage
     output_dir.mkdir(parents=True, exist_ok=True)
