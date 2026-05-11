@@ -7,6 +7,11 @@ Format: [Unreleased] at the top, dated releases below, newest first.
 
 ## [Unreleased]
 
+### Fixed
+- `plan.md` "Orchestration Flow" is now a markdown `##` heading before the mermaid fence, not a mermaid `title:` directive.
+- Stage completion sections now appear for every stage: `_append_stage_section` inserts new sections before `## File Manifest` instead of appending to the end of the file (where they were immediately truncated by the manifest refresh).
+- `## File Manifest` table ordering corrected: root run-folder files (`_state.yaml`, `run.log`) appear first, followed by stage subdirectories sorted by earliest file mtime (reflecting execution order) rather than alphabetically.
+
 ### Added
 - `plan.md` now appends a `## Stage` section below the mermaid diagram each time a stage passes, containing the output summary and relative-path markdown links to any files the stage produced (findings, PRD, slices, review log, ADRs, KB files, alignment log).
 - `plan.md` header replaced with an H1 title (`# project · feature`) and a started timestamp line; mermaid diagram now includes an "Orchestration Flow" title; node colours updated to saturated fills with white text and a mid-grey edge colour for visibility in dark mode; stage sections now include template name in heading (e.g., "Alignment (Interactive)") and a timing line (`HH:MM → HH:MM (Xm Ys)`); a "## File Manifest" table is appended at the bottom and refreshed after each stage, listing all files in the run folder.

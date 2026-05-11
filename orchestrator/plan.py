@@ -100,10 +100,9 @@ def init_plan_md(run_folder, profile):
     lines = [
         _run_header(run_folder),
         "",
+        "## Orchestration Flow",
+        "",
         "```mermaid",
-        "---",
-        "title: Orchestration Flow",
-        "---",
         "%%{init: {'theme': 'base', 'themeVariables': {'fontSize': '14px', 'lineColor': '#6b7280'}}}%%",
         "flowchart TD",
     ]
@@ -292,7 +291,13 @@ def _append_stage_section(plan_path, stage, summary, signal, run_folder, elapsed
             section.append(f"- [{Path(f).name}]({rel})")
         section.append("")
 
-    plan_path.write_text(content + "\n".join(section))
+    section_text = "\n".join(section)
+    marker = "\n## File Manifest"
+    if marker in content:
+        idx = content.index(marker)
+        plan_path.write_text(content[:idx] + section_text + content[idx:])
+    else:
+        plan_path.write_text(content + section_text)
 
 
 def update_plan_md(run_folder, stage, status, elapsed_secs=None, output_summary=None, signal=None, impl_name=None):
@@ -352,15 +357,29 @@ def _update_plan_md(run_folder, stage, status, elapsed_secs=None, output_summary
 def _update_run_files_table(plan_path, run_folder):
     """Replace the '## File Manifest' table at the bottom of plan.md with a fresh scan."""
     run_folder = Path(run_folder)
-    files = sorted(
-        (f for f in run_folder.rglob("*") if f.is_file() and f.name != "plan.md"),
-        key=lambda p: str(p.relative_to(run_folder)),
-    )
+    all_files = [f for f in run_folder.rglob("*") if f.is_file() and f.name != "plan.md"]
+
+    root_files = sorted(f for f in all_files if f.parent == run_folder)
+    subdir_files = [f for f in all_files if f.parent != run_folder]
+
+    stage_dirs: dict[str, list[Path]] = {}
+    for f in subdir_files:
+        d = f.relative_to(run_folder).parts[0]
+        stage_dirs.setdefault(d, []).append(f)
+
+    def _min_mtime(dir_name):
+        return min(f.stat().st_mtime for f in stage_dirs[dir_name])
+
+    ordered_dirs = sorted(stage_dirs.keys(), key=_min_mtime)
+
     rows = ["## File Manifest", "", "| File | Stage |", "| --- | --- |"]
-    for f in files:
+    for f in root_files:
         rel = f.relative_to(run_folder)
-        stage = rel.parts[0] if len(rel.parts) > 1 else "—"
-        rows.append(f"| [{rel}]({rel}) | {stage} |")
+        rows.append(f"| [{rel}]({rel}) | — |")
+    for dir_name in ordered_dirs:
+        for f in sorted(stage_dirs[dir_name]):
+            rel = f.relative_to(run_folder)
+            rows.append(f"| [{rel}]({rel}) | {dir_name} |")
 
     table_text = "\n".join(rows)
     content = plan_path.read_text()
