@@ -100,6 +100,7 @@ def run(run_folder, docs_root, project, branch, review_signal, project_log_path,
         fix_sig = run_stage(
             "fix-implementation", "default", fix_vars,
             run_folder, docs_root, project, str(project_log_path),
+            output_suffix=str(cycle),
             cwd=repo_root or None,
         )
         fix_elapsed = time.monotonic() - fix_t0
@@ -125,6 +126,7 @@ def run(run_folder, docs_root, project, branch, review_signal, project_log_path,
             sig = run_stage(
                 "review", reviewer, review_vars,
                 run_folder, docs_root, project, str(project_log_path),
+                output_suffix=f"{reviewer}-round{round_num}",
             )
             review_elapsed = time.monotonic() - review_t0
             verdict = sig.get("reviewer_statuses", {}).get(reviewer, sig.get("status", "unknown"))

@@ -549,7 +549,7 @@ def run_pipeline(docs_root, project, feature_path, branch, profile_name, resume=
                 update_plan_md(run_folder, sub_id, "in_progress")
                 impl = _impl_from_prompt(prompt_path)
                 t0 = time.monotonic()
-                sig = run_stage(stage_name, impl, variables, run_folder, docs_root, project, project_log_path)
+                sig = run_stage(stage_name, impl, variables, run_folder, docs_root, project, project_log_path, output_suffix=reviewer)
                 elapsed = time.monotonic() - t0
                 verdict = sig.get("reviewer_statuses", {}).get(reviewer, sig.get("status", "unknown"))
                 reviewer_statuses[reviewer] = verdict

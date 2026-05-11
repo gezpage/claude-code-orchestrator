@@ -139,7 +139,7 @@ def test_max_iterations_exactly_2(tmp_path):
 
     calls = []
 
-    def counting_stage(stage, impl, variables, run_folder, docs_root, project, log_path, cwd=None):
+    def counting_stage(stage, impl, variables, run_folder, docs_root, project, log_path, cwd=None, **kwargs):
         calls.append((stage, impl))
         if stage == "fix-implementation":
             return _fix_sig()
@@ -172,7 +172,7 @@ def test_only_failed_reviewers_rerun(tmp_path):
     ret_iter = iter(stage_returns)
     called_reviewers = []
 
-    def tracking_stage(stage, impl, variables, run_folder, docs_root, project, log_path, cwd=None):
+    def tracking_stage(stage, impl, variables, run_folder, docs_root, project, log_path, cwd=None, **kwargs):
         if stage == "review":
             called_reviewers.append(impl)
         return next(ret_iter)
