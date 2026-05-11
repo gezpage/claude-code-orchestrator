@@ -279,6 +279,16 @@ def _append_stage_section(plan_path, stage, summary, signal, run_folder, elapsed
     if summary:
         section.append(f"\n{summary}\n")
 
+    tracks = signal.get("tracks", [])
+    if tracks:
+        section.append("")
+        for track in tracks:
+            name = track.get("name", "")
+            track_summary = track.get("summary", "")
+            if name and track_summary:
+                section.append(f"**{name}** — {track_summary}")
+                section.append("")
+
     files = _stage_files(signal)
     if files:
         section.append("")

@@ -12,6 +12,7 @@ Format: [Unreleased] at the top, dated releases below, newest first.
 - `plan.md` "Orchestration Flow" is now a markdown `##` heading before the mermaid fence, not a mermaid `title:` directive.
 - Stage completion sections now appear for every stage: `_append_stage_section` inserts new sections before `## File Manifest` instead of appending to the end of the file (where they were immediately truncated by the manifest refresh).
 - `## File Manifest` table ordering corrected: root run-folder files (`_state.yaml`, `run.log`) appear first, followed by stage subdirectories sorted by earliest file mtime (reflecting execution order) rather than alphabetically.
+- Discovery stage section now lists each track's name and summary as bold sub-entries below the aggregate summary line; any stage whose signal carries a `tracks` array with `name`/`summary` fields gets the same treatment automatically.
 
 ### Added
 - `plan.md` now appends a `## Stage` section below the mermaid diagram each time a stage passes, containing the output summary and relative-path markdown links to any files the stage produced (findings, PRD, slices, review log, ADRs, KB files, alignment log).
