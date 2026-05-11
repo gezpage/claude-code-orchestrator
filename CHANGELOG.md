@@ -17,6 +17,7 @@ Format: [Unreleased] at the top, dated releases below, newest first.
 ### Added
 - `plan.add_fix_cycle_node()` inserts `fix_impl_N` and `review_{reviewer}_{round}` nodes into the mermaid diagram whenever a review cycle runs, so the fix-implement → re-review flow is visible rather than hidden.
 - `review_cycle.run()` now calls `plan_mod.add_fix_cycle_node` before each fix stage and `plan_mod.update_plan_md` after the fix and each re-review, with elapsed timing and verdict reflected in the diagram.
+- Decomposition prompt now instructs agents to derive execution waves from the dependency graph and emit `slice_groups`; parallel slices in a wave each run in their own git worktree (via `_create_worktree` / `_merge_worktree_branch` / `_remove_worktree` in `orchestrate.py`) to prevent index races when committing.
 
 ### Fixed
 - Pre-flight validation now checks that `repo-root` is a git repository (via `git rev-parse --git-dir`) immediately after verifying the path exists, so misconfigured projects fail fast before any stage is dispatched instead of surfacing a cryptic git error mid-pipeline.

@@ -109,6 +109,38 @@ def _build_variables(stage, signals, branch, feature_path, docs_root, project, r
     return vars_dict
 
 
+def _create_worktree(repo_root: str, temp_branch: str, base_branch: str, logger) -> str:
+    import tempfile
+    wt_path = tempfile.mkdtemp(prefix=f"orch-wt-{temp_branch}-")
+    result = subprocess.run(
+        ["git", "-C", repo_root, "worktree", "add", wt_path, "-b", temp_branch, base_branch],
+        capture_output=True, text=True,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(f"git worktree add failed: {result.stderr}")
+    logger.log("implementation", "INFO", f"Created worktree {wt_path} on branch {temp_branch}")
+    return wt_path
+
+
+def _remove_worktree(repo_root: str, wt_path: str, temp_branch: str, logger) -> None:
+    subprocess.run(["git", "-C", repo_root, "worktree", "remove", "--force", wt_path],
+                   capture_output=True)
+    subprocess.run(["git", "-C", repo_root, "branch", "-D", temp_branch],
+                   capture_output=True)
+    logger.log("implementation", "INFO", f"Removed worktree {wt_path}")
+
+
+def _merge_worktree_branch(repo_root: str, temp_branch: str, logger) -> None:
+    result = subprocess.run(
+        ["git", "-C", repo_root, "merge", temp_branch, "--no-ff",
+         "-m", f"merge parallel slice branch {temp_branch}"],
+        capture_output=True, text=True,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(f"git merge {temp_branch} failed: {result.stderr}")
+    logger.log("implementation", "INFO", f"Merged {temp_branch} into HEAD")
+
+
 def _create_branch(branch, repo_root, logger):
     result = subprocess.run(
         ["git", "-C", repo_root, "checkout", "-b", branch],
@@ -402,43 +434,56 @@ def run_pipeline(docs_root, project, feature_path, branch, profile_name, resume=
                                    output_summary=f"{len(commits)} commit{'s' if len(commits) != 1 else ''}" if commits else None,
                                    signal=sig, impl_name=impl)
                 else:
+                    repo_root = variables["repo_root"]
                     logger.log(stage_name, "INFO", f"dispatching {len(group)} implementation slices in parallel")
-                    for sf in group:
-                        update_plan_md(run_folder, slice_to_id[sf], "in_progress")
-                    t0 = time.monotonic()
-                    futures: dict[concurrent.futures.Future, tuple[str, str]] = {}
-                    with concurrent.futures.ThreadPoolExecutor(max_workers=len(group)) as executor:
-                        for slice_file in group:
-                            sub_id = slice_to_id[slice_file]
-                            vars_copy = dict(variables)
-                            vars_copy["slice_file"] = slice_file
-                            fut = executor.submit(
-                                run_stage, stage_name, impl, vars_copy,
-                                run_folder, docs_root, project, project_log_path,
-                                sub_id,
-                                cwd=variables.get("repo_root"),
-                                standards=stage_standards,
-                            )
-                            futures[fut] = (sub_id, slice_file)
-                    elapsed = time.monotonic() - t0
-                    failed = False
-                    for fut, (sub_id, slice_file) in futures.items():
-                        sig = fut.result()
-                        if sig.get("status") != "passed":
-                            st = state_mod.load_state(run_folder)
-                            st["blocked_at"] = stage_name
-                            state_mod.save_state(run_folder, st)
-                            update_plan_md(run_folder, sub_id, sig["status"])
-                            logger.log(stage_name, "ERROR", f"pipeline stopped: stage {stage_name} {sig['status']} on slice {slice_file}: {sig.get('message', '')}")
-                            failed = True
-                        else:
-                            commits = sig.get("commit_hashes", [])
-                            all_commits.extend(commits)
-                            update_plan_md(run_folder, sub_id, "passed", elapsed_secs=elapsed,
-                                           output_summary=f"{len(commits)} commit{'s' if len(commits) != 1 else ''}" if commits else None,
-                                           signal=sig, impl_name=impl)
-                    if failed:
-                        sys.exit(1)
+                    worktrees: dict[str, tuple[str, str]] = {}
+                    try:
+                        for sf in group:
+                            sub_id = slice_to_id[sf]
+                            temp_branch = f"{branch}-{sub_id}"
+                            wt_path = _create_worktree(repo_root, temp_branch, branch, logger)
+                            worktrees[sub_id] = (wt_path, temp_branch)
+                            update_plan_md(run_folder, sub_id, "in_progress")
+                        t0 = time.monotonic()
+                        futures: dict[concurrent.futures.Future, tuple[str, str]] = {}
+                        with concurrent.futures.ThreadPoolExecutor(max_workers=len(group)) as executor:
+                            for slice_file in group:
+                                sub_id = slice_to_id[slice_file]
+                                wt_path, _ = worktrees[sub_id]
+                                vars_copy = dict(variables)
+                                vars_copy["slice_file"] = slice_file
+                                fut = executor.submit(
+                                    run_stage, stage_name, impl, vars_copy,
+                                    run_folder, docs_root, project, project_log_path,
+                                    sub_id,
+                                    cwd=wt_path,
+                                    standards=stage_standards,
+                                )
+                                futures[fut] = (sub_id, slice_file)
+                        elapsed = time.monotonic() - t0
+                        failed = False
+                        for fut, (sub_id, slice_file) in futures.items():
+                            sig = fut.result()
+                            if sig.get("status") != "passed":
+                                st = state_mod.load_state(run_folder)
+                                st["blocked_at"] = stage_name
+                                state_mod.save_state(run_folder, st)
+                                update_plan_md(run_folder, sub_id, sig["status"])
+                                logger.log(stage_name, "ERROR", f"pipeline stopped: stage {stage_name} {sig['status']} on slice {slice_file}: {sig.get('message', '')}")
+                                failed = True
+                            else:
+                                _, temp_branch = worktrees[sub_id]
+                                _merge_worktree_branch(repo_root, temp_branch, logger)
+                                commits = sig.get("commit_hashes", [])
+                                all_commits.extend(commits)
+                                update_plan_md(run_folder, sub_id, "passed", elapsed_secs=elapsed,
+                                               output_summary=f"{len(commits)} commit{'s' if len(commits) != 1 else ''}" if commits else None,
+                                               signal=sig, impl_name=impl)
+                        if failed:
+                            sys.exit(1)
+                    finally:
+                        for sub_id, (wt_path, temp_branch) in worktrees.items():
+                            _remove_worktree(repo_root, wt_path, temp_branch, logger)
             signals[stage_name] = {"status": "passed", "commit_hashes": all_commits, "branch": branch}
             state_mod.update_stage_status(run_folder, stage_name, "passed")
             state_mod.save_stage_signal(run_folder, stage_name, signals[stage_name])

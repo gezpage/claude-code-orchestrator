@@ -15,6 +15,12 @@ You are a decomposition agent. Your task is to break the PRD into implementation
 5. Order slices by dependency. A slice may depend on prior slices but must not create circular dependencies.
 6. Write a dependency graph in Mermaid format at `{{ run_folder }}/decomposition/dependency-graph.md`.
 7. `dependency-graph.md` is a reference artifact — do **not** include it in `slice_files`.
+8. Derive **execution waves** from the dependency graph:
+   - Wave 1: slices with no prerequisites.
+   - Wave N: slices whose every prerequisite appears in an earlier wave.
+   - Slices in the same wave are independent and will run in parallel — only group slices together if they share no file or data dependency.
+   - Every slice must appear in exactly one wave.
+   Store the result as `slice_groups`: an ordered list of waves, each wave a list of absolute `S-NN-slug.md` paths (same paths as in `slice_files`).
 
 ### Slice file template
 
@@ -42,7 +48,7 @@ Do not implement anything. This stage is planning only.
 Emit exactly one line:
 
 ```
-SIGNAL_JSON: {"stage": "decomposition", "status": "passed", "slice_files": ["{{ run_folder }}/decomposition/S-01-slug.md", "..."]}
+SIGNAL_JSON: {"stage": "decomposition", "status": "passed", "slice_files": ["{{ run_folder }}/decomposition/S-01-slug.md", "..."], "slice_groups": [["{{ run_folder }}/decomposition/S-01-slug.md", "{{ run_folder }}/decomposition/S-07-slug.md"], ["{{ run_folder }}/decomposition/S-02-slug.md"], ["..."]]}
 ```
 
 `slice_files` must contain only `S-NN-slug.md` paths — not `dependency-graph.md`.
@@ -53,4 +59,4 @@ If decomposition cannot proceed:
 SIGNAL_JSON: {"stage": "decomposition", "status": "blocked", "message": "<reason>"}
 ```
 
-Required fields: `stage`, `status`. Required when passed: `slice_files` (array of paths written).
+Required fields: `stage`, `status`. Required when passed: `slice_files` (flat ordered array of paths written), `slice_groups` (ordered list of execution waves — slices in the same wave run in parallel).
