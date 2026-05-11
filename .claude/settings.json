@@ -1,7 +1,6 @@
 {
   "env": {
     "ANTHROPIC_MODEL": "claude-sonnet-4-6",
-    "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
     "CLAUDE_CODE_ENABLE_TELEMETRY": "1",
     "OTEL_METRICS_EXPORTER": "otlp",
     "OTEL_LOGS_EXPORTER": "otlp",
@@ -21,14 +20,17 @@
       "WebFetch(domain:github.com)",
       "WebFetch(domain:localhost)",
       "Bash(git:*)",
-      "Bash(docker:*)",
-      "Bash(curl:*)",
+      "Bash(docker ps:*)",
+      "Bash(docker logs:*)",
+      "Bash(curl http://localhost:*)",
       "Bash(php:*)",
       "Bash(python3:*)",
       "Bash(node:*)",
       "Bash(npm:*)",
       "Bash(jq:*)",
       "Bash(rg:*)",
+      "Bash(uv:*)",
+      "Bash(pytest:*)",
       "Bash(grep:*)",
       "Bash(find:*)",
       "Bash(ls:*)",
@@ -58,11 +60,6 @@
       "Bash(ln:*)",
       "Bash(rm:*)",
       "Bash(mktemp:*)",
-      "Bash(if:*)",
-      "Bash(for:*)",
-      "Bash(while:*)",
-      "Bash([:*)",
-      "Bash([[:*)",
       "mcp__forge__read_file",
       "mcp__forge__list_files",
       "mcp__forge__move_file",
@@ -114,10 +111,7 @@
       "Bash(gh pr review:*)",
       "Bash(gh pr merge:*)",
       "Bash(gh pr close:*)",
-      "Bash(gh pr edit:*)",
-      "mcp__forge__write_file",
-      "mcp__forge__prepend_file",
-      "mcp__forge__append_file"
+      "Bash(gh pr edit:*)"
     ]
   },
   "hooks": {

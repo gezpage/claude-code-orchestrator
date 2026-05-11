@@ -10,3 +10,4 @@ venv/
 .mypy_cache/
 *.log
 .idea/
+.claude/settings.local.json

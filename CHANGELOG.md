@@ -7,6 +7,11 @@ Format: [Unreleased] at the top, dated releases below, newest first.
 
 ## [Unreleased]
 
+### Changed
+- `.claude/settings.json`: removed redundant `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC` env var (inherited from user settings), added `Bash(pytest:*)` allow rule (moved from `settings.local.json`).
+- `.gitignore`: added `.claude/settings.local.json` so personal local settings are never committed.
+- `.claude/settings.local.json`: cleared shared tool rules now that they live in `settings.json`; file is gitignored and each developer can populate from `settings.local.template.json`.
+
 ### Added
 - `plan.add_fix_cycle_node()` inserts `fix_impl_N` and `review_{reviewer}_{round}` nodes into the mermaid diagram whenever a review cycle runs, so the fix-implement → re-review flow is visible rather than hidden.
 - `review_cycle.run()` now calls `plan_mod.add_fix_cycle_node` before each fix stage and `plan_mod.update_plan_md` after the fix and each re-review, with elapsed timing and verdict reflected in the diagram.
