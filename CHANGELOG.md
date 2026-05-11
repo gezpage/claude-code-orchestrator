@@ -13,6 +13,7 @@ Format: [Unreleased] at the top, dated releases below, newest first.
 
 ### Added
 - plan.md display improvements: Start/Done stadium nodes (indigo) bookend the flowchart; review fan-out/fan-in now correctly routes reviewer sub-nodes to the next stage instead of the review-parent node; File Manifest replaces the Stage column with a Time column (HH:MM:SS mtime) and adds bold stage-header rows; a Run Summary section appears after the mermaid block showing per-stage duration and a total-elapsed headline; implementation stage sections list each commit message and short hash; elapsed times persist to `_state.yaml` via `state.save_stage_elapsed`.
+- plan.md visual improvements: Mermaid subgraph boxes group agent nodes per stage; Run Summary shows colored duration text (green→red by speed) and a Cumulative column; File Manifest shows filename-only link text and pairs `-prompt`/`-output` files on a shared row; parallel impl slices now record individual per-thread elapsed times instead of shared group wall-clock.
 - ENH-001: `project_context_path` injected into all stage variables (path: `{docs_root}/projects/{project}/context.md`); `run_pipeline()` creates the file if absent so spec agents always have a readable baseline; harvest stage now updates this file after each run so meta-context and standing constraints accumulate across runs; all downstream stage prompts (implementation, QA, review) read `context_path` under a Jinja2 guard so pipelines without a spec stage continue to work.
 
 ---

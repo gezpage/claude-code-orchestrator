@@ -474,7 +474,11 @@ def run_pipeline(docs_root, project, feature_path, branch, profile_name, resume=
                             wt_path = _create_worktree(repo_root, temp_branch, branch, logger)
                             worktrees[sub_id] = (wt_path, temp_branch)
                             update_plan_md(run_folder, sub_id, "in_progress")
-                        t0 = time.monotonic()
+                        def _run_timed(sn, im, vc, rf, dr, pr, lp, sid, wt, std):
+                            t = time.monotonic()
+                            sig = run_stage(sn, im, vc, rf, dr, pr, lp, sid, cwd=wt, standards=std)
+                            return sig, time.monotonic() - t
+
                         futures: dict[concurrent.futures.Future, tuple[str, str]] = {}
                         with concurrent.futures.ThreadPoolExecutor(max_workers=len(group)) as executor:
                             for slice_file in group:
@@ -483,17 +487,14 @@ def run_pipeline(docs_root, project, feature_path, branch, profile_name, resume=
                                 vars_copy = dict(variables)
                                 vars_copy["slice_file"] = slice_file
                                 fut = executor.submit(
-                                    run_stage, stage_name, impl, vars_copy,
+                                    _run_timed, stage_name, impl, vars_copy,
                                     run_folder, docs_root, project, project_log_path,
-                                    sub_id,
-                                    cwd=wt_path,
-                                    standards=stage_standards,
+                                    sub_id, wt_path, stage_standards,
                                 )
                                 futures[fut] = (sub_id, slice_file)
-                        elapsed = time.monotonic() - t0
                         failed = False
                         for fut, (sub_id, slice_file) in futures.items():
-                            sig = fut.result()
+                            sig, elapsed = fut.result()
                             if sig.get("status") != "passed":
                                 st = state_mod.load_state(run_folder)
                                 st["blocked_at"] = stage_name

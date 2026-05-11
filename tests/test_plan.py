@@ -161,9 +161,9 @@ def test_update_plan_md_file_manifest_timestamp_column(tmp_path):
     (stage_dir / "findings.md").write_text("findings")
     update_plan_md(run_folder, "discovery", "passed", signal={})
     content = (run_folder / "plan.md").read_text()
-    assert "| File | Time |" in content
+    assert "| Prompt | Output | Time |" in content
     assert "| Stage |" not in content
-    assert "| **discovery** | |" in content
+    assert "| **discovery** | | |" in content
 
 
 def test_expand_discovery_nodes_rewrites_start_edge(tmp_path):
@@ -222,7 +222,7 @@ def test_expand_discovery_nodes_multi_track(tmp_path):
     assert 'class disc_product_requirements pending' in content
     assert 'class disc_fanout fannode' in content
     assert 'class disc_fanin fannode' in content
-    assert 'discovery[' not in content
+    assert '    discovery["' not in content
 
 
 def test_expand_discovery_nodes_single_track(tmp_path):
@@ -286,7 +286,7 @@ def test_expand_impl_nodes_replaces_node_and_chain(tmp_path):
     assert 'impl_1[' in content
     assert 'impl_2[' in content
     assert 'impl_3[' in content
-    assert 'implementation[' not in content
+    assert '    implementation["' not in content
     assert "impl_1 --> impl_2 --> impl_3" in content
     assert "class impl_1 pending" in content
     assert "class implementation" not in content

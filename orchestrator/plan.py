@@ -38,6 +38,26 @@ _CLASSDEFS = [
     "    classDef startend fill:#4f46e5,color:#fff,stroke:none",
 ]
 
+_DURATION_COLORS = [
+    (30,   "#22c55e"),   # < 30s  — green
+    (120,  "#a3e635"),   # < 2m   — lime
+    (300,  "#fbbf24"),   # < 5m   — amber
+    (900,  "#f97316"),   # < 15m  — orange
+    (None, "#ef4444"),   # ≥ 15m  — red
+]
+
+
+def _duration_color(secs: float) -> str:
+    for threshold, color in _DURATION_COLORS:
+        if threshold is None or secs < threshold:
+            return color
+    return "#ef4444"
+
+
+def _colored_duration(secs: float) -> str:
+    color = _duration_color(secs)
+    return f'<span style="color:{color}">{_format_elapsed(secs)}</span>'
+
 
 def _stage_files(signal: dict) -> list[str]:
     """Extract output file paths from a signal, keeping only those that exist on disk."""
@@ -136,16 +156,18 @@ def init_plan_md(run_folder, profile):
 
     for stage_def in stages:
         name = stage_def["stage"]
+        display_name = name.replace("_", " ").title()
         if "prompt" in stage_def:
             impl = Path(stage_def["prompt"]).stem
             label = _node_label(name.title(), impl)
+            lines.append(f'    subgraph sg_{name}["{display_name}"]')
             lines.append(f'    {name}["{label}"]')
+            lines.append('    end')
             chain_ids.append(name)
             class_assignments.append(f"    class {name} pending")
         elif "prompts" in stage_def:
+            lines.append(f'    subgraph sg_{name}["{display_name}"]')
             lines.append(f'    {name}["{name.title()}"]')
-            chain_ids.append(name)
-            class_assignments.append(f"    class {name} pending")
             for reviewer, prompt_path in stage_def["prompts"].items():
                 reviewer_impl = Path(prompt_path).stem
                 sub_id = f"{name}_{reviewer}"
@@ -153,14 +175,21 @@ def init_plan_md(run_folder, profile):
                 lines.append(f'    {sub_id}["{label}"]')
                 review_sub_ids.append((name, sub_id))
                 class_assignments.append(f"    class {sub_id} pending")
+            lines.append('    end')
+            chain_ids.append(name)
+            class_assignments.append(f"    class {name} pending")
         elif stage_def.get("mode") == "interactive":
+            lines.append(f'    subgraph sg_{name}["{display_name}"]')
             lines.append(f'    {name}{{{{\"✋ {name.title()}\"}}}}')
+            lines.append('    end')
             chain_ids.append(name)
             class_assignments.append(f"    class {name} gate")
         else:
             impl = Path(stage_def.get("prompt", f"prompts/{name}/default.md")).stem
             label = _node_label(name.title(), impl)
+            lines.append(f'    subgraph sg_{name}["{display_name}"]')
             lines.append(f'    {name}["{label}"]')
+            lines.append('    end')
             chain_ids.append(name)
             class_assignments.append(f"    class {name} pending")
 
@@ -235,23 +264,34 @@ def _expand_discovery_nodes(run_folder, tracks, planning_elapsed_secs=None):
     track_node_ids = {t["name"]: _track_node_id(t["name"]) for t in tracks}
     content = plan_path.read_text()
 
-    # Build replacement node definitions
+    # Build replacement subgraph block
     planning_label = _node_label("Discovery Planning", "planning", status="passed", elapsed_secs=planning_elapsed_secs)
-    new_defs = [f'    discovery_planning["{planning_label}"]']
+    new_subgraph_lines = ['    subgraph sg_discovery["Discovery"]']
+    new_subgraph_lines.append(f'    discovery_planning["{planning_label}"]')
     if len(tracks) > 1:
-        new_defs.append('    disc_fanout((" "))')
+        new_subgraph_lines.append('    disc_fanout((" "))')
     for track in tracks:
         tid = track_node_ids[track["name"]]
         display = track["name"].replace("-", " ").title()
         track_label = _node_label(display, track["name"])
-        new_defs.append(f'    {tid}["{track_label}"]')
+        new_subgraph_lines.append(f'    {tid}["{track_label}"]')
     if len(tracks) > 1:
-        new_defs.append('    disc_fanin((" "))')
+        new_subgraph_lines.append('    disc_fanin((" "))')
+    new_subgraph_lines.append('    end')
 
-    # Replace node definition
-    old_def = re.search(r'    discovery\["[^"]*"\]', content)
-    if old_def:
-        content = content[:old_def.start()] + "\n".join(new_defs) + content[old_def.end():]
+    # Replace the subgraph block (falls back to bare node replacement for old-format files)
+    new_subgraph = "\n".join(new_subgraph_lines)
+    if re.search(r'    subgraph sg_discovery\["[^"]*"\]', content):
+        content = re.sub(
+            r'    subgraph sg_discovery\["[^"]*"\]\n.*?    end',
+            new_subgraph,
+            content,
+            flags=re.DOTALL,
+        )
+    else:
+        old_def = re.search(r'    discovery\["[^"]*"\]', content)
+        if old_def:
+            content = content[:old_def.start()] + new_subgraph + content[old_def.end():]
 
     # Rewrite chain edge: discovery --> <next>
     if len(tracks) > 1:
@@ -321,22 +361,32 @@ def expand_impl_nodes(run_folder, slice_files, slice_groups=None):
 
     content = plan_path.read_text()
 
-    # Build node definitions
-    new_defs = []
+    # Build replacement subgraph block
+    new_subgraph_lines = ['    subgraph sg_implementation["Implementation"]']
     for g_idx, group in enumerate(slice_groups):
         if len(group) > 1:
-            new_defs.append(f'    fanout_{g_idx + 1}((" "))')
+            new_subgraph_lines.append(f'    fanout_{g_idx + 1}((" "))')
         for sf in group:
             nid = slice_to_id[sf]
             i = all_slices.index(sf)
             title = _read_slice_title(sf) or f"Implementation Slice {i + 1}"
-            new_defs.append(f'    {nid}["Implementation Slice {i + 1} -\\n{title}"]')
+            new_subgraph_lines.append(f'    {nid}["Implementation Slice {i + 1} -\\n{title}"]')
         if len(group) > 1:
-            new_defs.append(f'    fanin_{g_idx + 1}((" "))')
+            new_subgraph_lines.append(f'    fanin_{g_idx + 1}((" "))')
+    new_subgraph_lines.append('    end')
+    new_subgraph = "\n".join(new_subgraph_lines)
 
-    old_def = re.search(r'    implementation\["[^"]*"\]', content)
-    if old_def:
-        content = content[:old_def.start()] + "\n".join(new_defs) + content[old_def.end():]
+    if re.search(r'    subgraph sg_implementation\["[^"]*"\]', content):
+        content = re.sub(
+            r'    subgraph sg_implementation\["[^"]*"\]\n.*?    end',
+            new_subgraph,
+            content,
+            flags=re.DOTALL,
+        )
+    else:
+        old_def = re.search(r'    implementation\["[^"]*"\]', content)
+        if old_def:
+            content = content[:old_def.start()] + new_subgraph + content[old_def.end():]
 
     # Rewrite chain edges
     if has_parallel:
@@ -376,6 +426,20 @@ def expand_impl_nodes(run_folder, slice_files, slice_groups=None):
             lambda m: "decomposition --> " + " --> ".join(sub_ids) + (f" --> {m.group(1)}" if m.group(1) else ""),
             content,
         )
+
+    # Determine the last node in the expanded chain
+    last_group = slice_groups[-1]
+    if has_parallel and len(last_group) > 1:
+        last_chain_node = f"fanin_{len(slice_groups)}"
+    else:
+        last_chain_node = slice_to_id[last_group[-1]]
+
+    # Rewrite any stale "implementation --> X" edge (init_plan_md emits separate per-stage edges)
+    content = re.sub(
+        r'    implementation --> (\w+)',
+        lambda m: f"    {last_chain_node} --> {m.group(1)}",
+        content,
+    )
 
     # Replace class assignments
     old_class = re.search(r'    class implementation \w+', content)
@@ -491,12 +555,14 @@ def _add_fix_cycle_node(run_folder, cycle_num: int, reviewers: list) -> None:
 
     content = plan_path.read_text()
 
-    # Build new node definitions
+    # Build new subgraph + edges
     fix_label = _node_label("Fix Implementation", f"fix-{cycle_num}", status="in_progress")
-    new_defs = [f'    {fix_node_id}["{fix_label}"]']
+    new_subgraph_lines = [f'    subgraph sg_fix_{cycle_num}["Fix Cycle {round_num}"]']
+    new_subgraph_lines.append(f'    {fix_node_id}["{fix_label}"]')
     for reviewer, rerun_id in zip(reviewers, rerun_ids):
         rerun_label = _node_label(reviewer.title(), reviewer, status="pending")
-        new_defs.append(f'    {rerun_id}["{rerun_label}"]')
+        new_subgraph_lines.append(f'    {rerun_id}["{rerun_label}"]')
+    new_subgraph_lines.append('    end')
 
     # Build new edges: source reviewer nodes → fix_impl_N → re-review nodes
     src_str = " & ".join(source_ids)
@@ -511,10 +577,10 @@ def _add_fix_cycle_node(run_folder, cycle_num: int, reviewers: list) -> None:
     for rerun_id in rerun_ids:
         new_classes.append(f"    class {rerun_id} pending")
 
-    # Insert node defs and edges just before the first classDef line
+    # Insert subgraph + edges just before the first classDef line
     classdef_pos = content.find("    classDef complete")
     if classdef_pos >= 0:
-        insert = "\n".join(new_defs + new_edges) + "\n"
+        insert = "\n".join(new_subgraph_lines) + "\n" + "\n".join(new_edges) + "\n"
         content = content[:classdef_pos] + insert + content[classdef_pos:]
     else:
         return  # malformed mermaid block; skip
@@ -600,19 +666,15 @@ def _update_run_summary(plan_path, run_folder):
         "",
         f"### ⏱ Total elapsed: {total_str}",
         "",
-        "| Stage | Status | Duration |",
+        "| Stage | Duration | Cumulative |",
         "| --- | --- | --- |",
     ]
 
-    # Load stage statuses so we can show the icon
-    state = state_mod.load_state(run_folder)
-    stage_statuses = state.get("stages", {})
-
+    cumulative = 0
     for stage, secs in elapsed_map.items():
-        status = stage_statuses.get(stage, "pending")
-        icon = _STATUS_ICON.get(status, "-")
+        cumulative += secs
         display = stage.replace("_", " ").title()
-        rows.append(f"| {display} | {icon} | {_format_elapsed(secs)} |")
+        rows.append(f"| {display} | {_colored_duration(secs)} | {_format_elapsed(cumulative)} |")
 
     table_text = "\n".join(rows)
     content = plan_path.read_text()
@@ -640,6 +702,37 @@ def _update_run_summary(plan_path, run_folder):
     plan_path.write_text(content)
 
 
+def _pair_prompt_output(files: list) -> list:
+    """Group files with -prompt/-output suffixes onto shared rows.
+
+    Returns list of (prompt_path|None, output_path|None, mtime_float) tuples.
+    Files without a matching partner appear as (file, None, mtime) or (None, file, mtime).
+    """
+    prompt_map: dict[str, Path] = {}
+    output_map: dict[str, Path] = {}
+    unpaired: list[Path] = []
+    for f in sorted(files):
+        stem = f.stem
+        if stem.endswith("-prompt"):
+            prompt_map[stem[:-7] + f.suffix] = f
+        elif stem.endswith("-output"):
+            output_map[stem[:-7] + f.suffix] = f
+        else:
+            unpaired.append(f)
+    result = []
+    seen: set[str] = set()
+    for key in list(prompt_map) + [k for k in output_map if k not in prompt_map]:
+        if key in seen:
+            continue
+        seen.add(key)
+        p, o = prompt_map.get(key), output_map.get(key)
+        mtime = max(f.stat().st_mtime for f in (p, o) if f)
+        result.append((p, o, mtime))
+    for f in unpaired:
+        result.append((f, None, f.stat().st_mtime))
+    return result
+
+
 def _update_run_files_table(plan_path, run_folder):
     """Replace the '## File Manifest' table at the bottom of plan.md with a fresh scan."""
     run_folder = Path(run_folder)
@@ -658,18 +751,25 @@ def _update_run_files_table(plan_path, run_folder):
 
     ordered_dirs = sorted(stage_dirs.keys(), key=_min_mtime)
 
-    def _fmt_time(f: Path) -> str:
-        return datetime.datetime.fromtimestamp(f.stat().st_mtime).strftime("%H:%M:%S")
+    def _fmt_time(mtime: float) -> str:
+        return datetime.datetime.fromtimestamp(mtime).strftime("%H:%M:%S")
 
-    rows = ["## File Manifest", "", "| File | Time |", "| --- | --- |"]
-    for f in root_files:
+    def _link(f: Path) -> str:
         rel = f.relative_to(run_folder)
-        rows.append(f"| [{rel}]({rel}) | {_fmt_time(f)} |")
+        return f"[{f.name}]({rel})"
+
+    rows = ["## File Manifest", "", "| Prompt | Output | Time |", "| --- | --- | --- |"]
+    for f in root_files:
+        rows.append(f"| {_link(f)} | | {_fmt_time(f.stat().st_mtime)} |")
     for dir_name in ordered_dirs:
-        rows.append(f"| **{dir_name}** | |")
-        for f in sorted(stage_dirs[dir_name]):
-            rel = f.relative_to(run_folder)
-            rows.append(f"| [{rel}]({rel}) | {_fmt_time(f)} |")
+        rows.append(f"| **{dir_name}** | | |")
+        for prompt_f, output_f, mtime in _pair_prompt_output(stage_dirs[dir_name]):
+            if prompt_f and output_f:
+                rows.append(f"| {_link(prompt_f)} | {_link(output_f)} | {_fmt_time(mtime)} |")
+            elif prompt_f:
+                rows.append(f"| {_link(prompt_f)} | | {_fmt_time(mtime)} |")
+            else:
+                rows.append(f"| | {_link(output_f)} | {_fmt_time(mtime)} |")
 
     table_text = "\n".join(rows)
     content = plan_path.read_text()
