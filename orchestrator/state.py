@@ -31,3 +31,14 @@ def save_stage_signal(run_folder, stage: str, signal: dict) -> None:
 def load_signals(run_folder) -> dict:
     state = load_state(run_folder)
     return state.get("signals", {})
+
+
+def save_stage_elapsed(run_folder, stage: str, secs: float) -> None:
+    state = load_state(run_folder)
+    state.setdefault("elapsed", {})[stage] = secs
+    save_state(run_folder, state)
+
+
+def load_elapsed(run_folder) -> dict:
+    state = load_state(run_folder)
+    return state.get("elapsed", {})

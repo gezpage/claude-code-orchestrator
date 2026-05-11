@@ -1,5 +1,6 @@
 import pytest
 from pathlib import Path
+from unittest.mock import patch
 
 from orchestrator.plan import init_plan_md, expand_impl_nodes, expand_discovery_nodes, update_plan_md, add_fix_cycle_node
 
@@ -65,6 +66,119 @@ def test_init_plan_md_review_stage_with_prompts(tmp_path):
     assert 'review_arch[' in content
     assert 'review_security[' in content
     assert "review --> review_arch & review_security" in content
+
+
+def test_init_plan_md_review_fan_in_to_next_stage(tmp_path):
+    """Reviewer sub-nodes must fan-in to the stage after review, not via review --> next."""
+    run_folder = _make_run_folder(tmp_path)
+    profile = {
+        "stages": [
+            {"stage": "implementation", "prompt": "prompts/implementation/default.md"},
+            {"stage": "review", "prompts": {
+                "arch": "prompts/review/arch.md",
+                "security": "prompts/review/security.md",
+            }},
+            {"stage": "harvest", "prompt": "prompts/harvest/default.md"},
+        ]
+    }
+    init_plan_md(run_folder, profile)
+    content = (run_folder / "plan.md").read_text()
+    # Fan-out from review parent to sub-nodes
+    assert "review --> review_arch & review_security" in content
+    # Fan-in from sub-nodes to harvest
+    assert "review_arch & review_security --> harvest" in content
+    # review must NOT directly connect to harvest
+    assert "review --> harvest" not in content
+
+
+def test_init_plan_md_start_done_nodes(tmp_path):
+    run_folder = _make_run_folder(tmp_path)
+    profile = _simple_profile("discovery", "specification")
+    init_plan_md(run_folder, profile)
+    content = (run_folder / "plan.md").read_text()
+    assert 'Start([' in content
+    assert 'Done([' in content
+    assert "class Start startend" in content
+    assert "class Done startend" in content
+    assert "Start --> discovery" in content
+    assert "specification --> Done" in content
+
+
+def test_init_plan_md_start_done_single_stage(tmp_path):
+    run_folder = _make_run_folder(tmp_path)
+    profile = _simple_profile("discovery")
+    init_plan_md(run_folder, profile)
+    content = (run_folder / "plan.md").read_text()
+    assert "Start --> discovery" in content
+    assert "discovery --> Done" in content
+
+
+def test_init_plan_md_start_done_with_review(tmp_path):
+    """Done should connect from the stage after review fan-in, not from review parent."""
+    run_folder = _make_run_folder(tmp_path)
+    profile = {
+        "stages": [
+            {"stage": "implementation", "prompt": "prompts/implementation/default.md"},
+            {"stage": "review", "prompts": {"arch": "prompts/review/arch.md"}},
+            {"stage": "harvest", "prompt": "prompts/harvest/default.md"},
+        ]
+    }
+    init_plan_md(run_folder, profile)
+    content = (run_folder / "plan.md").read_text()
+    assert "harvest --> Done" in content
+    assert "review --> Done" not in content
+
+
+def test_update_plan_md_run_summary_section(tmp_path):
+    run_folder = _make_run_folder(tmp_path)
+    profile = _simple_profile("discovery", "specification")
+    init_plan_md(run_folder, profile)
+    update_plan_md(run_folder, "discovery", "passed", elapsed_secs=90, output_summary="1 finding", signal={})
+    content = (run_folder / "plan.md").read_text()
+    assert "## Run Summary" in content
+    assert "⏱ Total elapsed:" in content
+    assert "1m 30s" in content
+
+
+def test_update_plan_md_run_summary_accumulates(tmp_path):
+    run_folder = _make_run_folder(tmp_path)
+    profile = _simple_profile("discovery", "specification")
+    init_plan_md(run_folder, profile)
+    update_plan_md(run_folder, "discovery", "passed", elapsed_secs=90, output_summary="x", signal={})
+    update_plan_md(run_folder, "specification", "passed", elapsed_secs=60, output_summary="y", signal={})
+    content = (run_folder / "plan.md").read_text()
+    # Total should be 90+60 = 150s = 2m 30s
+    assert "2m 30s" in content
+
+
+def test_update_plan_md_file_manifest_timestamp_column(tmp_path):
+    run_folder = _make_run_folder(tmp_path)
+    profile = _simple_profile("discovery")
+    init_plan_md(run_folder, profile)
+    # Create a file in a stage subdirectory
+    stage_dir = run_folder / "discovery"
+    stage_dir.mkdir()
+    (stage_dir / "findings.md").write_text("findings")
+    update_plan_md(run_folder, "discovery", "passed", signal={})
+    content = (run_folder / "plan.md").read_text()
+    assert "| File | Time |" in content
+    assert "| Stage |" not in content
+    assert "| **discovery** | |" in content
+
+
+def test_update_plan_md_commit_messages_in_section(tmp_path):
+    run_folder = _make_run_folder(tmp_path)
+    profile = _simple_profile("implementation")
+    init_plan_md(run_folder, profile)
+    signal = {"commit_hashes": ["abc12345def67890"]}
+    with patch("orchestrator.plan._fetch_commit_messages", return_value=["feat: add auth (abc12345)"]):
+        update_plan_md(
+            run_folder, "implementation", "passed",
+            elapsed_secs=30, output_summary="1 commit",
+            signal=signal, repo_root="/some/repo",
+        )
+    content = (run_folder / "plan.md").read_text()
+    assert "`feat: add auth (abc12345)`" in content
 
 
 # --- expand_discovery_nodes ---

@@ -462,7 +462,7 @@ def run_pipeline(docs_root, project, feature_path, branch, profile_name, resume=
                     all_commits.extend(commits)
                     update_plan_md(run_folder, sub_id, "passed", elapsed_secs=elapsed,
                                    output_summary=f"{len(commits)} commit{'s' if len(commits) != 1 else ''}" if commits else None,
-                                   signal=sig, impl_name=impl)
+                                   signal=sig, impl_name=impl, repo_root=variables.get("repo_root"))
                 else:
                     repo_root = variables["repo_root"]
                     logger.log(stage_name, "INFO", f"dispatching {len(group)} implementation slices in parallel")
@@ -508,7 +508,7 @@ def run_pipeline(docs_root, project, feature_path, branch, profile_name, resume=
                                 all_commits.extend(commits)
                                 update_plan_md(run_folder, sub_id, "passed", elapsed_secs=elapsed,
                                                output_summary=f"{len(commits)} commit{'s' if len(commits) != 1 else ''}" if commits else None,
-                                               signal=sig, impl_name=impl)
+                                               signal=sig, impl_name=impl, repo_root=variables.get("repo_root"))
                         if failed:
                             sys.exit(1)
                     finally:

@@ -1,8 +1,11 @@
 import datetime
 import os
 import re
+import subprocess
 import threading
 from pathlib import Path
+
+from orchestrator import state as state_mod
 
 _STATUS_CLASS = {
     "pending":     "pending",
@@ -32,6 +35,7 @@ _CLASSDEFS = [
     "    classDef skipped fill:#4b5563,color:#9ca3af,stroke:#374151",
     "    classDef gate fill:#92400e,color:#fff,stroke:#d97706,stroke-width:2px",
     "    classDef fannode fill:#374151,color:#9ca3af,stroke:#1f2937,stroke-width:1px",
+    "    classDef startend fill:#4f46e5,color:#fff,stroke:none",
 ]
 
 
@@ -90,6 +94,23 @@ def _node_label(display, impl, status="pending", elapsed_secs=None, output_summa
     return "\\n".join(parts)
 
 
+def _fetch_commit_messages(hashes: list, repo_root: str) -> list[str]:
+    """Return 'message (short_hash)' for each commit hash. Returns [] on any failure."""
+    results = []
+    for h in hashes:
+        try:
+            r = subprocess.run(
+                ["git", "-C", repo_root, "log", "--format=%s", "-1", h],
+                capture_output=True, text=True, timeout=10,
+            )
+            msg = r.stdout.strip()
+            if msg:
+                results.append(f"{msg} ({h[:8]})")
+        except Exception:
+            pass
+    return results
+
+
 def init_plan_md(run_folder, profile):
     run_folder = Path(run_folder)
     plan_path = run_folder / "plan.md"
@@ -106,6 +127,9 @@ def init_plan_md(run_folder, profile):
         "%%{init: {'theme': 'base', 'themeVariables': {'fontSize': '14px', 'lineColor': '#6b7280'}}}%%",
         "flowchart TD",
     ]
+
+    # Start node
+    lines.append('    Start(["▶ Start"])')
 
     chain_ids = []
     review_sub_ids = []  # [(parent_id, sub_id), ...]
@@ -141,18 +165,46 @@ def init_plan_md(run_folder, profile):
             chain_ids.append(name)
             class_assignments.append(f"    class {name} pending")
 
-    if len(chain_ids) > 1:
-        lines.append("    " + " --> ".join(chain_ids))
+    # Done node
+    lines.append('    Done(["■ Done"])')
 
-    # Fan-out edges for review sub-nodes (group by parent for & syntax)
+    # Group review sub-nodes by parent
     parents: dict[str, list[str]] = {}
     for parent_id, sub_id in review_sub_ids:
         parents.setdefault(parent_id, []).append(sub_id)
-    for parent_id, sub_ids in parents.items():
-        lines.append(f"    {parent_id} --> {' & '.join(sub_ids)}")
+
+    # Build sequential chain, splitting at review parents so that fan-in connects
+    # reviewer sub-nodes to the next stage instead of review --> next_stage.
+    if chain_ids:
+        lines.append(f"    Start --> {chain_ids[0]}")
+        i = 0
+        while i < len(chain_ids):
+            cur = chain_ids[i]
+            nxt = chain_ids[i + 1] if i + 1 < len(chain_ids) else None
+            if cur in parents:
+                # Fan-out from review parent to sub-nodes
+                sub_ids = parents[cur]
+                lines.append(f"    {cur} --> {' & '.join(sub_ids)}")
+                # Fan-in from sub-nodes to next stage (or Done).
+                # Do NOT emit cur --> nxt; the fan-in edge replaces it.
+                fanin_target = nxt if nxt else "Done"
+                lines.append(f"    {' & '.join(sub_ids)} --> {fanin_target}")
+                # Advance normally so nxt is still processed next iteration
+                # and can emit its own outgoing edge (e.g. harvest --> Done).
+                i += 1
+            else:
+                if nxt:
+                    lines.append(f"    {cur} --> {nxt}")
+                else:
+                    lines.append(f"    {cur} --> Done")
+                i += 1
+    else:
+        lines.append("    Start --> Done")
 
     lines.extend(_CLASSDEFS)
     lines.extend(class_assignments)
+    lines.append("    class Start startend")
+    lines.append("    class Done startend")
     lines.append("```")
     lines.append("")
 
@@ -336,7 +388,7 @@ def expand_impl_nodes(run_folder, slice_files, slice_groups=None):
     plan_path.write_text(content)
 
 
-def _append_stage_section(plan_path, stage, summary, signal, run_folder, elapsed_secs, impl_name):
+def _append_stage_section(plan_path, stage, summary, signal, run_folder, elapsed_secs, impl_name, repo_root=None):
     """Append a stage-completion section below the mermaid block."""
     content = plan_path.read_text()
 
@@ -365,6 +417,16 @@ def _append_stage_section(plan_path, stage, summary, signal, run_folder, elapsed
     if summary:
         section.append(f"\n{summary}\n")
 
+    # Show commit messages for implementation stages
+    commit_hashes = signal.get("commit_hashes", [])
+    if commit_hashes and repo_root:
+        commit_lines = _fetch_commit_messages(commit_hashes, repo_root)
+        if commit_lines:
+            section.append("")
+            for cl in commit_lines:
+                section.append(f"`{cl}`")
+            section.append("")
+
     tracks = signal.get("tracks", [])
     if tracks:
         section.append("")
@@ -388,10 +450,16 @@ def _append_stage_section(plan_path, stage, summary, signal, run_folder, elapsed
         section.append("")
 
     section_text = "\n".join(section)
-    marker = "\n## File Manifest"
-    if marker in content:
-        idx = content.index(marker)
-        plan_path.write_text(content[:idx] + section_text + content[idx:])
+    # Insert before File Manifest or Run Summary, whichever comes first
+    markers = ["\n## File Manifest", "\n## Run Summary"]
+    insert_at = len(content)
+    for marker in markers:
+        idx = content.find(marker)
+        if idx >= 0 and idx < insert_at:
+            insert_at = idx
+
+    if insert_at < len(content):
+        plan_path.write_text(content[:insert_at] + section_text + content[insert_at:])
     else:
         plan_path.write_text(content + section_text)
 
@@ -458,12 +526,12 @@ def _add_fix_cycle_node(run_folder, cycle_num: int, reviewers: list) -> None:
     plan_path.write_text(content)
 
 
-def update_plan_md(run_folder, stage, status, elapsed_secs=None, output_summary=None, signal=None, impl_name=None):
+def update_plan_md(run_folder, stage, status, elapsed_secs=None, output_summary=None, signal=None, impl_name=None, repo_root=None):
     with _plan_lock:
-        _update_plan_md(run_folder, stage, status, elapsed_secs, output_summary, signal, impl_name)
+        _update_plan_md(run_folder, stage, status, elapsed_secs, output_summary, signal, impl_name, repo_root)
 
 
-def _update_plan_md(run_folder, stage, status, elapsed_secs=None, output_summary=None, signal=None, impl_name=None):
+def _update_plan_md(run_folder, stage, status, elapsed_secs=None, output_summary=None, signal=None, impl_name=None, repo_root=None):
     run_folder = Path(run_folder)
     plan_path = run_folder / "plan.md"
     css_class = _STATUS_CLASS.get(status, "pending")
@@ -506,10 +574,68 @@ def _update_plan_md(run_folder, stage, status, elapsed_secs=None, output_summary
 
     plan_path.write_text(content)
 
+    if elapsed_secs is not None:
+        state_mod.save_stage_elapsed(run_folder, stage, elapsed_secs)
+
     if status == "passed" and signal is not None:
-        _append_stage_section(plan_path, stage, output_summary, signal, run_folder, elapsed_secs, impl_name)
+        _append_stage_section(plan_path, stage, output_summary, signal, run_folder, elapsed_secs, impl_name, repo_root)
     if status == "passed":
+        _update_run_summary(plan_path, run_folder)
         _update_run_files_table(plan_path, run_folder)
+
+
+def _update_run_summary(plan_path, run_folder):
+    """Replace the '## Run Summary' section immediately after the mermaid block."""
+    elapsed_map = state_mod.load_elapsed(run_folder)
+    if not elapsed_map:
+        return
+
+    total_secs = sum(elapsed_map.values())
+    total_str = _format_elapsed(total_secs)
+
+    rows = [
+        "## Run Summary",
+        "",
+        f"### ⏱ Total elapsed: {total_str}",
+        "",
+        "| Stage | Status | Duration |",
+        "| --- | --- | --- |",
+    ]
+
+    # Load stage statuses so we can show the icon
+    state = state_mod.load_state(run_folder)
+    stage_statuses = state.get("stages", {})
+
+    for stage, secs in elapsed_map.items():
+        status = stage_statuses.get(stage, "pending")
+        icon = _STATUS_ICON.get(status, "-")
+        display = stage.replace("_", " ").title()
+        rows.append(f"| {display} | {icon} | {_format_elapsed(secs)} |")
+
+    table_text = "\n".join(rows)
+    content = plan_path.read_text()
+    marker = "\n## Run Summary"
+
+    # Find where to anchor the Run Summary section: right after the closing mermaid fence
+    fence_end = content.find("\n```\n")
+    if fence_end >= 0:
+        fence_end += 5  # skip past "\n```\n"
+    else:
+        fence_end = 0
+
+    if marker in content:
+        # Replace existing section up to the next ## heading or File Manifest
+        start = content.index(marker)
+        next_section = content.find("\n## ", start + 1)
+        if next_section >= 0:
+            content = content[:start] + "\n" + table_text + content[next_section:]
+        else:
+            content = content[:start] + "\n" + table_text + "\n"
+    else:
+        # Insert immediately after the mermaid fence
+        content = content[:fence_end] + "\n" + table_text + "\n" + content[fence_end:]
+
+    plan_path.write_text(content)
 
 
 def _update_run_files_table(plan_path, run_folder):
@@ -530,14 +656,18 @@ def _update_run_files_table(plan_path, run_folder):
 
     ordered_dirs = sorted(stage_dirs.keys(), key=_min_mtime)
 
-    rows = ["## File Manifest", "", "| File | Stage |", "| --- | --- |"]
+    def _fmt_time(f: Path) -> str:
+        return datetime.datetime.fromtimestamp(f.stat().st_mtime).strftime("%H:%M:%S")
+
+    rows = ["## File Manifest", "", "| File | Time |", "| --- | --- |"]
     for f in root_files:
         rel = f.relative_to(run_folder)
-        rows.append(f"| [{rel}]({rel}) | — |")
+        rows.append(f"| [{rel}]({rel}) | {_fmt_time(f)} |")
     for dir_name in ordered_dirs:
+        rows.append(f"| **{dir_name}** | |")
         for f in sorted(stage_dirs[dir_name]):
             rel = f.relative_to(run_folder)
-            rows.append(f"| [{rel}]({rel}) | {dir_name} |")
+            rows.append(f"| [{rel}]({rel}) | {_fmt_time(f)} |")
 
     table_text = "\n".join(rows)
     content = plan_path.read_text()
