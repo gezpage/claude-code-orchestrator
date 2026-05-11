@@ -89,8 +89,7 @@ def _node_label(display, impl, status="pending", elapsed_secs=None, output_summa
     parts = [f"{display} {icon}", impl]
     if elapsed_secs is not None:
         parts.append(f"⏱ {_format_elapsed(elapsed_secs)}")
-    if output_summary:
-        parts.append(output_summary)
+    # output_summary is intentionally excluded — it appears in the markdown section, not the diagram
     return "\\n".join(parts)
 
 
@@ -281,6 +280,9 @@ def _expand_discovery_nodes(run_folder, tracks, planning_elapsed_secs=None):
             return line
 
         content = re.sub(r"    discovery --> (\w+)", _single_chain, content)
+
+    # Rewrite Start --> discovery to point at discovery_planning
+    content = content.replace("    Start --> discovery\n", "    Start --> discovery_planning\n")
 
     # Replace class assignment
     old_class = re.search(r"    class discovery \w+", content)

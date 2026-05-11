@@ -166,6 +166,17 @@ def test_update_plan_md_file_manifest_timestamp_column(tmp_path):
     assert "| **discovery** | |" in content
 
 
+def test_expand_discovery_nodes_rewrites_start_edge(tmp_path):
+    """Start --> discovery must be rewritten to Start --> discovery_planning after expansion."""
+    run_folder = _make_run_folder(tmp_path)
+    init_plan_md(run_folder, _discovery_profile())
+    assert "Start --> discovery" in (run_folder / "plan.md").read_text()
+    expand_discovery_nodes(run_folder, [{"name": "risk"}])
+    content = (run_folder / "plan.md").read_text()
+    assert "Start --> discovery_planning" in content
+    assert "Start --> discovery\n" not in content
+
+
 def test_update_plan_md_commit_messages_in_section(tmp_path):
     run_folder = _make_run_folder(tmp_path)
     profile = _simple_profile("implementation")
@@ -306,7 +317,8 @@ def test_update_plan_md_adds_elapsed_and_summary(tmp_path):
     run_folder = _make_run_folder(tmp_path)
     profile = _simple_profile("discovery")
     init_plan_md(run_folder, profile)
-    update_plan_md(run_folder, "discovery", "passed", elapsed_secs=90, output_summary="3 files")
+    # output_summary appears in the markdown stage section (not the diagram node), so signal must be provided
+    update_plan_md(run_folder, "discovery", "passed", elapsed_secs=90, output_summary="3 files", signal={})
     content = (run_folder / "plan.md").read_text()
     assert "✅" in content
     assert "1m 30s" in content
