@@ -9,6 +9,8 @@ Format: [Unreleased] at the top, dated releases below, newest first.
 
 ### Changed
 - `.claude/settings.json`: removed redundant `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC` env var (inherited from user settings), added `Bash(pytest:*)` allow rule (moved from `settings.local.json`).
+- `.claude/settings.json`: removed `env` block entirely — all vars now inherited from user-level settings.
+- `.claude/settings.local.template.json`: deleted; template is no longer needed now that `settings.local.json` is gitignored and the shared rules live in `settings.json`.
 - `.gitignore`: added `.claude/settings.local.json` so personal local settings are never committed.
 - `.claude/settings.local.json`: cleared shared tool rules now that they live in `settings.json`; file is gitignored and each developer can populate from `settings.local.template.json`.
 
