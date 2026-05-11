@@ -611,6 +611,61 @@ def test_interactive_artifact_path_in_stage_subfolder(tmp_path):
     )
 
 
+# ── project_context_path injected into variables ──────────────────────────────
+
+def test_project_context_path_injected_into_variables(tmp_path):
+    stages = [
+        {"stage": "specification", "prompt": "prompts/specification/default.md"},
+    ]
+    docs_root = _setup_docs(tmp_path, stages)
+    run_folder_path = tmp_path / "projects" / "myproject" / "workflow" / "runs" / "feat" / "2026-01-01-run-1"
+    run_folder_path.mkdir(parents=True)
+
+    captured_vars = {}
+
+    def fake_run_stage(stage, impl, variables, run_folder, docs_root, project, log_path, output_suffix="", cwd=None, prompt_file=None, schema_name=None, standards=None):
+        captured_vars.update(variables)
+        return SPEC_SIGNAL
+
+    with patch("orchestrator.orchestrate.run_stage", side_effect=fake_run_stage), \
+         patch("orchestrator.orchestrate.update_plan_md"), \
+         patch("orchestrator.orchestrate.subprocess.run", return_value=_git_ok()), \
+         patch("orchestrator.orchestrate._resolve_run_folder", return_value=run_folder_path):
+        orchestrate.run_pipeline(
+            docs_root, "myproject", "feature", "feat/test", str(tmp_path / "test.yaml")
+        )
+
+    expected = str(tmp_path / "projects" / "myproject" / "context.md")
+    assert captured_vars.get("project_context_path") == expected, (
+        f"project_context_path should be {expected!r}, got {captured_vars.get('project_context_path')!r}"
+    )
+
+
+# ── project context file created when absent ──────────────────────────────────
+
+def test_project_context_file_created_when_absent(tmp_path):
+    stages = [
+        {"stage": "specification", "prompt": "prompts/specification/default.md"},
+    ]
+    docs_root = _setup_docs(tmp_path, stages)
+    run_folder_path = tmp_path / "projects" / "myproject" / "workflow" / "runs" / "feat" / "2026-01-01-run-1"
+    run_folder_path.mkdir(parents=True)
+
+    project_context = tmp_path / "projects" / "myproject" / "context.md"
+    assert not project_context.exists(), "Precondition: file must not exist before pipeline runs"
+
+    with patch("orchestrator.orchestrate.run_stage", return_value=SPEC_SIGNAL), \
+         patch("orchestrator.orchestrate.update_plan_md"), \
+         patch("orchestrator.orchestrate.subprocess.run", return_value=_git_ok()), \
+         patch("orchestrator.orchestrate._resolve_run_folder", return_value=run_folder_path):
+        orchestrate.run_pipeline(
+            docs_root, "myproject", "feature", "feat/test", str(tmp_path / "test.yaml")
+        )
+
+    assert project_context.exists(), "project context.md should be created by run_pipeline when absent"
+    assert project_context.read_text() == "", "newly created project context.md should be empty"
+
+
 # ── orchestrate.py source contains no open() calls ───────────────────────────
 
 def test_orchestrate_source_has_no_open_calls():

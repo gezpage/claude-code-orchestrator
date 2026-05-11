@@ -5,6 +5,10 @@ You are a harvest agent. Your task is to extract reusable knowledge from this fe
 **Run folder:** `{{ run_folder }}`
 **Review document:** `{{ review_md }}`
 **Repo root:** `{{ repo_root }}`
+{% if context_path %}
+**Context (this run):** `{{ context_path }}`
+{% endif %}
+**Project context (baseline to update):** `{{ project_context_path }}`
 
 ## Instructions
 
@@ -16,6 +20,8 @@ You are a harvest agent. Your task is to extract reusable knowledge from this fe
 3. Write ADRs to the project ADR directory (read from project.yaml if needed).
 4. Write KB entries to the project knowledge-base directory.
 5. Do not duplicate content already in existing ADRs or KB files.
+6. Read the current contents of `{{ project_context_path }}` (may be empty).
+7. Update `{{ project_context_path }}` with any standing constraints or meta-context from this run that should apply to all future runs on this project. Preserve existing content unless it has been explicitly superseded by a decision made in this run. Append or merge — do not discard prior context without cause.
 
 ## Output
 

@@ -7,6 +7,9 @@ Format: [Unreleased] at the top, dated releases below, newest first.
 
 ## [Unreleased]
 
+### Added
+- ENH-001: `project_context_path` injected into all stage variables (path: `{docs_root}/projects/{project}/context.md`); `run_pipeline()` creates the file if absent so spec agents always have a readable baseline; harvest stage now updates this file after each run so meta-context and standing constraints accumulate across runs; all downstream stage prompts (implementation, QA, review) read `context_path` under a Jinja2 guard so pipelines without a spec stage continue to work.
+
 ### Changed
 - `.claude/settings.json`: removed redundant `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC` env var (inherited from user settings), added `Bash(pytest:*)` allow rule (moved from `settings.local.json`).
 - `.claude/settings.json`: removed `env` block entirely — all vars now inherited from user-level settings.

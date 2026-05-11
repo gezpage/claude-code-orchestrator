@@ -5,9 +5,23 @@ You are a QA agent. Your task is to verify the implementation against the accept
 **Run folder:** `{{ run_folder }}`
 **Branch:** `{{ branch }}`
 **Repo root:** `{{ repo_root }}`
+{% if context_path %}
+**Context:** `{{ context_path }}`
+{% endif %}
 
 ## Instructions
 
+{% if context_path %}
+1. Read the context document at `{{ context_path }}` for the quality bar and binding constraints that apply to this run.
+2. Read the following slice files to understand acceptance criteria:
+{% for f in slice_files %}   - `{{ f }}`
+{% endfor %}
+3. Check out branch `{{ branch }}` in `{{ repo_root }}` using `git -C {{ repo_root }} checkout {{ branch }}` (or verify it is already checked out). All git commands must use `git -C {{ repo_root }}` — never bare `git`.
+4. Run all tests referenced in the acceptance criteria.
+5. Verify each acceptance criterion is met — state pass/fail for each one.
+6. Assess regression risk: scan for changes to shared utilities, interfaces, or high-traffic code paths.
+7. Write a QA summary at `{{ run_folder }}/qa/qa-report.md`.
+{% else %}
 1. Read the following slice files to understand acceptance criteria:
 {% for f in slice_files %}   - `{{ f }}`
 {% endfor %}
@@ -16,6 +30,7 @@ You are a QA agent. Your task is to verify the implementation against the accept
 4. Verify each acceptance criterion is met — state pass/fail for each one.
 5. Assess regression risk: scan for changes to shared utilities, interfaces, or high-traffic code paths.
 6. Write a QA summary at `{{ run_folder }}/qa/qa-report.md`.
+{% endif %}
 
 ## Output
 

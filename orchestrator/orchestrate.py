@@ -98,6 +98,7 @@ def _build_variables(stage, signals, branch, feature_path, docs_root, project, r
         "project": project,
         "branch": branch,
         "feature_path": feature_path,
+        "project_context_path": str(Path(docs_root) / "projects" / project / "context.md"),
     }
     if "repo-root" in project_config:
         vars_dict["repo_root"] = project_config["repo-root"]
@@ -195,6 +196,11 @@ def run_pipeline(docs_root, project, feature_path, branch, profile_name, resume=
             f"[orchestrator] [ERROR] repo-root is not a git repository: {project_config['repo-root']}\n"
             f"  Ensure the path in project.yaml 'repo-root' points to the root of a git repository."
         )
+
+    project_context = Path(docs_root) / "projects" / project / "context.md"
+    if not project_context.exists():
+        project_context.touch()
+
     profile = _load_profile(profile_name)
 
     project_log_path = str(Path(docs_root) / "projects" / project)
