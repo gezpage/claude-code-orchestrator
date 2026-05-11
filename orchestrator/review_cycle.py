@@ -1,9 +1,11 @@
 # Review cycle manager; runs reviewer feedback rounds up to the configured cycle limit (_MAX_CYCLES).
 import re
+import time
 from pathlib import Path
 
 import yaml
 
+from orchestrator import plan as plan_mod
 from orchestrator import state as state_mod
 from orchestrator.logger import OrchestratorLogger
 from orchestrator.run_stage import run_stage
@@ -83,18 +85,30 @@ def run(run_folder, docs_root, project, branch, review_signal, project_log_path,
                 review_md_path.read_text(), changes_requested
             )
 
+        plan_mod.add_fix_cycle_node(run_folder, cycle, changes_requested)
+
         fix_vars = {
             "run_folder": str(run_folder),
             "branch": branch,
             "changes_brief": changes_brief,
             "repo_root": repo_root,
         }
+        fix_t0 = time.monotonic()
         fix_sig = run_stage(
             "fix-implementation", "default", fix_vars,
             run_folder, docs_root, project, str(project_log_path),
             cwd=repo_root or None,
         )
-        logger.log("review-cycle", "INFO", f"fix-implementation round {round_num}: {fix_sig.get('status')}")
+        fix_elapsed = time.monotonic() - fix_t0
+        fix_status = fix_sig.get("status", "unknown")
+        commit_hashes = fix_sig.get("commit_hashes", [])
+        fix_summary = f"{len(commit_hashes)} commit{'s' if len(commit_hashes) != 1 else ''}" if commit_hashes else None
+        plan_mod.update_plan_md(
+            run_folder, f"fix_impl_{cycle}",
+            "passed" if fix_status == "passed" else "blocked",
+            elapsed_secs=fix_elapsed, output_summary=fix_summary,
+        )
+        logger.log("review-cycle", "INFO", f"fix-implementation round {round_num}: {fix_status}")
 
         for reviewer in list(changes_requested):
             review_vars = {
@@ -103,13 +117,20 @@ def run(run_folder, docs_root, project, branch, review_signal, project_log_path,
                 "diff": fix_sig.get("diff", ""),
                 "round": str(round_num),
             }
+            review_t0 = time.monotonic()
             sig = run_stage(
                 "review", reviewer, review_vars,
                 run_folder, docs_root, project, str(project_log_path),
             )
+            review_elapsed = time.monotonic() - review_t0
             verdict = sig.get("reviewer_statuses", {}).get(reviewer, sig.get("status", "unknown"))
             reviewer_statuses[reviewer] = verdict
             _update_review_md(review_md_path, reviewer, verdict, round_num, sig.get("message", ""))
+            plan_mod.update_plan_md(
+                run_folder, f"review_{reviewer}_{round_num}",
+                "blocked" if verdict == "changes-requested" else "passed",
+                elapsed_secs=review_elapsed, output_summary=verdict,
+            )
             logger.log("review-cycle", "INFO", f"reviewer {reviewer} round {round_num}: {verdict}")
 
         state_mod.update_stage_status(run_folder, f"review-cycle-{cycle}", "passed")

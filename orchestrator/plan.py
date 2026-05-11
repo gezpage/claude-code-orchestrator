@@ -310,6 +310,68 @@ def _append_stage_section(plan_path, stage, summary, signal, run_folder, elapsed
         plan_path.write_text(content + section_text)
 
 
+def add_fix_cycle_node(run_folder, cycle_num: int, reviewers: list) -> None:
+    """Insert fix-implementation and re-review nodes into the mermaid diagram for a review cycle."""
+    with _plan_lock:
+        _add_fix_cycle_node(run_folder, cycle_num, reviewers)
+
+
+def _add_fix_cycle_node(run_folder, cycle_num: int, reviewers: list) -> None:
+    run_folder = Path(run_folder)
+    plan_path = run_folder / "plan.md"
+    if not plan_path.exists() or not reviewers:
+        return
+
+    round_num = cycle_num + 1  # cycle 1 → round 2, cycle 2 → round 3
+    fix_node_id = f"fix_impl_{cycle_num}"
+
+    # Source nodes: original sub-nodes for cycle 1, previous-round re-review nodes for later cycles
+    if cycle_num == 1:
+        source_ids = [f"review_{r}" for r in reviewers]
+    else:
+        source_ids = [f"review_{r}_{round_num - 1}" for r in reviewers]
+
+    rerun_ids = [f"review_{r}_{round_num}" for r in reviewers]
+
+    content = plan_path.read_text()
+
+    # Build new node definitions
+    fix_label = _node_label("Fix Implementation", f"fix-{cycle_num}", status="in_progress")
+    new_defs = [f'    {fix_node_id}["{fix_label}"]']
+    for reviewer, rerun_id in zip(reviewers, rerun_ids):
+        rerun_label = _node_label(reviewer.title(), reviewer, status="pending")
+        new_defs.append(f'    {rerun_id}["{rerun_label}"]')
+
+    # Build new edges: source reviewer nodes → fix_impl_N → re-review nodes
+    src_str = " & ".join(source_ids)
+    dst_str = " & ".join(rerun_ids)
+    new_edges = [
+        f"    {src_str} --> {fix_node_id}",
+        f"    {fix_node_id} --> {dst_str}",
+    ]
+
+    # New class assignments
+    new_classes = [f"    class {fix_node_id} active"]
+    for rerun_id in rerun_ids:
+        new_classes.append(f"    class {rerun_id} pending")
+
+    # Insert node defs and edges just before the first classDef line
+    classdef_pos = content.find("    classDef complete")
+    if classdef_pos >= 0:
+        insert = "\n".join(new_defs + new_edges) + "\n"
+        content = content[:classdef_pos] + insert + content[classdef_pos:]
+    else:
+        return  # malformed mermaid block; skip
+
+    # Insert class assignments just before the closing fence
+    last_fence = content.rfind("```")
+    if last_fence >= 0:
+        insert = "\n".join(new_classes) + "\n"
+        content = content[:last_fence] + insert + content[last_fence:]
+
+    plan_path.write_text(content)
+
+
 def update_plan_md(run_folder, stage, status, elapsed_secs=None, output_summary=None, signal=None, impl_name=None):
     with _plan_lock:
         _update_plan_md(run_folder, stage, status, elapsed_secs, output_summary, signal, impl_name)

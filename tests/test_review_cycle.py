@@ -1,6 +1,6 @@
 import pytest
 from pathlib import Path
-from unittest.mock import patch, call
+from unittest.mock import patch, call, MagicMock
 import yaml
 
 from orchestrator import review_cycle
@@ -244,3 +244,55 @@ def test_no_new_run_folder(tmp_path):
     dirs_after = set(d for d in tmp_path.iterdir() if d.is_dir())
     new_dirs = dirs_after - dirs_before
     assert new_dirs == set(), f"Unexpected new directories created: {new_dirs}"
+
+
+# ── plan updates during fix cycles ───────────────────────────────────────────
+
+def test_plan_add_fix_cycle_called_per_cycle(tmp_path):
+    run_folder, log_path = _setup(tmp_path)
+    signal = _review_signal({"tests": "changes-requested"})
+
+    stage_returns = [
+        _fix_sig(),
+        _reviewer_sig("tests", "changes-requested"),
+        _fix_sig(),
+        _reviewer_sig("tests", "approved"),
+    ]
+    ret_iter = iter(stage_returns)
+
+    with (
+        patch("orchestrator.review_cycle.run_stage", side_effect=lambda *a, **kw: next(ret_iter)),
+        patch("orchestrator.review_cycle.plan_mod") as mock_plan,
+    ):
+        review_cycle.run(run_folder, "/docs", "proj", "feat/x", signal, log_path)
+
+    add_calls = [c for c in mock_plan.add_fix_cycle_node.call_args_list]
+    assert len(add_calls) == 2
+    # Cycle 1: reviewers=["tests"]
+    assert add_calls[0].args[1] == 1
+    assert add_calls[0].args[2] == ["tests"]
+    # Cycle 2: same reviewer still changes-requested
+    assert add_calls[1].args[1] == 2
+
+
+def test_plan_update_called_for_fix_and_rerun_nodes(tmp_path):
+    run_folder, log_path = _setup(tmp_path)
+    signal = _review_signal({"tests": "changes-requested"})
+
+    stage_returns = [_fix_sig(), _reviewer_sig("tests", "approved")]
+    ret_iter = iter(stage_returns)
+
+    with (
+        patch("orchestrator.review_cycle.run_stage", side_effect=lambda *a, **kw: next(ret_iter)),
+        patch("orchestrator.review_cycle.plan_mod") as mock_plan,
+    ):
+        review_cycle.run(run_folder, "/docs", "proj", "feat/x", signal, log_path)
+
+    update_calls = mock_plan.update_plan_md.call_args_list
+    updated_nodes = [c.args[1] for c in update_calls]
+    # fix_impl_1 and review_tests_2 must be updated
+    assert "fix_impl_1" in updated_nodes
+    assert "review_tests_2" in updated_nodes
+    # The re-review node should be marked passed (approved verdict)
+    rerun_call = next(c for c in update_calls if c.args[1] == "review_tests_2")
+    assert rerun_call.args[2] == "passed"

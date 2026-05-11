@@ -7,6 +7,10 @@ Format: [Unreleased] at the top, dated releases below, newest first.
 
 ## [Unreleased]
 
+### Added
+- `plan.add_fix_cycle_node()` inserts `fix_impl_N` and `review_{reviewer}_{round}` nodes into the mermaid diagram whenever a review cycle runs, so the fix-implement → re-review flow is visible rather than hidden.
+- `review_cycle.run()` now calls `plan_mod.add_fix_cycle_node` before each fix stage and `plan_mod.update_plan_md` after the fix and each re-review, with elapsed timing and verdict reflected in the diagram.
+
 ### Fixed
 - `resume` no longer requires `blocked_at` in state; runs interrupted without an explicit stage failure (e.g. process killed mid-pipeline) can now be resumed using the completed-stages list that `run_pipeline` already skips correctly.
 - Stage response files now written as `{stage}{tag}-output.md` instead of `{stage}{tag}.md`, preventing the agent's stdout from overwriting artifact files the stage writes to the same path (e.g. `discovery-code-entry-points.md`).
