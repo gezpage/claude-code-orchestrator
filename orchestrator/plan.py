@@ -1,3 +1,4 @@
+import datetime
 import os
 import re
 import threading
@@ -24,13 +25,13 @@ _STATUS_ICON = {
 _plan_lock = threading.Lock()
 
 _CLASSDEFS = [
-    "    classDef complete fill:#2d6a4f,color:#fff,stroke:none",
-    "    classDef active fill:#e9c46a,color:#000,stroke:none",
-    "    classDef pending fill:#e9ecef,color:#888,stroke:#ced4da",
-    "    classDef blocked fill:#e63946,color:#fff,stroke:none",
-    "    classDef skipped fill:#dee2e6,color:#adb5bd,stroke:#ced4da",
-    "    classDef gate fill:#fff3cd,color:#664d03,stroke:#ffc107,stroke-width:2px",
-    "    classDef fannode fill:#dee2e6,color:#495057,stroke:#adb5bd,stroke-width:1px",
+    "    classDef complete fill:#059669,color:#fff,stroke:none",
+    "    classDef active fill:#d97706,color:#fff,stroke:none",
+    "    classDef pending fill:#6b7280,color:#fff,stroke:#4b5563",
+    "    classDef blocked fill:#dc2626,color:#fff,stroke:none",
+    "    classDef skipped fill:#4b5563,color:#9ca3af,stroke:#374151",
+    "    classDef gate fill:#92400e,color:#fff,stroke:#d97706,stroke-width:2px",
+    "    classDef fannode fill:#374151,color:#9ca3af,stroke:#1f2937,stroke-width:1px",
 ]
 
 
@@ -61,12 +62,17 @@ def _read_slice_title(path):
 
 
 def _run_header(run_folder):
-    """One-line run identifier derived from the run folder path."""
+    """Title and subtitle lines for the top of plan.md."""
     rf = Path(run_folder)
-    run_name = rf.name                              # "2026-05-09-run-6"
-    feature = rf.parent.name                        # "overview"
-    project = rf.parent.parent.parent.parent.name   # "todo"
-    return f"**{project}** · {feature} · {run_name}"
+    run_name = rf.name
+    feature  = rf.parent.name
+    project  = rf.parent.parent.parent.parent.name
+    started  = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    return "\n".join([
+        f"# {project} · {feature}",
+        "",
+        f"**Run:** {run_name} &nbsp;·&nbsp; **Started:** {started}",
+    ])
 
 
 def _format_elapsed(secs):
@@ -95,7 +101,10 @@ def init_plan_md(run_folder, profile):
         _run_header(run_folder),
         "",
         "```mermaid",
-        "%%{init: {'theme': 'base', 'themeVariables': {'fontSize': '14px'}}}%%",
+        "---",
+        "title: Orchestration Flow",
+        "---",
+        "%%{init: {'theme': 'base', 'themeVariables': {'fontSize': '14px', 'lineColor': '#6b7280'}}}%%",
         "flowchart TD",
     ]
 
@@ -181,8 +190,8 @@ def expand_impl_nodes(run_folder, slice_files, slice_groups=None):
         for sf in group:
             nid = slice_to_id[sf]
             i = all_slices.index(sf)
-            title = _read_slice_title(sf) or f"Slice {i + 1}"
-            new_defs.append(f'    {nid}["Slice {i + 1} -\\n{title}"]')
+            title = _read_slice_title(sf) or f"Implementation Slice {i + 1}"
+            new_defs.append(f'    {nid}["Implementation Slice {i + 1} -\\n{title}"]')
         if len(group) > 1:
             new_defs.append(f'    fanin_{g_idx + 1}((" "))')
 
@@ -242,7 +251,7 @@ def expand_impl_nodes(run_folder, slice_files, slice_groups=None):
     plan_path.write_text(content)
 
 
-def _append_stage_section(plan_path, stage, summary, signal, run_folder):
+def _append_stage_section(plan_path, stage, summary, signal, run_folder, elapsed_secs, impl_name):
     """Append a stage-completion section below the mermaid block."""
     content = plan_path.read_text()
 
@@ -251,13 +260,25 @@ def _append_stage_section(plan_path, stage, summary, signal, run_folder):
     m = re.search(node_pattern, content)
     if m:
         parts = m.group(1).split("\\n")
-        heading = re.sub(r'\s+(?:✅|⏳|🔴|-)\s*$', '', parts[0]).strip()
+        display = re.sub(r'\s+(?:✅|⏳|🔴|-)\s*$', '', parts[0]).strip()
+        display = re.sub(r'\s*-\s*$', '', display)  # strip trailing " -" on impl slice labels
     else:
-        heading = stage.replace("_", " ").title()
+        display = stage.replace("_", " ").title()
 
-    section = [f"\n## {heading}\n"]
+    heading = f"{display} ({impl_name.title()})" if impl_name else display
+
+    # Build time metadata line
+    now = datetime.datetime.now()
+    completed_str = now.strftime("%H:%M:%S")
+    if elapsed_secs is not None:
+        started = now - datetime.timedelta(seconds=int(elapsed_secs))
+        time_line = f"_{started.strftime('%H:%M:%S')} → {completed_str} ({_format_elapsed(elapsed_secs)})_"
+    else:
+        time_line = f"_Completed: {completed_str}_"
+
+    section = [f"\n## {heading}\n", time_line + "\n"]
     if summary:
-        section.append(f"{summary}\n")
+        section.append(f"\n{summary}\n")
 
     files = _stage_files(signal)
     if files:
@@ -274,12 +295,12 @@ def _append_stage_section(plan_path, stage, summary, signal, run_folder):
     plan_path.write_text(content + "\n".join(section))
 
 
-def update_plan_md(run_folder, stage, status, elapsed_secs=None, output_summary=None, signal=None):
+def update_plan_md(run_folder, stage, status, elapsed_secs=None, output_summary=None, signal=None, impl_name=None):
     with _plan_lock:
-        _update_plan_md(run_folder, stage, status, elapsed_secs, output_summary, signal)
+        _update_plan_md(run_folder, stage, status, elapsed_secs, output_summary, signal, impl_name)
 
 
-def _update_plan_md(run_folder, stage, status, elapsed_secs=None, output_summary=None, signal=None):
+def _update_plan_md(run_folder, stage, status, elapsed_secs=None, output_summary=None, signal=None, impl_name=None):
     run_folder = Path(run_folder)
     plan_path = run_folder / "plan.md"
     css_class = _STATUS_CLASS.get(status, "pending")
@@ -323,4 +344,29 @@ def _update_plan_md(run_folder, stage, status, elapsed_secs=None, output_summary
     plan_path.write_text(content)
 
     if status == "passed" and signal is not None:
-        _append_stage_section(plan_path, stage, output_summary, signal, run_folder)
+        _append_stage_section(plan_path, stage, output_summary, signal, run_folder, elapsed_secs, impl_name)
+    if status == "passed":
+        _update_run_files_table(plan_path, run_folder)
+
+
+def _update_run_files_table(plan_path, run_folder):
+    """Replace the '## File Manifest' table at the bottom of plan.md with a fresh scan."""
+    run_folder = Path(run_folder)
+    files = sorted(
+        (f for f in run_folder.rglob("*") if f.is_file() and f.name != "plan.md"),
+        key=lambda p: str(p.relative_to(run_folder)),
+    )
+    rows = ["## File Manifest", "", "| File | Stage |", "| --- | --- |"]
+    for f in files:
+        rel = f.relative_to(run_folder)
+        stage = rel.parts[0] if len(rel.parts) > 1 else "—"
+        rows.append(f"| [{rel}]({rel}) | {stage} |")
+
+    table_text = "\n".join(rows)
+    content = plan_path.read_text()
+    marker = "\n## File Manifest"
+    if marker in content:
+        content = content[: content.index(marker)] + "\n" + table_text
+    else:
+        content = content.rstrip("\n") + "\n\n" + table_text + "\n"
+    plan_path.write_text(content)

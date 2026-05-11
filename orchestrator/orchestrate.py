@@ -37,7 +37,7 @@ def _output_summary(stage, signal):
         return ", ".join(parts) if parts else None
     if stage == "decomposition":
         n = len(signal.get("slice_files", []))
-        return f"{n} slice{'s' if n != 1 else ''}" if n else None
+        return f"{n} implementation slice{'s' if n != 1 else ''}" if n else None
     if stage == "implementation":
         n = len(signal.get("commit_hashes", []))
         return f"{n} commit{'s' if n != 1 else ''}" if n else None
@@ -211,7 +211,7 @@ def run_pipeline(docs_root, project, feature_path, branch, profile_name, resume=
                 signals[stage_name] = sig
                 state_mod.update_stage_status(run_folder, stage_name, "passed")
                 state_mod.save_stage_signal(run_folder, stage_name, sig)
-                update_plan_md(run_folder, stage_name, "passed", signal=sig)
+                update_plan_md(run_folder, stage_name, "passed", signal=sig, impl_name="Interactive")
                 logger.log(stage_name, "INFO", "artifact exists — skipping interactive session")
                 continue
             update_plan_md(run_folder, stage_name, "in_progress")
@@ -236,7 +236,7 @@ def run_pipeline(docs_root, project, feature_path, branch, profile_name, resume=
             signals[stage_name] = sig
             state_mod.update_stage_status(run_folder, stage_name, "passed")
             state_mod.save_stage_signal(run_folder, stage_name, sig)
-            update_plan_md(run_folder, stage_name, "passed", elapsed_secs=elapsed, signal=sig)
+            update_plan_md(run_folder, stage_name, "passed", elapsed_secs=elapsed, signal=sig, impl_name="Interactive")
             continue
 
         variables = _build_variables(
@@ -391,9 +391,9 @@ def run_pipeline(docs_root, project, feature_path, branch, profile_name, resume=
                     all_commits.extend(commits)
                     update_plan_md(run_folder, sub_id, "passed", elapsed_secs=elapsed,
                                    output_summary=f"{len(commits)} commit{'s' if len(commits) != 1 else ''}" if commits else None,
-                                   signal=sig)
+                                   signal=sig, impl_name=impl)
                 else:
-                    logger.log(stage_name, "INFO", f"dispatching {len(group)} slices in parallel")
+                    logger.log(stage_name, "INFO", f"dispatching {len(group)} implementation slices in parallel")
                     for sf in group:
                         update_plan_md(run_folder, slice_to_id[sf], "in_progress")
                     t0 = time.monotonic()
@@ -427,7 +427,7 @@ def run_pipeline(docs_root, project, feature_path, branch, profile_name, resume=
                             all_commits.extend(commits)
                             update_plan_md(run_folder, sub_id, "passed", elapsed_secs=elapsed,
                                            output_summary=f"{len(commits)} commit{'s' if len(commits) != 1 else ''}" if commits else None,
-                                           signal=sig)
+                                           signal=sig, impl_name=impl)
                     if failed:
                         sys.exit(1)
             signals[stage_name] = {"status": "passed", "commit_hashes": all_commits, "branch": branch}
@@ -471,7 +471,7 @@ def run_pipeline(docs_root, project, feature_path, branch, profile_name, resume=
                 if verdict == "changes-requested":
                     changes_requested.append(reviewer)
                 sub_status = "blocked" if verdict == "changes-requested" else "passed"
-                update_plan_md(run_folder, sub_id, sub_status, elapsed_secs=elapsed, output_summary=verdict)
+                update_plan_md(run_folder, sub_id, sub_status, elapsed_secs=elapsed, output_summary=verdict, impl_name=impl)
             review_signal = {
                 "status": "passed",
                 "reviewer_statuses": reviewer_statuses,
@@ -516,6 +516,6 @@ def run_pipeline(docs_root, project, feature_path, branch, profile_name, resume=
 
         state_mod.update_stage_status(run_folder, stage_name, "passed")
         state_mod.save_stage_signal(run_folder, stage_name, sig)
-        update_plan_md(run_folder, stage_name, "passed", elapsed_secs=elapsed, output_summary=_output_summary(stage_name, sig), signal=sig)
+        update_plan_md(run_folder, stage_name, "passed", elapsed_secs=elapsed, output_summary=_output_summary(stage_name, sig), signal=sig, impl_name=impl)
 
     logger.log("pipeline", "INFO", "pipeline completed successfully")

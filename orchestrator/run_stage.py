@@ -23,7 +23,7 @@ def _signal_summary(sig: dict) -> str:
         h = sig["commit_hashes"]
         return f"{len(h)} commit{'s' if len(h) != 1 else ''}: {', '.join(h)}"
     if "slice_files" in sig:
-        return f"{len(sig['slice_files'])} slices"
+        return f"{len(sig['slice_files'])} implementation slices"
     if "reviewer_statuses" in sig:
         return ", ".join(f"{r}={v}" for r, v in sig["reviewer_statuses"].items())
     if "qa_pair_count" in sig:
