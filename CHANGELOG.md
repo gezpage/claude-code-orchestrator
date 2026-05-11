@@ -8,6 +8,7 @@ Format: [Unreleased] at the top, dated releases below, newest first.
 ## [Unreleased]
 
 ### Fixed
+- Stage response files now written as `{stage}{tag}-output.md` instead of `{stage}{tag}.md`, preventing the agent's stdout from overwriting artifact files the stage writes to the same path (e.g. `discovery-code-entry-points.md`).
 - `plan.md` "Orchestration Flow" is now a markdown `##` heading before the mermaid fence, not a mermaid `title:` directive.
 - Stage completion sections now appear for every stage: `_append_stage_section` inserts new sections before `## File Manifest` instead of appending to the end of the file (where they were immediately truncated by the manifest refresh).
 - `## File Manifest` table ordering corrected: root run-folder files (`_state.yaml`, `run.log`) appear first, followed by stage subdirectories sorted by earliest file mtime (reflecting execution order) rather than alphabetically.

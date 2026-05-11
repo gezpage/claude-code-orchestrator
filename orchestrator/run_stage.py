@@ -98,7 +98,8 @@ def run_stage(
     t0 = time.monotonic()
     stdout = _run_claude(prompt, cwd=cwd)
     elapsed = time.monotonic() - t0
-    (output_dir / f"{stage}{tag}.md").write_text(stdout)
+    output_file = output_dir / f"{stage}{tag}-output.md"
+    output_file.write_text(stdout)
 
     sig = signal_mod.extract_signal(stdout)
 
@@ -120,7 +121,7 @@ def run_stage(
         logger.log(stage, "ERROR", "signal missing after grace retry — treating as blocked")
         return {"stage": stage, "status": "blocked", "message": "No signal emitted"}
 
-    (output_dir / f"{stage}{tag}.md").write_text(_format_stage_output(stdout, sig))
+    output_file.write_text(_format_stage_output(stdout, sig))
 
     validator.validate_output(schema_name if schema_name else stage, sig)
     elapsed_str = _fmt_elapsed(elapsed)
