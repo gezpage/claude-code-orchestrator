@@ -10,18 +10,26 @@ Format: [Unreleased] at the top, dated releases below, newest first.
 ### Added
 - ENH-001: `project_context_path` injected into all stage variables (path: `{docs_root}/projects/{project}/context.md`); `run_pipeline()` creates the file if absent so spec agents always have a readable baseline; harvest stage now updates this file after each run so meta-context and standing constraints accumulate across runs; all downstream stage prompts (implementation, QA, review) read `context_path` under a Jinja2 guard so pipelines without a spec stage continue to work.
 
-### Changed
-- `.claude/settings.json`: removed redundant `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC` env var (inherited from user settings), added `Bash(pytest:*)` allow rule (moved from `settings.local.json`).
-- `.claude/settings.json`: removed `env` block entirely — all vars now inherited from user-level settings.
-- `.claude/settings.local.template.json`: deleted; template is no longer needed now that `settings.local.json` is gitignored and the shared rules live in `settings.json`.
-- `.gitignore`: added `.claude/settings.local.json` so personal local settings are never committed.
-- `.claude/settings.local.json`: cleared shared tool rules now that they live in `settings.json`; file is gitignored and each developer can populate from `settings.local.template.json`.
+---
+
+## [0.5.0] — 2026-05-11
 
 ### Added
 - `plan.expand_discovery_nodes()` replaces the single `discovery` node with `discovery_planning` + fanout circle + per-track nodes + fanin circle, mirroring the implementation fan-out pattern; `orchestrate.py` calls it after planning completes and updates each track node's status and timing as tracks run.
 - `plan.add_fix_cycle_node()` inserts `fix_impl_N` and `review_{reviewer}_{round}` nodes into the mermaid diagram whenever a review cycle runs, so the fix-implement → re-review flow is visible rather than hidden.
 - `review_cycle.run()` now calls `plan_mod.add_fix_cycle_node` before each fix stage and `plan_mod.update_plan_md` after the fix and each re-review, with elapsed timing and verdict reflected in the diagram.
 - Decomposition prompt now instructs agents to derive execution waves from the dependency graph and emit `slice_groups`; parallel slices in a wave each run in their own git worktree (via `_create_worktree` / `_merge_worktree_branch` / `_remove_worktree` in `orchestrate.py`) to prevent index races when committing.
+- `plan.md` now appends a `## Stage` section below the mermaid diagram each time a stage passes, containing the output summary and relative-path markdown links to any files the stage produced (findings, PRD, slices, review log, ADRs, KB files, alignment log).
+- `plan.md` header replaced with an H1 title (`# project · feature`) and a started timestamp line; mermaid diagram now includes an "Orchestration Flow" title; node colours updated to saturated fills with white text and a mid-grey edge colour for visibility in dark mode; stage sections now include template name in heading (e.g., "Alignment (Interactive)") and a timing line (`HH:MM → HH:MM (Xm Ys)`); a "## File Manifest" table is appended at the bottom and refreshed after each stage, listing all files in the run folder.
+- "Slice" renamed to "Implementation Slice" throughout: diagram node labels, log messages, `_output_summary`, and `_signal_summary`.
+- Engineering standards injection: `orchestrator/standards.py` discovers `harsh-*-engineering-standards` skills from `.claude/skills/` and injects their content (frontmatter stripped) into stage prompts. The `general` standard is always included first; per-project standards are declared in `project.yaml` under a `standards:` list. Per-stage opt-in is controlled by `standards: true` in the profile YAML — added to `implementation` and `qa` in the built-in `full` profile. Six harsh-* skill symlinks added to `.claude/skills/` pointing to the docs repo.
+
+### Changed
+- `.claude/settings.json`: removed redundant `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC` env var (inherited from user settings), added `Bash(pytest:*)` allow rule (moved from `settings.local.json`).
+- `.claude/settings.json`: removed `env` block entirely — all vars now inherited from user-level settings.
+- `.claude/settings.local.template.json`: deleted; template is no longer needed now that `settings.local.json` is gitignored and the shared rules live in `settings.json`.
+- `.gitignore`: added `.claude/settings.local.json` so personal local settings are never committed.
+- `.claude/settings.local.json`: cleared shared tool rules now that they live in `settings.json`; file is gitignored and each developer can populate from `settings.local.template.json`.
 
 ### Fixed
 - Pre-flight validation now checks that `repo-root` is a git repository (via `git rev-parse --git-dir`) immediately after verifying the path exists, so misconfigured projects fail fast before any stage is dispatched instead of surfacing a cryptic git error mid-pipeline.
@@ -32,17 +40,32 @@ Format: [Unreleased] at the top, dated releases below, newest first.
 - `## File Manifest` table ordering corrected: root run-folder files (`_state.yaml`, `run.log`) appear first, followed by stage subdirectories sorted by earliest file mtime (reflecting execution order) rather than alphabetically.
 - Discovery stage section now lists each track's name and summary as bold sub-entries below the aggregate summary line; any stage whose signal carries a `tracks` array with `name`/`summary` fields gets the same treatment automatically.
 
+---
+
+## [0.4.0] — 2026-05-10
+
 ### Added
-- `plan.md` now appends a `## Stage` section below the mermaid diagram each time a stage passes, containing the output summary and relative-path markdown links to any files the stage produced (findings, PRD, slices, review log, ADRs, KB files, alignment log).
-- `plan.md` header replaced with an H1 title (`# project · feature`) and a started timestamp line; mermaid diagram now includes an "Orchestration Flow" title; node colours updated to saturated fills with white text and a mid-grey edge colour for visibility in dark mode; stage sections now include template name in heading (e.g., "Alignment (Interactive)") and a timing line (`HH:MM → HH:MM (Xm Ys)`); a "## File Manifest" table is appended at the bottom and refreshed after each stage, listing all files in the run folder.
-- "Slice" renamed to "Implementation Slice" throughout: diagram node labels, log messages, `_output_summary`, and `_signal_summary`.
-- Engineering standards injection: `orchestrator/standards.py` discovers `harsh-*-engineering-standards` skills from `.claude/skills/` and injects their content (frontmatter stripped) into stage prompts. The `general` standard is always included first; per-project standards are declared in `project.yaml` under a `standards:` list. Per-stage opt-in is controlled by `standards: true` in the profile YAML — added to `implementation` and `qa` in the built-in `full` profile. Six harsh-* skill symlinks added to `.claude/skills/` pointing to the docs repo.
+- Interactive stage support: stages with `mode: interactive` in the profile YAML now launch a `claude` interactive session (inheriting the terminal) instead of pausing and requiring manual pipeline resume. A new `artifact` field declares the expected output file; after the session exits the pipeline checks for it and continues or blocks. `run_interactive_stage()` added to `run_stage.py`; the alignment special-case in `orchestrate.py` is replaced by a generic `mode: interactive` handler.
+- `profiles/full.yaml` updated with `artifact: alignment-log.md` and `prompt: prompts/alignment/interactive.md` on the alignment stage.
+- `prompts/alignment/interactive.md` rewritten as an agent-facing prompt (rendered and passed as initial context to the interactive session).
+- `plan.py` now generates `flowchart TD` (top-down) diagrams instead of `flowchart LR`, adds a run-metadata header above the Mermaid block, reads H1 titles from slice files to label implementation nodes, and emits `fanout_N`/`fanin_N` circle nodes around any slice group with multiple parallel slices.
+- Discovery stage restructured as a parallel fan-out: a planning agent reads the feature overview, decides which tracks to run, and writes a concise prompt file per track; track agents then run in parallel via `ThreadPoolExecutor`. Replaces the previous single-agent monolithic discovery. See ADR-013.
+- `run_stage()` gains `prompt_file` and `schema_name` optional parameters. `prompt_file` bypasses Jinja2 template rendering and reads the prompt from a pre-generated file; `schema_name` overrides the schema lookup key used for signal validation.
+- New schemas: `discovery_planning.json` (planning agent signal), `discovery_track.json` (per-track signal). `discovery.json` updated with a `tracks` array.
+- New prompt: `prompts/discovery/planning.md` — instructs the planning agent to decide tracks and write bullet-point-only track prompt files.
+- `projects/orchestrator/adrs/ADR-012-bare-flag-on-stage-invocations.md` — documents the decision to pass `--bare` to all stage subprocess invocations.
+- `projects/orchestrator/adrs/_template.md` — ADR template with required YAML frontmatter (`status`, `date`, `affects`) for all new ADRs.
+- `projects/orchestrator/DEVELOPMENT.md`: "When to Write a New ADR" expanded into a five-step process pointing at the template; ADR-012 added to the index.
 
 ### Changed
 - Run folder reorganized: every stage now writes its transcripts and artifacts into a dedicated subfolder named after the stage (e.g. `discovery/`, `alignment/`, `specification/`); only `_state.yaml`, `run.log`, and `plan.md` remain at the run root. The `stages/` flat directory and root-level `slices/`/`adrs/` directories are gone. The review artifact is renamed `review-log.md` to avoid collision with the stage transcript in the same folder. All prompt files, Python path construction, and tests updated accordingly.
 - Logging overhauled for clarity and scannability: stage column padded to 14 chars for alignment; "stage starting" logs removed (redundant before dispatch); per-field signal dump replaced with a single timed completion line including a human-readable summary derived from the signal; dispatch messages now include track/slice/implementation name rather than the stage name again; "already passed — skipping" demoted to DEBUG; WARN emitted when review requests changes; stage-level completion logs added for discovery and implementation (previously silent); review-cycle log messages clarified; signal fields preserved at DEBUG level for diagnostics.
 - `--profile` now accepts a built-in name (`full`, `spike`) or a path to a YAML file; docs-repo `workflow/profiles/` lookup removed. Built-in profiles moved into the package at `orchestrator/profiles/` and included in package data. `profiles/full.yaml` had misleading `prompt` field on discovery stage removed. New `spike` profile added (discovery only). Tests updated; `test_load_profile.py` added.
 - README rewritten with concepts table, profiles reference, and full parameter docs for all three commands. CLI help text for `--profile` updated to reflect new behaviour.
+- `run_stage()` and `_run_claude()` accept an optional `cwd` parameter forwarded to `subprocess.Popen`, so implementation, QA, and fix-implementation stage agents run with `repo_root` as their working directory — unqualified git commands can no longer silently target the wrong repository.
+- `review_cycle.run()` now receives and passes `repo_root` so the fix-implementation stage resolves the `{{ repo_root }}` template variable it already referenced.
+- Implementation and QA prompts now include an explicit constraint requiring `git -C {{ repo_root }}` for all git operations.
+- `CLAUDE.md`: "Bugfix Workflow" renamed to "Change Workflow" and made applicable to all changes (bugfix, feature, refactor). Bug-specific `overview.md` lookup step removed. ADR gate promoted to an explicit numbered step with template reference and frontmatter requirements. Changelog update added as a mandatory pre-commit step.
 
 ### Fixed
 - `signal.stage=` debug log omitted; the stage name is already present in every log line's tag column.
@@ -54,40 +77,11 @@ Format: [Unreleased] at the top, dated releases below, newest first.
 - Discovery planning phase now hardcodes `"planning"` as the prompt implementation instead of deriving it from the profile's `prompt` field; a profile specifying `prompts/discovery/default.md` previously caused the planning phase to run the single-shot discovery prompt, producing a `findings_files` signal instead of the required `tracks` signal.
 - Pipeline now fails immediately with a clear message when `--feature-path` does not resolve to a directory containing `overview.md`, rather than dispatching a planning agent that silently improvises and emits a non-conforming signal. CLI help text updated to clarify that `--feature-path` is a directory, not a file. "No tracks" error message improved to hint at the path issue.
 - Harvest stage crash: `review_md` (path to `review.md` in the run folder) is now seeded in `_build_variables` as a base variable derived from `run_folder`, so it is always available regardless of whether the run was freshly started or resumed from an older `_state.yaml` that predates the review-signal field.
-
-### Added
-- Interactive stage support: stages with `mode: interactive` in the profile YAML now launch a `claude` interactive session (inheriting the terminal) instead of pausing and requiring manual pipeline resume. A new `artifact` field declares the expected output file; after the session exits the pipeline checks for it and continues or blocks. `run_interactive_stage()` added to `run_stage.py`; the alignment special-case in `orchestrate.py` is replaced by a generic `mode: interactive` handler.
-- `profiles/full.yaml` updated with `artifact: alignment-log.md` and `prompt: prompts/alignment/interactive.md` on the alignment stage.
-- `prompts/alignment/interactive.md` rewritten as an agent-facing prompt (rendered and passed as initial context to the interactive session).
-
-- `plan.py` now generates `flowchart TD` (top-down) diagrams instead of `flowchart LR`, adds a run-metadata header above the Mermaid block, reads H1 titles from slice files to label implementation nodes, and emits `fanout_N`/`fanin_N` circle nodes around any slice group with multiple parallel slices.
-- Discovery stage restructured as a parallel fan-out: a planning agent reads the feature overview, decides which tracks to run, and writes a concise prompt file per track; track agents then run in parallel via `ThreadPoolExecutor`. Replaces the previous single-agent monolithic discovery. See ADR-013.
-- `run_stage()` gains `prompt_file` and `schema_name` optional parameters. `prompt_file` bypasses Jinja2 template rendering and reads the prompt from a pre-generated file; `schema_name` overrides the schema lookup key used for signal validation.
-- New schemas: `discovery_planning.json` (planning agent signal), `discovery_track.json` (per-track signal). `discovery.json` updated with a `tracks` array.
-- New prompt: `prompts/discovery/planning.md` — instructs the planning agent to decide tracks and write bullet-point-only track prompt files.
-
-### Fixed
 - `_create_branch()` now uses `git -C repo_root checkout -b` instead of bare `git checkout -b`, preventing branch creation in the orchestrator's own working directory instead of the target project repo.
 
-### Changed
-- `run_stage()` and `_run_claude()` accept an optional `cwd` parameter forwarded to `subprocess.Popen`, so implementation, QA, and fix-implementation stage agents run with `repo_root` as their working directory — unqualified git commands can no longer silently target the wrong repository.
-- `review_cycle.run()` now receives and passes `repo_root` so the fix-implementation stage resolves the `{{ repo_root }}` template variable it already referenced.
-- Implementation and QA prompts now include an explicit constraint requiring `git -C {{ repo_root }}` for all git operations.
+---
 
-### Changed
-- `CLAUDE.md`: "Bugfix Workflow" renamed to "Change Workflow" and made applicable to
-  all changes (bugfix, feature, refactor). Bug-specific `overview.md` lookup step
-  removed. ADR gate promoted to an explicit numbered step with template reference and
-  frontmatter requirements. Changelog update added as a mandatory pre-commit step.
-- `CLAUDE.md`: `--bare` invariant added alongside `--dangerously-skip-permissions`.
-
-### Added
-- `projects/orchestrator/adrs/ADR-012-bare-flag-on-stage-invocations.md` — documents
-  the decision to pass `--bare` to all stage subprocess invocations.
-- `projects/orchestrator/adrs/_template.md` — ADR template with required YAML
-  frontmatter (`status`, `date`, `affects`) for all new ADRs.
-- `projects/orchestrator/DEVELOPMENT.md`: "When to Write a New ADR" expanded into a
-  five-step process pointing at the template; ADR-012 added to the index.
+## [0.3.0] — 2026-05-09
 
 ### Added
 - Parallel implementation slice dispatch via `slice_groups`. Decomposition agent now
@@ -121,6 +115,7 @@ Format: [Unreleased] at the top, dated releases below, newest first.
   that already has a matching commit), a TDD red→green cycle, and test-quality
   rules (public-API-only, mock only at system boundaries).
 - Review/tests prompt adds interface-coupling and refactor-survivability checks.
+- `CLAUDE.md`: `--bare` invariant added alongside `--dangerously-skip-permissions`.
 
 ### Removed
 - Inlined `_STYLE_MAP`, `_format_elapsed`, `_node_label`, `_init_plan_md`, and
