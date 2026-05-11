@@ -18,9 +18,11 @@ You are a discovery planning agent. Analyse the feature request and design a set
 3. For each track, write a prompt file to `{{ run_folder }}/discovery/discovery-{name}-prompt.md`.
 4. For tracks that explore source code, include targeted `find` or `grep` instructions scoped to `{{ repo_root }}` — not the docs root.
 
+**Track focus quality**: a good track focus is a specific question, not a topic. Prefer "what auth boundaries does this feature cross?" over "authentication". Prefer "which shared utilities does the checkout path touch?" over "shared code". Specific questions produce specific findings.
+
 ## Track prompt format
 
-Each prompt must be bullet-point instructions only — no prose paragraphs. Use exactly this structure:
+Each prompt must be bullet-point instructions only — no prose paragraphs. Each track prompt must explicitly bound its exploration scope: name the directories, file patterns, or entry points to search — do not leave scope open-ended. Use exactly this structure:
 
 ```
 # Discovery: {track-name}
@@ -30,7 +32,7 @@ Each prompt must be bullet-point instructions only — no prose paragraphs. Use 
 **Repo root:** {{ repo_root }}
 
 ## Focus
-- [one bullet per specific question or area]
+- [one bullet per specific question — not a topic, a question]
 
 ## Instructions
 - Read `{{ docs_root }}/{{ feature_path }}/overview.md` for feature context

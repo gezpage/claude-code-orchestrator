@@ -14,7 +14,7 @@ You are an implementation agent. Implement exactly one slice. Do not loop; imple
 {% if context_path %}
 1. Read the context document at `{{ context_path }}`. It contains binding decisions and quality requirements that apply to all implementation work in this pipeline run.
 2. Check if this slice is already implemented: run `git -C {{ repo_root }} log --oneline {{ branch }} --grep="S-[0-9]"` and look for a commit that implements this slice (the filename is `{{ slice_file }}`). If a matching commit exists and all acceptance criteria pass when you run the tests, emit the signal with that commit hash and stop — do not re-implement.
-3. Read the slice definition at `{{ slice_file }}`.
+3. Read the slice definition at `{{ slice_file }}`. If the slice spec is ambiguous about what to build, do not silently resolve the ambiguity — emit a `blocked` signal with a specific question rather than guessing.
 4. For each acceptance criterion that involves tests — follow the RED → GREEN cycle:
    - Write a failing test that asserts the behavior through the public interface. Confirm it fails.
    - Write the minimum code to make it pass. Confirm it passes.
@@ -25,10 +25,10 @@ You are an implementation agent. Implement exactly one slice. Do not loop; imple
    - Use descriptive commit messages; one commit per logical unit (not one giant squash).
    - All git commands must target `{{ repo_root }}` — always use `git -C {{ repo_root }}`, never bare `git`.
 7. Do not touch files outside the scope of this slice. Do not refactor unrelated code.
-8. Confirm all tests referenced in the acceptance criteria pass.
+8. Confirm all tests referenced in the acceptance criteria pass and the git working tree is clean before emitting the signal.
 {% else %}
 1. Check if this slice is already implemented: run `git -C {{ repo_root }} log --oneline {{ branch }} --grep="S-[0-9]"` and look for a commit that implements this slice (the filename is `{{ slice_file }}`). If a matching commit exists and all acceptance criteria pass when you run the tests, emit the signal with that commit hash and stop — do not re-implement.
-2. Read the slice definition at `{{ slice_file }}`.
+2. Read the slice definition at `{{ slice_file }}`. If the slice spec is ambiguous about what to build, do not silently resolve the ambiguity — emit a `blocked` signal with a specific question rather than guessing.
 3. For each acceptance criterion that involves tests — follow the RED → GREEN cycle:
    - Write a failing test that asserts the behavior through the public interface. Confirm it fails.
    - Write the minimum code to make it pass. Confirm it passes.
@@ -39,7 +39,7 @@ You are an implementation agent. Implement exactly one slice. Do not loop; imple
    - Use descriptive commit messages; one commit per logical unit (not one giant squash).
    - All git commands must target `{{ repo_root }}` — always use `git -C {{ repo_root }}`, never bare `git`.
 6. Do not touch files outside the scope of this slice. Do not refactor unrelated code.
-7. Confirm all tests referenced in the acceptance criteria pass.
+7. Confirm all tests referenced in the acceptance criteria pass and the git working tree is clean before emitting the signal.
 {% endif %}
 
 Do not implement the next slice. Stop after this one.

@@ -17,6 +17,8 @@ Work through the following with the developer:
 4. Identify risks and agree on mitigations
 5. Surface any open questions that must be resolved before speccing
 
-Once alignment is complete, write the alignment log to `{{ run_folder }}/alignment/alignment-log.md`. The log should capture: all decisions made, the reasoning, and any remaining open items.
+Once all questions are resolved, read back the decisions made to confirm nothing was missed before writing the log.
+
+Write the alignment log to `{{ run_folder }}/alignment/alignment-log.md`. The log must be complete enough that someone who was not in this session could reconstruct every decision made — include the question, the decision, the reasoning, and any alternatives that were ruled out.
 
 When done, exit this session (`/exit`). The pipeline will detect `alignment-log.md` and advance to Specification.
