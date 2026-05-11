@@ -57,10 +57,11 @@ def test_extension_appended_after_core(tmp_path):
     assert run_pos < conventions_pos
 
 
-def _make_skill(skills_dir: Path, identifier: str, body: str) -> None:
+def _make_skill(skills_dir: Path, identifier: str, body: str, h1: str = "") -> None:
     d = skills_dir / f"harsh-{identifier}-engineering-standards"
     d.mkdir(parents=True)
-    (d / "SKILL.md").write_text(f"---\nname: harsh-{identifier}-engineering-standards\n---\n\n{body}")
+    h1_line = f"# {h1}\n\n" if h1 else ""
+    (d / "SKILL.md").write_text(f"---\nname: harsh-{identifier}-engineering-standards\n---\n\n{h1_line}{body}")
 
 
 def test_standards_none_produces_no_block(tmp_path):
@@ -71,19 +72,19 @@ def test_standards_none_produces_no_block(tmp_path):
 def test_standards_injected_when_provided(tmp_path):
     skills_dir = tmp_path / ".claude" / "skills"
     skills_dir.mkdir(parents=True)
-    _make_skill(skills_dir, "general", "# General Rules\nDo good work.\n")
-    _make_skill(skills_dir, "php", "# PHP Rules\nUse strict_types.\n")
+    _make_skill(skills_dir, "general", "Do good work.\n", h1="General Rules")
+    _make_skill(skills_dir, "php", "Use strict_types.\n", h1="PHP Rules")
     with patch("orchestrator.standards._SKILLS_DIR", skills_dir):
         result = render_prompt("discovery", "default", VARS, str(tmp_path), "myproject", standards=["php"])
     assert "## Engineering Standards" in result
-    assert "General Rules" in result
-    assert "PHP Rules" in result
+    assert "### General Rules" in result
+    assert "### PHP Rules" in result
 
 
 def test_standards_block_before_project_conventions(tmp_path):
     skills_dir = tmp_path / ".claude" / "skills"
     skills_dir.mkdir(parents=True)
-    _make_skill(skills_dir, "general", "# General Rules\nDo good work.\n")
+    _make_skill(skills_dir, "general", "Do good work.\n", h1="General Rules")
     ext_dir = tmp_path / "projects" / "myproject" / "workflow" / "prompts"
     ext_dir.mkdir(parents=True)
     (ext_dir / "discovery.md").write_text("Project rule here.")
@@ -97,8 +98,8 @@ def test_standards_block_before_project_conventions(tmp_path):
 def test_standards_empty_list_injects_only_general(tmp_path):
     skills_dir = tmp_path / ".claude" / "skills"
     skills_dir.mkdir(parents=True)
-    _make_skill(skills_dir, "general", "# General Rules\nDo good work.\n")
-    _make_skill(skills_dir, "php", "# PHP Rules\nUse strict_types.\n")
+    _make_skill(skills_dir, "general", "Do good work.\n", h1="General Rules")
+    _make_skill(skills_dir, "php", "Use strict_types.\n", h1="PHP Rules")
     with patch("orchestrator.standards._SKILLS_DIR", skills_dir):
         result = render_prompt("discovery", "default", VARS, str(tmp_path), "myproject", standards=[])
     assert "General Rules" in result

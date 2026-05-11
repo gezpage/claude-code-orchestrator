@@ -2,7 +2,7 @@ import pytest
 from pathlib import Path
 from unittest.mock import patch
 
-from orchestrator.standards import discover, _strip_frontmatter, load, _SKILLS_DIR
+from orchestrator.standards import discover, _strip_frontmatter, _extract_h1, load, _SKILLS_DIR
 
 
 def _make_skill(skills_dir: Path, identifier: str, content: str) -> None:
@@ -14,6 +14,31 @@ def _make_skill(skills_dir: Path, identifier: str, content: str) -> None:
 GENERAL_CONTENT = "---\nname: harsh-general-engineering-standards\ndescription: General rules.\n---\n\n# General Standards\n\nDo good work.\n"
 PHP_CONTENT = "---\nname: harsh-php-engineering-standards\ndescription: PHP rules.\n---\n\n# PHP Standards\n\nUse strict_types.\n"
 ORPHAN_DIR_CONTENT = "# Not a skill"  # dir without SKILL.md
+
+
+class TestExtractH1:
+    def test_extracts_h1_and_returns_body(self):
+        text = "# My Title\n\nSome body text.\n"
+        label, body = _extract_h1(text)
+        assert label == "My Title"
+        assert body == "Some body text.\n"
+
+    def test_no_h1_returns_empty_label(self):
+        text = "## Not an H1\n\nBody.\n"
+        label, body = _extract_h1(text)
+        assert label == ""
+        assert body == text
+
+    def test_h1_only_no_body(self):
+        text = "# Just a title"
+        label, body = _extract_h1(text)
+        assert label == "Just a title"
+        assert body == ""
+
+    def test_h1_label_stripped(self):
+        text = "# Title With Spaces  \n\nBody.\n"
+        label, _ = _extract_h1(text)
+        assert label == "Title With Spaces"
 
 
 class TestStripFrontmatter:
@@ -64,6 +89,22 @@ class TestDiscover:
 
 
 class TestLoad:
+    def test_h1_promoted_to_h3_subsection(self, tmp_path):
+        _make_skill(tmp_path, "general", GENERAL_CONTENT)
+        with patch("orchestrator.standards._SKILLS_DIR", tmp_path):
+            result = load([])
+        assert "### General Standards" in result
+        # No bare H1 lines remain (only ### prefix, not # or ##)
+        import re
+        assert not re.search(r"^# ", result, re.MULTILINE)
+
+    def test_identifier_used_as_label_when_no_h1(self, tmp_path):
+        content = "---\nname: x\n---\n\nNo heading here.\n"
+        _make_skill(tmp_path, "general", content)
+        with patch("orchestrator.standards._SKILLS_DIR", tmp_path):
+            result = load([])
+        assert "### General" in result
+
     def test_general_always_included(self, tmp_path):
         _make_skill(tmp_path, "general", GENERAL_CONTENT)
         with patch("orchestrator.standards._SKILLS_DIR", tmp_path):

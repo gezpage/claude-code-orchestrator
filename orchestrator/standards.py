@@ -34,9 +34,20 @@ def _strip_frontmatter(text: str) -> str:
     return text[end + 4:].lstrip("\n")
 
 
-def load(requested: list[str]) -> str:
-    """Load general (always first) + each requested identifier; return stripped joined markdown.
+def _extract_h1(text: str) -> tuple[str, str]:
+    """Return (h1_text, remaining_body) stripping the leading H1 line if present."""
+    if not text.startswith("# "):
+        return "", text
+    newline = text.find("\n")
+    if newline == -1:
+        return text[2:].strip(), ""
+    return text[2:newline].strip(), text[newline:].lstrip("\n")
 
+
+def load(requested: list[str]) -> str:
+    """Load general (always first) + each requested identifier; return joined markdown.
+
+    Each standard becomes a ### subsection using the skill's own H1 as its label.
     Returns "" when no skills are found (safe — caller skips the empty block).
     """
     available = discover()
@@ -51,5 +62,11 @@ def load(requested: list[str]) -> str:
         else:
             logger.warning("standards: no skill found for identifier '%s' — skipping", ident)
 
-    sections = [_strip_frontmatter(available[i].read_text()) for i in identifiers]
+    sections = []
+    for ident in identifiers:
+        body = _strip_frontmatter(available[ident].read_text())
+        label, body = _extract_h1(body)
+        if not label:
+            label = ident.replace("-", " ").title()
+        sections.append(f"### {label}\n\n{body.strip()}")
     return "\n\n---\n\n".join(sections)
