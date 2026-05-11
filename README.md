@@ -66,6 +66,28 @@ Interactive stages also require `mode: interactive` and `artifact`:
     prompt: prompts/alignment/interactive.md
 ```
 
+## Project configuration
+
+Each project requires a `project.yaml` file at `{docs-root}/projects/{project}/project.yaml`.
+
+```yaml
+name: my-api
+description: REST API for the platform
+repo-root: ~/Dev/my-api        # path to the code repository
+default-profile: full          # profile used when --profile is omitted
+merge-target: main             # branch PRs merge into
+agent-rules: CLAUDE.md         # agent rules file in the code repo
+
+# Engineering standards injected into implementation and QA prompts.
+# Each entry maps to a harsh-{name}-engineering-standards skill in .claude/skills/.
+# The general standard is always included automatically.
+standards:
+  - php
+  - mysql
+```
+
+The `standards` list is optional. If omitted, only the general engineering standard is injected (when the active profile opts stages in via `standards: true`). Add any identifier that has a corresponding `harsh-{name}-engineering-standards` skill symlinked in the orchestrator's `.claude/skills/` directory.
+
 ## Commands
 
 ### `orchestrator run` — start a pipeline
