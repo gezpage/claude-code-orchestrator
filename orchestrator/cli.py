@@ -64,9 +64,6 @@ def resume(run_folder, docs_root):
         raise click.UsageError(str(e))
 
     st = state_mod.load_state(run_folder)
-    blocked_at = st.get("blocked_at")
-    if not blocked_at:
-        raise click.UsageError("No blocked_at in state — nothing to resume.")
 
     for key in ("project", "feature_path", "branch"):
         if not st.get(key):
