@@ -143,7 +143,7 @@ def init_plan_md(run_folder, profile):
         "## Orchestration Flow",
         "",
         "```mermaid",
-        "%%{init: {'theme': 'base', 'themeVariables': {'fontSize': '14px', 'lineColor': '#6b7280'}}}%%",
+        "%%{init: {'theme': 'base', 'themeVariables': {'fontSize': '14px', 'lineColor': '#6b7280', 'clusterBkg': 'transparent', 'clusterBorder': 'transparent'}}}%%",
         "flowchart TD",
     ]
 
