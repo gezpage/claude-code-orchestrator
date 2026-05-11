@@ -12,7 +12,7 @@ from orchestrator import paths, state as state_mod
 
 _SLICE_RE = re.compile(r'S-\d+-')
 from orchestrator.logger import OrchestratorLogger
-from orchestrator.plan import init_plan_md, expand_impl_nodes, update_plan_md
+from orchestrator.plan import init_plan_md, expand_impl_nodes, expand_discovery_nodes, update_plan_md
 from orchestrator.run_stage import run_stage, run_interactive_stage, _fmt_elapsed
 import orchestrator.review_cycle as review_cycle_mod
 
@@ -313,9 +313,17 @@ def run_pipeline(docs_root, project, feature_path, branch, profile_name, resume=
 
             logger.log(stage_name, "INFO", f"planning complete: {len(tracks)} track{'s' if len(tracks) != 1 else ''}")
 
+            # Expand diagram: replace single discovery node with planning + per-track nodes
+            planning_elapsed = time.monotonic() - t0
+            track_node_ids = expand_discovery_nodes(run_folder, tracks, planning_elapsed_secs=planning_elapsed)
+
             # Phase 2: run all tracks in parallel
             if len(tracks) == 1:
                 track = tracks[0]
+                tid = track_node_ids.get(track["name"])
+                if tid:
+                    update_plan_md(run_folder, tid, "in_progress")
+                t_start = time.monotonic()
                 sig = run_stage(
                     "discovery", "pregenerated", dict(variables),
                     run_folder, docs_root, project, project_log_path,
@@ -323,21 +331,37 @@ def run_pipeline(docs_root, project, feature_path, branch, profile_name, resume=
                     prompt_file=track["prompt_file"],
                     schema_name="discovery_track",
                 )
+                track_elapsed = time.monotonic() - t_start
+                if tid:
+                    t_status = "passed" if sig.get("status") == "passed" else "blocked"
+                    update_plan_md(run_folder, tid, t_status, elapsed_secs=track_elapsed, output_summary=sig.get("summary", ""))
                 track_results = {track["name"]: sig}
             else:
                 logger.log(stage_name, "INFO", f"dispatching {len(tracks)} tracks in parallel")
+
+                def _run_track_with_updates(track, variables_copy):
+                    tid = track_node_ids.get(track["name"])
+                    if tid:
+                        update_plan_md(run_folder, tid, "in_progress")
+                    t_start = time.monotonic()
+                    sig = run_stage(
+                        "discovery", "pregenerated", variables_copy,
+                        run_folder, docs_root, project, project_log_path,
+                        track["name"],        # output_suffix
+                        None,                 # cwd
+                        track["prompt_file"], # prompt_file
+                        "discovery_track",    # schema_name
+                    )
+                    track_elapsed = time.monotonic() - t_start
+                    if tid:
+                        t_status = "passed" if sig.get("status") == "passed" else "blocked"
+                        update_plan_md(run_folder, tid, t_status, elapsed_secs=track_elapsed, output_summary=sig.get("summary", ""))
+                    return sig
+
                 futures: dict[concurrent.futures.Future, str] = {}
                 with concurrent.futures.ThreadPoolExecutor(max_workers=len(tracks)) as executor:
                     for track in tracks:
-                        fut = executor.submit(
-                            run_stage,
-                            "discovery", "pregenerated", dict(variables),
-                            run_folder, docs_root, project, project_log_path,
-                            track["name"],        # output_suffix
-                            None,                 # cwd
-                            track["prompt_file"], # prompt_file
-                            "discovery_track",    # schema_name
-                        )
+                        fut = executor.submit(_run_track_with_updates, track, dict(variables))
                         futures[fut] = track["name"]
                 track_results = {name: fut.result() for fut, name in futures.items()}
 

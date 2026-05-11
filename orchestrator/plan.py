@@ -160,6 +160,92 @@ def init_plan_md(run_folder, profile):
     plan_path.write_text("\n".join(lines))
 
 
+def _track_node_id(track_name: str) -> str:
+    return "disc_" + track_name.replace("-", "_")
+
+
+def expand_discovery_nodes(run_folder, tracks, planning_elapsed_secs=None):
+    """Replace the single 'discovery' node with discovery_planning + per-track nodes.
+
+    Called after the planning phase returns track definitions. Marks discovery_planning
+    as complete and each track node as pending. Returns a dict mapping track name →
+    node ID so orchestrate.py can update individual track statuses.
+    """
+    with _plan_lock:
+        return _expand_discovery_nodes(run_folder, tracks, planning_elapsed_secs)
+
+
+def _expand_discovery_nodes(run_folder, tracks, planning_elapsed_secs=None):
+    run_folder = Path(run_folder)
+    plan_path = run_folder / "plan.md"
+    if not plan_path.exists() or not tracks:
+        return {}
+
+    track_node_ids = {t["name"]: _track_node_id(t["name"]) for t in tracks}
+    content = plan_path.read_text()
+
+    # Build replacement node definitions
+    planning_label = _node_label("Discovery Planning", "planning", status="passed", elapsed_secs=planning_elapsed_secs)
+    new_defs = [f'    discovery_planning["{planning_label}"]']
+    if len(tracks) > 1:
+        new_defs.append('    disc_fanout((" "))')
+    for track in tracks:
+        tid = track_node_ids[track["name"]]
+        display = track["name"].replace("-", " ").title()
+        track_label = _node_label(display, track["name"])
+        new_defs.append(f'    {tid}["{track_label}"]')
+    if len(tracks) > 1:
+        new_defs.append('    disc_fanin((" "))')
+
+    # Replace node definition
+    old_def = re.search(r'    discovery\["[^"]*"\]', content)
+    if old_def:
+        content = content[:old_def.start()] + "\n".join(new_defs) + content[old_def.end():]
+
+    # Rewrite chain edge: discovery --> <next>
+    if len(tracks) > 1:
+        fan_ids = " & ".join(track_node_ids[t["name"]] for t in tracks)
+
+        def _discovery_chain(m):
+            next_stage = m.group(1)
+            lines = [
+                "    discovery_planning --> disc_fanout",
+                f"    disc_fanout --> {fan_ids}",
+                f"    {fan_ids} --> disc_fanin",
+            ]
+            if next_stage:
+                lines.append(f"    disc_fanin --> {next_stage}")
+            return "\n".join(lines)
+
+        content = re.sub(r"    discovery --> (\w+)", _discovery_chain, content)
+    else:
+        tid = track_node_ids[tracks[0]["name"]]
+
+        def _single_chain(m):
+            next_stage = m.group(1)
+            line = f"    discovery_planning --> {tid}"
+            if next_stage:
+                line += f" --> {next_stage}"
+            return line
+
+        content = re.sub(r"    discovery --> (\w+)", _single_chain, content)
+
+    # Replace class assignment
+    old_class = re.search(r"    class discovery \w+", content)
+    if old_class:
+        new_classes = ["    class discovery_planning complete"]
+        if len(tracks) > 1:
+            new_classes.append("    class disc_fanout fannode")
+        for track in tracks:
+            new_classes.append(f"    class {track_node_ids[track['name']]} pending")
+        if len(tracks) > 1:
+            new_classes.append("    class disc_fanin fannode")
+        content = content[:old_class.start()] + "\n".join(new_classes) + content[old_class.end():]
+
+    plan_path.write_text(content)
+    return track_node_ids
+
+
 def expand_impl_nodes(run_folder, slice_files, slice_groups=None):
     """Replace the single 'implementation' node with one node per slice.
 

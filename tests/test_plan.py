@@ -1,7 +1,7 @@
 import pytest
 from pathlib import Path
 
-from orchestrator.plan import init_plan_md, expand_impl_nodes, update_plan_md, add_fix_cycle_node
+from orchestrator.plan import init_plan_md, expand_impl_nodes, expand_discovery_nodes, update_plan_md, add_fix_cycle_node
 
 
 def _make_run_folder(tmp_path):
@@ -65,6 +65,89 @@ def test_init_plan_md_review_stage_with_prompts(tmp_path):
     assert 'review_arch[' in content
     assert 'review_security[' in content
     assert "review --> review_arch & review_security" in content
+
+
+# --- expand_discovery_nodes ---
+
+def _discovery_profile():
+    return {"stages": [
+        {"stage": "discovery"},
+        {"stage": "alignment", "mode": "interactive", "artifact": "alignment-log.md"},
+        {"stage": "specification", "prompt": "prompts/specification/default.md"},
+    ]}
+
+
+def test_expand_discovery_nodes_multi_track(tmp_path):
+    run_folder = _make_run_folder(tmp_path)
+    init_plan_md(run_folder, _discovery_profile())
+    tracks = [{"name": "architecture"}, {"name": "product-requirements"}]
+    result = expand_discovery_nodes(run_folder, tracks)
+    content = (run_folder / "plan.md").read_text()
+    assert 'discovery_planning[' in content
+    assert 'disc_architecture[' in content
+    assert 'disc_product_requirements[' in content
+    assert 'disc_fanout' in content
+    assert 'disc_fanin' in content
+    assert 'discovery_planning --> disc_fanout' in content
+    assert 'disc_fanout --> disc_architecture & disc_product_requirements' in content
+    assert 'disc_architecture & disc_product_requirements --> disc_fanin' in content
+    assert 'disc_fanin --> alignment' in content
+    assert 'class discovery_planning complete' in content
+    assert 'class disc_architecture pending' in content
+    assert 'class disc_product_requirements pending' in content
+    assert 'class disc_fanout fannode' in content
+    assert 'class disc_fanin fannode' in content
+    assert 'discovery[' not in content
+
+
+def test_expand_discovery_nodes_single_track(tmp_path):
+    run_folder = _make_run_folder(tmp_path)
+    init_plan_md(run_folder, _discovery_profile())
+    tracks = [{"name": "risk"}]
+    expand_discovery_nodes(run_folder, tracks)
+    content = (run_folder / "plan.md").read_text()
+    assert 'discovery_planning[' in content
+    assert 'disc_risk[' in content
+    assert 'disc_fanout' not in content
+    assert 'disc_fanin' not in content
+    assert 'discovery_planning --> disc_risk --> alignment' in content
+    assert 'class discovery_planning complete' in content
+    assert 'class disc_risk pending' in content
+
+
+def test_expand_discovery_nodes_noop_when_no_tracks(tmp_path):
+    run_folder = _make_run_folder(tmp_path)
+    init_plan_md(run_folder, _discovery_profile())
+    original = (run_folder / "plan.md").read_text()
+    result = expand_discovery_nodes(run_folder, [])
+    assert (run_folder / "plan.md").read_text() == original
+    assert result == {}
+
+
+def test_expand_discovery_nodes_noop_when_no_plan(tmp_path):
+    run_folder = _make_run_folder(tmp_path)
+    result = expand_discovery_nodes(run_folder, [{"name": "architecture"}])
+    assert not (run_folder / "plan.md").exists()
+    assert result == {}
+
+
+def test_expand_discovery_nodes_returns_node_id_map(tmp_path):
+    run_folder = _make_run_folder(tmp_path)
+    init_plan_md(run_folder, _discovery_profile())
+    tracks = [{"name": "product-requirements"}, {"name": "code-entry-points"}]
+    result = expand_discovery_nodes(run_folder, tracks)
+    assert result == {
+        "product-requirements": "disc_product_requirements",
+        "code-entry-points": "disc_code_entry_points",
+    }
+
+
+def test_expand_discovery_nodes_planning_elapsed_in_label(tmp_path):
+    run_folder = _make_run_folder(tmp_path)
+    init_plan_md(run_folder, _discovery_profile())
+    expand_discovery_nodes(run_folder, [{"name": "architecture"}], planning_elapsed_secs=90)
+    content = (run_folder / "plan.md").read_text()
+    assert "1m 30s" in content
 
 
 # --- expand_impl_nodes ---
