@@ -8,7 +8,7 @@ Delegates to the `orchestrator` CLI. No orchestration logic lives here.
 
 ```
 orchestrator run \
-  --docs-root <path-to-team-hub> \
+  --docs-root <path-to-docs-root> \
   --project <project-name> \
   --feature-path <docs-relative-path-to-feature-file> \
   --branch <git-branch-name> \
@@ -22,7 +22,7 @@ orchestrator stage \
   --stage <stage-name> \
   --input <path-to-input-json> \
   --run-folder <path-to-run-folder> \
-  --docs-root <path-to-team-hub> \
+  --docs-root <path-to-docs-root> \
   --project <project-name> \
   --project-log-path <path-for-logs>
 ```
@@ -32,7 +32,7 @@ orchestrator stage \
 ```
 orchestrator resume \
   --run-folder <path-to-existing-run-folder> \
-  --docs-root <path-to-team-hub>
+  --docs-root <path-to-docs-root>
 ```
 
 ## Required args
