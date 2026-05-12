@@ -1,5 +1,7 @@
 # Orchestrator
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+
 Pipeline sequencer for feature development. Takes a feature spec and drives it through a fixed sequence of stages — discovery, alignment, specification, decomposition, implementation, QA, review, harvest — by orchestrating Claude Code agents, managing state, and coordinating parallel execution.
 
 ## Overview
@@ -231,6 +233,10 @@ orchestrator stage \
 ```
 
 Exits `0` on success, `1` on failure. Prints the stage signal JSON to stdout.
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md). Read `CLAUDE.md` before making code changes — it documents the architectural invariants every contributor must follow.
 
 ## Tests
 

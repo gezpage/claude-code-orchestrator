@@ -5,13 +5,28 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "orchestrator"
 dynamic = ["version"]
+description = "Pipeline sequencer for feature development with Claude Code"
+readme = "README.md"
+license = {text = "MIT"}
+authors = [{name = "Gez Page"}]
 requires-python = ">=3.11"
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+]
 dependencies = [
     "click>=8.1",
     "jinja2>=3.1",
     "jsonschema>=4.21",
     "pyyaml>=6.0",
 ]
+
+[project.urls]
+Repository = "https://github.com/gezpage/claude-code-orchestrator"
 
 [project.scripts]
 orchestrator = "orchestrator.cli:main"

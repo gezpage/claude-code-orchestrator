@@ -10,4 +10,8 @@ venv/
 .mypy_cache/
 *.log
 .idea/
+.vscode/
 .claude/
+.env
+.env.*
+.DS_Store
