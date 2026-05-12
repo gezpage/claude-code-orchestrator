@@ -56,11 +56,11 @@ Follow this for every change — bugfix, feature, or refactor.
    add an invariant here too.
 6. Create a feature branch from main:
    ```
-   git -C ~/Dev/tools/orchestrator fetch origin main
-   git -C ~/Dev/tools/orchestrator checkout -b <type>/<short-description> origin/main
+   git fetch origin main
+   git checkout -b <type>/<short-description> origin/main
    ```
-7. Commit: `git -C ~/Dev/tools/orchestrator commit -m "type: message"`
-8. Push: `git -C ~/Dev/tools/orchestrator push -u origin <branch>`
+7. Commit: `git commit -m "type: message"`
+8. Push: `git push -u origin <branch>`
 9. Open PR — do NOT merge, that is always left to the user:
    `gh pr create --title "<commit message>" --body "..."`
 
@@ -77,7 +77,7 @@ Run `uv run pytest tests/` from the repo root.
 After each discrete task, open a pull request — do not commit to main directly.
 
 - Add a CHANGELOG.md entry (one line, current date heading) before committing
-- Branch from main: `git -C ~/Dev/tools/orchestrator fetch origin main && git -C ~/Dev/tools/orchestrator checkout -b <type>/<slug> origin/main`
+- Branch from main: `git fetch origin main && git checkout -b <type>/<slug> origin/main`
 - Stage files by name — never `git add -A` or `git add .`
 - Commit message: conventional format (`fix:`, `feat:`, `chore:`, `docs:`), one sentence, no ticket refs, no emoji
 - Push and open PR: `gh pr create --title "<msg>" --body "..."`
