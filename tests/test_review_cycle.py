@@ -275,6 +275,50 @@ def test_plan_add_fix_cycle_called_per_cycle(tmp_path):
     assert add_calls[1].args[1] == 2
 
 
+def test_reviewer_cwd_set_to_repo_root(tmp_path):
+    run_folder, log_path = _setup(tmp_path)
+    signal = _review_signal({"implementation": "changes-requested"})
+
+    stage_returns = [_fix_sig(), _reviewer_sig("implementation", "approved")]
+    ret_iter = iter(stage_returns)
+    reviewer_cwds = []
+
+    def tracking_stage(stage, impl, variables, run_folder, docs_root, project, log_path, cwd=None, **kwargs):
+        if stage == "review":
+            reviewer_cwds.append(cwd)
+        return next(ret_iter)
+
+    with patch("orchestrator.review_cycle.run_stage", side_effect=tracking_stage):
+        review_cycle.run(
+            run_folder, "/docs", "proj", "feat/x", signal, log_path,
+            repo_root="/path/to/repo",
+        )
+
+    assert reviewer_cwds == ["/path/to/repo"]
+
+
+def test_reviewer_vars_include_repo_root(tmp_path):
+    run_folder, log_path = _setup(tmp_path)
+    signal = _review_signal({"implementation": "changes-requested"})
+
+    stage_returns = [_fix_sig(), _reviewer_sig("implementation", "approved")]
+    ret_iter = iter(stage_returns)
+    reviewer_vars_seen = []
+
+    def tracking_stage(stage, impl, variables, run_folder, docs_root, project, log_path, cwd=None, **kwargs):
+        if stage == "review":
+            reviewer_vars_seen.append(variables.get("repo_root"))
+        return next(ret_iter)
+
+    with patch("orchestrator.review_cycle.run_stage", side_effect=tracking_stage):
+        review_cycle.run(
+            run_folder, "/docs", "proj", "feat/x", signal, log_path,
+            repo_root="/path/to/repo",
+        )
+
+    assert reviewer_vars_seen == ["/path/to/repo"]
+
+
 def test_plan_update_called_for_fix_and_rerun_nodes(tmp_path):
     run_folder, log_path = _setup(tmp_path)
     signal = _review_signal({"tests": "changes-requested"})

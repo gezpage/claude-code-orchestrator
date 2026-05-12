@@ -121,12 +121,14 @@ def run(run_folder, docs_root, project, branch, review_signal, project_log_path,
                 "diff": fix_sig.get("diff", ""),
                 "round": str(round_num),
                 "context_path": context_path,
+                "repo_root": repo_root,
             }
             review_t0 = time.monotonic()
             sig = run_stage(
                 "review", reviewer, review_vars,
                 run_folder, docs_root, project, str(project_log_path),
                 output_suffix=f"{reviewer}-round{round_num}",
+                cwd=repo_root or None,
             )
             review_elapsed = time.monotonic() - review_t0
             verdict = sig.get("reviewer_statuses", {}).get(reviewer, sig.get("status", "unknown"))
