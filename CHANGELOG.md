@@ -8,14 +8,8 @@ Format: [Unreleased] at the top, dated releases below, newest first.
 ## [Unreleased]
 
 ### Changed
-
-## [2026-05-12]
-
-### Added
-- Ruff (lint + format), mypy, pytest-cov dev dependencies and config in pyproject.toml
-- `.pre-commit-config.yaml` for local enforcement of ruff and mypy
-- `.github/workflows/ci.yml` — CI gate running lint, format, type-check, and tests on every PR
 - Added branch housekeeping step (step 5) to Change Workflow: prunes merged-PR branches via `gh pr list --state merged` before each new worktree, covering squash-merge repos where `git branch --merged` is unreliable.
+- Refactored `orchestrate.py`: extracted five stage dispatcher functions (`_dispatch_default`, `_dispatch_interactive`, `_dispatch_tracks`, `_dispatch_slices`, `_dispatch_prompts`) from the 424-line `run_pipeline` god function; each dispatcher is independently unit-tested (24 new tests); `_PipelineContext` dataclass replaces 8-argument function signatures; `_DISPATCHERS` dict replaces the `if/elif` expansion chain; `run_pipeline` reduced from 424 to 147 lines.
 
 ## [2026-05-12]
 

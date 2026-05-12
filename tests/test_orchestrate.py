@@ -4,6 +4,8 @@ import pytest
 import yaml
 
 from orchestrator import orchestrate
+from orchestrator.orchestrate import _PipelineContext
+from orchestrator.profile import ExpansionKind, StageConfig
 
 # ── helpers ──────────────────────────────────────────────────────────────────
 
@@ -846,3 +848,668 @@ def test_orchestrate_source_has_no_open_calls():
     # Filter out this very assertion and comments
     lines = [line for line in source.splitlines() if "open(" in line and not line.strip().startswith("#")]
     assert lines == [], "orchestrate.py contains open() calls:\n" + "\n".join(lines)
+
+
+# ── dispatcher unit tests ─────────────────────────────────────────────────────
+
+
+def _make_ctx(tmp_path):
+    logger = MagicMock()
+    return _PipelineContext(
+        docs_root=str(tmp_path),
+        project="myproject",
+        project_log_path=str(tmp_path / "projects" / "myproject"),
+        logger=logger,
+        branch="feat/test",
+        project_config={"repo-root": "/tmp"},
+        project_standards=[],
+    )
+
+
+def _make_run_folder(tmp_path):
+    rf = tmp_path / "runs" / "run-1"
+    rf.mkdir(parents=True)
+    return rf
+
+
+# ── _dispatch_default ─────────────────────────────────────────────────────────
+
+
+def test_default_dispatcher_returns_run_stage_signal(tmp_path):
+    """Single stage execution surfaces the run_stage signal unchanged."""
+    from orchestrator.orchestrate import _dispatch_default
+
+    stage = StageConfig(name="specification", prompt="prompts/specification/default.md")
+    ctx = _make_ctx(tmp_path)
+    run_folder = _make_run_folder(tmp_path)
+    expected = {"stage": "specification", "status": "passed", "prd_path": "/tmp/prd.md"}
+
+    with patch("orchestrator.orchestrate.run_stage", return_value=expected) as mock_rs:
+        result = _dispatch_default(stage, {"repo_root": "/tmp"}, run_folder, ctx)
+
+    assert result == expected
+    mock_rs.assert_called_once()
+
+
+def test_default_dispatcher_passes_repo_root_as_cwd_when_configured(tmp_path):
+    """Stages with cwd_from_repo_root=True receive repo_root as working directory."""
+    from orchestrator.orchestrate import _dispatch_default
+
+    stage = StageConfig(name="qa", prompt="prompts/qa/default.md", cwd_from_repo_root=True)
+    ctx = _make_ctx(tmp_path)
+    run_folder = _make_run_folder(tmp_path)
+    variables = {"repo_root": "/my/repo"}
+
+    with patch("orchestrator.orchestrate.run_stage", return_value={"status": "passed"}) as mock_rs:
+        _dispatch_default(stage, variables, run_folder, ctx)
+
+    _, kwargs = mock_rs.call_args
+    assert kwargs.get("cwd") == "/my/repo"
+
+
+def test_default_dispatcher_omits_cwd_when_stage_does_not_request_it(tmp_path):
+    """Stages without cwd_from_repo_root run without a working directory override."""
+    from orchestrator.orchestrate import _dispatch_default
+
+    stage = StageConfig(name="specification", prompt="prompts/specification/default.md", cwd_from_repo_root=False)
+    ctx = _make_ctx(tmp_path)
+    run_folder = _make_run_folder(tmp_path)
+
+    with patch("orchestrator.orchestrate.run_stage", return_value={"status": "passed"}) as mock_rs:
+        _dispatch_default(stage, {"repo_root": "/my/repo"}, run_folder, ctx)
+
+    _, kwargs = mock_rs.call_args
+    assert kwargs.get("cwd") is None
+
+
+def test_default_dispatcher_injects_standards_when_stage_opts_in(tmp_path):
+    """Standards list is forwarded to run_stage when stage.standards is True."""
+    from orchestrator.orchestrate import _dispatch_default
+
+    stage = StageConfig(name="implementation", prompt="prompts/impl/default.md", standards=True)
+    ctx = _make_ctx(tmp_path)
+    ctx.project_standards = ["harsh-python-engineering-standards"]
+    run_folder = _make_run_folder(tmp_path)
+
+    with patch("orchestrator.orchestrate.run_stage", return_value={"status": "passed"}) as mock_rs:
+        _dispatch_default(stage, {}, run_folder, ctx)
+
+    _, kwargs = mock_rs.call_args
+    assert kwargs.get("standards") == ["harsh-python-engineering-standards"]
+
+
+def test_default_dispatcher_passes_no_standards_when_stage_does_not_opt_in(tmp_path):
+    """Standards are None when stage.standards is False, even if project has standards."""
+    from orchestrator.orchestrate import _dispatch_default
+
+    stage = StageConfig(name="specification", prompt="prompts/spec/default.md", standards=False)
+    ctx = _make_ctx(tmp_path)
+    ctx.project_standards = ["harsh-python-engineering-standards"]
+    run_folder = _make_run_folder(tmp_path)
+
+    with patch("orchestrator.orchestrate.run_stage", return_value={"status": "passed"}) as mock_rs:
+        _dispatch_default(stage, {}, run_folder, ctx)
+
+    _, kwargs = mock_rs.call_args
+    assert kwargs.get("standards") is None
+
+
+# ── _dispatch_interactive ─────────────────────────────────────────────────────
+
+
+def test_interactive_returns_passed_when_artifact_already_exists(tmp_path):
+    """Existing artifact skips the session and returns a passed signal immediately."""
+    from orchestrator.orchestrate import _dispatch_interactive
+
+    stage = StageConfig(
+        name="alignment", mode="interactive", artifact="alignment-log.md", prompt="prompts/alignment/interactive.md"
+    )
+    ctx = _make_ctx(tmp_path)
+    run_folder = _make_run_folder(tmp_path)
+    artifact_path = run_folder / "alignment" / "alignment-log.md"
+    artifact_path.parent.mkdir(parents=True)
+    artifact_path.write_text("# alignment log\n")
+
+    with patch("orchestrator.orchestrate.run_interactive_stage") as mock_ris:
+        result = _dispatch_interactive(stage, {}, run_folder, ctx)
+
+    assert result["status"] == "passed"
+    mock_ris.assert_not_called()
+
+
+def test_interactive_returns_blocked_when_session_exits_without_artifact(tmp_path):
+    """Missing artifact after session exits returns a blocked signal."""
+    from orchestrator.orchestrate import _dispatch_interactive
+
+    stage = StageConfig(
+        name="alignment", mode="interactive", artifact="alignment-log.md", prompt="prompts/alignment/interactive.md"
+    )
+    ctx = _make_ctx(tmp_path)
+    run_folder = _make_run_folder(tmp_path)
+
+    with patch(
+        "orchestrator.orchestrate.run_interactive_stage",
+        return_value={"status": "blocked", "message": "artifact not found"},
+    ):
+        result = _dispatch_interactive(stage, {}, run_folder, ctx)
+
+    assert result["status"] == "blocked"
+
+
+def test_interactive_missing_artifact_field_returns_blocked_before_session(tmp_path):
+    """Stage with no artifact field returns a blocked signal without launching a session."""
+    from orchestrator.orchestrate import _dispatch_interactive
+
+    stage = StageConfig(name="alignment", mode="interactive", artifact=None, prompt="prompts/alignment/interactive.md")
+    ctx = _make_ctx(tmp_path)
+    run_folder = _make_run_folder(tmp_path)
+
+    with patch("orchestrator.orchestrate.run_interactive_stage") as mock_ris:
+        result = _dispatch_interactive(stage, {}, run_folder, ctx)
+
+    assert result["status"] == "blocked"
+    mock_ris.assert_not_called()
+
+
+# ── _dispatch_tracks ──────────────────────────────────────────────────────────
+
+
+def _planning_signal_with_tracks(tracks):
+    return {"stage": "discovery-planning", "status": "passed", "tracks": tracks}
+
+
+def test_tracks_planning_failure_propagates_as_blocked(tmp_path):
+    """When the planning stage fails, the dispatcher returns a blocked signal."""
+    from orchestrator.orchestrate import _dispatch_tracks
+
+    stage = StageConfig(name="discovery", expansion=ExpansionKind.TRACKS)
+    ctx = _make_ctx(tmp_path)
+    run_folder = _make_run_folder(tmp_path)
+    failed_planning = {"stage": "discovery-planning", "status": "failed", "message": "no overview"}
+
+    with (
+        patch("orchestrator.orchestrate.run_stage", return_value=failed_planning),
+        patch("orchestrator.orchestrate.update_plan_md"),
+    ):
+        result = _dispatch_tracks(stage, {}, run_folder, ctx)
+
+    assert result["status"] in ("failed", "blocked")
+
+
+def test_tracks_no_tracks_from_planning_yields_blocked(tmp_path):
+    """Empty tracks list from planning is a blocking failure."""
+    from orchestrator.orchestrate import _dispatch_tracks
+
+    stage = StageConfig(name="discovery", expansion=ExpansionKind.TRACKS)
+    ctx = _make_ctx(tmp_path)
+    run_folder = _make_run_folder(tmp_path)
+    empty = {"stage": "discovery-planning", "status": "passed", "tracks": []}
+
+    with (
+        patch("orchestrator.orchestrate.run_stage", return_value=empty),
+        patch("orchestrator.orchestrate.update_plan_md"),
+        patch("orchestrator.orchestrate.expand_nodes"),
+    ):
+        result = _dispatch_tracks(stage, {}, run_folder, ctx)
+
+    assert result["status"] == "blocked"
+
+
+def test_tracks_single_track_runs_serially_without_executor(tmp_path):
+    """A single track does not use ThreadPoolExecutor."""
+    import concurrent.futures as cf
+
+    from orchestrator.orchestrate import _dispatch_tracks
+
+    stage = StageConfig(name="discovery", expansion=ExpansionKind.TRACKS)
+    ctx = _make_ctx(tmp_path)
+    run_folder = _make_run_folder(tmp_path)
+    planning = _planning_signal_with_tracks(
+        [
+            {
+                "name": "only-track",
+                "prompt_file": "/tmp/prompt.md",
+            }
+        ]
+    )
+    track_sig = {
+        "stage": "discovery-only-track",
+        "status": "passed",
+        "findings_file": "/tmp/findings.md",
+        "summary": "done",
+    }
+
+    with (
+        patch("orchestrator.orchestrate.run_stage", side_effect=[planning, track_sig]),
+        patch("orchestrator.orchestrate.update_plan_md"),
+        patch("orchestrator.orchestrate.expand_nodes", return_value={"only-track": "node-1"}),
+        patch.object(cf, "ThreadPoolExecutor") as mock_exec,
+    ):
+        result = _dispatch_tracks(stage, {}, run_folder, ctx)
+
+    assert result["status"] == "passed"
+    mock_exec.assert_not_called()
+
+
+def test_tracks_multiple_tracks_run_in_parallel(tmp_path):
+    """Multiple tracks are submitted to ThreadPoolExecutor concurrently."""
+    from orchestrator.orchestrate import _dispatch_tracks
+
+    stage = StageConfig(name="discovery", expansion=ExpansionKind.TRACKS)
+    ctx = _make_ctx(tmp_path)
+    run_folder = _make_run_folder(tmp_path)
+    tracks = [
+        {"name": "track-a", "prompt_file": "/tmp/a.md"},
+        {"name": "track-b", "prompt_file": "/tmp/b.md"},
+    ]
+    planning = _planning_signal_with_tracks(tracks)
+    track_sig = {"status": "passed", "findings_file": "/tmp/f.md", "summary": "ok"}
+
+    fut_a = MagicMock()
+    fut_a.result.return_value = ("track-a", track_sig)
+    fut_b = MagicMock()
+    fut_b.result.return_value = ("track-b", track_sig)
+
+    with (
+        patch("orchestrator.orchestrate.run_stage", return_value=planning),
+        patch("orchestrator.orchestrate.update_plan_md"),
+        patch("orchestrator.orchestrate.expand_nodes", return_value={}),
+        patch("concurrent.futures.ThreadPoolExecutor") as mock_exec_cls,
+    ):
+        mock_exec = MagicMock()
+        mock_exec.__enter__ = MagicMock(return_value=mock_exec)
+        mock_exec.__exit__ = MagicMock(return_value=False)
+        submitted = iter([fut_a, fut_b])
+        mock_exec.submit.side_effect = lambda *a, **kw: next(submitted)
+        mock_exec_cls.return_value = mock_exec
+
+        result = _dispatch_tracks(stage, {}, run_folder, ctx)
+
+    assert mock_exec.submit.call_count == 2
+
+
+def test_tracks_any_failed_track_yields_failed_signal(tmp_path):
+    """One failed track causes the dispatcher to return a failed aggregated signal."""
+    from orchestrator.orchestrate import _dispatch_tracks
+
+    stage = StageConfig(name="discovery", expansion=ExpansionKind.TRACKS)
+    ctx = _make_ctx(tmp_path)
+    run_folder = _make_run_folder(tmp_path)
+    tracks = [
+        {"name": "track-a", "prompt_file": "/tmp/a.md"},
+        {"name": "track-b", "prompt_file": "/tmp/b.md"},
+    ]
+    planning = _planning_signal_with_tracks(tracks)
+    passed = {"status": "passed", "findings_file": "/tmp/f.md", "summary": "ok"}
+    failed = {"status": "failed", "message": "agent crashed"}
+
+    with (
+        patch("orchestrator.orchestrate.run_stage", return_value=planning),
+        patch("orchestrator.orchestrate.update_plan_md"),
+        patch("orchestrator.orchestrate.expand_nodes", return_value={}),
+        patch("concurrent.futures.ThreadPoolExecutor") as mock_exec_cls,
+    ):
+        mock_exec = MagicMock()
+        mock_exec.__enter__ = MagicMock(return_value=mock_exec)
+        mock_exec.__exit__ = MagicMock(return_value=False)
+        fut_a = MagicMock()
+        fut_a.result.return_value = ("track-a", passed)
+        fut_b = MagicMock()
+        fut_b.result.return_value = ("track-b", failed)
+        submitted = iter([fut_a, fut_b])
+        mock_exec.submit.side_effect = lambda *a, **kw: next(submitted)
+        mock_exec_cls.return_value = mock_exec
+
+        result = _dispatch_tracks(stage, {}, run_folder, ctx)
+
+    assert result["status"] in ("failed", "blocked")
+
+
+def test_tracks_aggregated_signal_contains_all_findings_files(tmp_path):
+    """Passed tracks are aggregated into a single signal with all findings_files."""
+    from orchestrator.orchestrate import _dispatch_tracks
+
+    stage = StageConfig(name="discovery", expansion=ExpansionKind.TRACKS)
+    ctx = _make_ctx(tmp_path)
+    run_folder = _make_run_folder(tmp_path)
+    planning = _planning_signal_with_tracks([{"name": "t1", "prompt_file": "/tmp/p1.md"}])
+    track_sig = {"status": "passed", "findings_file": "/tmp/findings1.md", "summary": "x"}
+
+    with (
+        patch("orchestrator.orchestrate.run_stage", side_effect=[planning, track_sig]),
+        patch("orchestrator.orchestrate.update_plan_md"),
+        patch("orchestrator.orchestrate.expand_nodes", return_value={}),
+    ):
+        result = _dispatch_tracks(stage, {}, run_folder, ctx)
+
+    assert result["status"] == "passed"
+    assert "/tmp/findings1.md" in result.get("findings_files", [])
+    assert len(result.get("tracks", [])) == 1
+
+
+# ── _dispatch_slices ──────────────────────────────────────────────────────────
+
+
+def test_slices_creates_git_branch_before_any_slice_runs(tmp_path):
+    """Branch is created once before slice execution begins."""
+    from orchestrator.orchestrate import _dispatch_slices
+
+    stage = StageConfig(
+        name="implementation",
+        prompt="prompts/implementation/default.md",
+        expansion=ExpansionKind.SLICES,
+        slices_from_stage="decomposition",
+    )
+    ctx = _make_ctx(tmp_path)
+    run_folder = _make_run_folder(tmp_path)
+    signals = {"decomposition": {"slice_files": ["S-01-slice.md"], "slice_groups": [["S-01-slice.md"]]}}
+
+    with (
+        patch("orchestrator.orchestrate._create_branch") as mock_cb,
+        patch("orchestrator.orchestrate.run_stage", return_value={"status": "passed", "commit_hashes": ["a1"]}),
+        patch("orchestrator.orchestrate.update_plan_md"),
+        patch("orchestrator.orchestrate.expand_nodes"),
+    ):
+        _dispatch_slices(stage, {"repo_root": "/tmp"}, run_folder, ctx, signals)
+
+    mock_cb.assert_called_once()
+    assert mock_cb.call_args[0][0] == "feat/test"
+
+
+def test_slices_single_slice_runs_serially(tmp_path):
+    """A group of one slice runs directly without worktrees."""
+    from orchestrator.orchestrate import _dispatch_slices
+
+    stage = StageConfig(
+        name="implementation",
+        prompt="prompts/implementation/default.md",
+        expansion=ExpansionKind.SLICES,
+        slices_from_stage="decomposition",
+    )
+    ctx = _make_ctx(tmp_path)
+    run_folder = _make_run_folder(tmp_path)
+    signals = {"decomposition": {"slice_files": ["S-01-slice.md"], "slice_groups": [["S-01-slice.md"]]}}
+
+    with (
+        patch("orchestrator.orchestrate._create_branch"),
+        patch("orchestrator.orchestrate._create_worktree") as mock_wt,
+        patch("orchestrator.orchestrate.run_stage", return_value={"status": "passed", "commit_hashes": ["a1"]}),
+        patch("orchestrator.orchestrate.update_plan_md"),
+        patch("orchestrator.orchestrate.expand_nodes"),
+    ):
+        result = _dispatch_slices(stage, {"repo_root": "/tmp"}, run_folder, ctx, signals)
+
+    assert result["status"] == "passed"
+    mock_wt.assert_not_called()
+
+
+def test_slices_parallel_group_creates_one_worktree_per_slice(tmp_path):
+    """A group of multiple slices each get their own git worktree."""
+    from orchestrator.orchestrate import _dispatch_slices
+
+    stage = StageConfig(
+        name="implementation",
+        prompt="prompts/implementation/default.md",
+        expansion=ExpansionKind.SLICES,
+        slices_from_stage="decomposition",
+    )
+    ctx = _make_ctx(tmp_path)
+    run_folder = _make_run_folder(tmp_path)
+    signals = {
+        "decomposition": {
+            "slice_files": ["S-01-a.md", "S-02-b.md"],
+            "slice_groups": [["S-01-a.md", "S-02-b.md"]],
+        }
+    }
+    impl_sig = {"status": "passed", "commit_hashes": ["c1"]}
+
+    mock_future = MagicMock()
+    mock_future.result.return_value = (impl_sig, 1.0)
+
+    with (
+        patch("orchestrator.orchestrate._create_branch"),
+        patch("orchestrator.orchestrate._create_worktree", return_value="/tmp/wt") as mock_wt,
+        patch("orchestrator.orchestrate._remove_worktree"),
+        patch("orchestrator.orchestrate._merge_worktree_branch"),
+        patch("orchestrator.orchestrate.update_plan_md"),
+        patch("orchestrator.orchestrate.expand_nodes"),
+        patch("concurrent.futures.ThreadPoolExecutor") as mock_exec_cls,
+    ):
+        mock_exec = MagicMock()
+        mock_exec.__enter__ = MagicMock(return_value=mock_exec)
+        mock_exec.__exit__ = MagicMock(return_value=False)
+        mock_exec.submit.return_value = mock_future
+        mock_exec_cls.return_value = mock_exec
+
+        _dispatch_slices(stage, {"repo_root": "/tmp"}, run_folder, ctx, signals)
+
+    assert mock_wt.call_count == 2
+
+
+def test_slices_worktrees_cleaned_up_after_failure(tmp_path):
+    """Worktrees are removed in the finally block even when a slice fails."""
+    from orchestrator.orchestrate import _dispatch_slices
+
+    stage = StageConfig(
+        name="implementation",
+        prompt="prompts/implementation/default.md",
+        expansion=ExpansionKind.SLICES,
+        slices_from_stage="decomposition",
+    )
+    ctx = _make_ctx(tmp_path)
+    run_folder = _make_run_folder(tmp_path)
+    signals = {
+        "decomposition": {
+            "slice_files": ["S-01-a.md", "S-02-b.md"],
+            "slice_groups": [["S-01-a.md", "S-02-b.md"]],
+        }
+    }
+    failed_sig = {"status": "failed", "message": "compile error"}
+
+    mock_future = MagicMock()
+    mock_future.result.return_value = (failed_sig, 0.5)
+
+    with (
+        patch("orchestrator.orchestrate._create_branch"),
+        patch("orchestrator.orchestrate._create_worktree", return_value="/tmp/wt"),
+        patch("orchestrator.orchestrate._remove_worktree") as mock_rm,
+        patch("orchestrator.orchestrate.update_plan_md"),
+        patch("orchestrator.orchestrate.expand_nodes"),
+        patch("concurrent.futures.ThreadPoolExecutor") as mock_exec_cls,
+    ):
+        mock_exec = MagicMock()
+        mock_exec.__enter__ = MagicMock(return_value=mock_exec)
+        mock_exec.__exit__ = MagicMock(return_value=False)
+        mock_exec.submit.return_value = mock_future
+        mock_exec_cls.return_value = mock_exec
+
+        result = _dispatch_slices(stage, {"repo_root": "/tmp"}, run_folder, ctx, signals)
+
+    assert result["status"] in ("failed", "blocked")
+    assert mock_rm.call_count == 2
+
+
+def test_slices_non_slice_files_filtered_with_warning(tmp_path):
+    """Files not matching S-\\d+- pattern are dropped and a warning is logged."""
+    from orchestrator.orchestrate import _dispatch_slices
+
+    stage = StageConfig(
+        name="implementation",
+        prompt="prompts/implementation/default.md",
+        expansion=ExpansionKind.SLICES,
+        slices_from_stage="decomposition",
+    )
+    ctx = _make_ctx(tmp_path)
+    run_folder = _make_run_folder(tmp_path)
+    signals = {
+        "decomposition": {
+            "slice_files": ["S-01-slice.md", "README.md"],
+            "slice_groups": [["S-01-slice.md", "README.md"]],
+        }
+    }
+
+    with (
+        patch("orchestrator.orchestrate._create_branch"),
+        patch("orchestrator.orchestrate.run_stage", return_value={"status": "passed", "commit_hashes": []}),
+        patch("orchestrator.orchestrate.update_plan_md"),
+        patch("orchestrator.orchestrate.expand_nodes"),
+    ):
+        _dispatch_slices(stage, {"repo_root": "/tmp"}, run_folder, ctx, signals)
+
+    ctx.logger.log.assert_any_call("implementation", "WARN", unittest_mock_any_str())
+
+
+def unittest_mock_any_str():
+    class _AnyStr:
+        def __eq__(self, other):
+            return isinstance(other, str)
+
+        def __repr__(self):
+            return "<AnyStr>"
+
+    return _AnyStr()
+
+
+def test_slices_failed_slice_propagates_failed_signal(tmp_path):
+    """A blocked/failed serial slice causes the dispatcher to return a failed signal."""
+    from orchestrator.orchestrate import _dispatch_slices
+
+    stage = StageConfig(
+        name="implementation",
+        prompt="prompts/implementation/default.md",
+        expansion=ExpansionKind.SLICES,
+        slices_from_stage="decomposition",
+    )
+    ctx = _make_ctx(tmp_path)
+    run_folder = _make_run_folder(tmp_path)
+    signals = {"decomposition": {"slice_files": ["S-01-slice.md"], "slice_groups": [["S-01-slice.md"]]}}
+
+    with (
+        patch("orchestrator.orchestrate._create_branch"),
+        patch("orchestrator.orchestrate.run_stage", return_value={"status": "failed", "message": "tests failed"}),
+        patch("orchestrator.orchestrate.update_plan_md"),
+        patch("orchestrator.orchestrate.expand_nodes"),
+    ):
+        result = _dispatch_slices(stage, {"repo_root": "/tmp"}, run_folder, ctx, signals)
+
+    assert result["status"] in ("failed", "blocked")
+
+
+# ── _dispatch_prompts ─────────────────────────────────────────────────────────
+
+
+def test_prompts_all_reviewers_run_and_statuses_collected(tmp_path):
+    """Each reviewer in stage.prompts receives a run_stage call."""
+    from orchestrator.orchestrate import _dispatch_prompts
+
+    stage = StageConfig(
+        name="review",
+        expansion=ExpansionKind.PROMPTS,
+        prompts={"architecture": "prompts/review/architecture.md", "security": "prompts/review/security.md"},
+    )
+    ctx = _make_ctx(tmp_path)
+    run_folder = _make_run_folder(tmp_path)
+    review_sig = {"status": "passed", "reviewer_statuses": {"architecture": "passed"}, "changes_requested": []}
+
+    with (
+        patch("orchestrator.orchestrate.run_stage", return_value=review_sig) as mock_rs,
+        patch("orchestrator.orchestrate.update_plan_md"),
+        patch("orchestrator.orchestrate.subprocess.run", return_value=_git_ok()),
+    ):
+        result = _dispatch_prompts(stage, {"repo_root": "/tmp"}, run_folder, ctx, {})
+
+    assert mock_rs.call_count == 2
+    assert "reviewer_statuses" in result
+
+
+def test_prompts_fix_cycle_triggered_automatically_when_reviewer_requests_changes(tmp_path):
+    """changes_requested triggers review_cycle.run without user approval."""
+    from orchestrator.orchestrate import _dispatch_prompts
+
+    stage = StageConfig(
+        name="review",
+        expansion=ExpansionKind.PROMPTS,
+        prompts={"architecture": "prompts/review/architecture.md"},
+    )
+    ctx = _make_ctx(tmp_path)
+    run_folder = _make_run_folder(tmp_path)
+    review_sig = {
+        "status": "passed",
+        "reviewer_statuses": {"architecture": "changes-requested"},
+        "changes_requested": ["architecture"],
+    }
+
+    with (
+        patch("orchestrator.orchestrate.run_stage", return_value=review_sig),
+        patch("orchestrator.orchestrate.update_plan_md"),
+        patch("orchestrator.orchestrate.subprocess.run", return_value=_git_ok()),
+        patch(
+            "orchestrator.orchestrate.review_cycle_mod.run", return_value={"all_passed": True, "reviewers": []}
+        ) as mock_cycle,
+    ):
+        result = _dispatch_prompts(stage, {"repo_root": "/tmp"}, run_folder, ctx, {})
+
+    mock_cycle.assert_called_once()
+    assert result["status"] == "passed"
+
+
+def test_prompts_review_cycle_failure_returns_blocked_signal(tmp_path):
+    """When review_cycle.run returns all_passed=False, the dispatcher returns blocked."""
+    from orchestrator.orchestrate import _dispatch_prompts
+
+    stage = StageConfig(
+        name="review",
+        expansion=ExpansionKind.PROMPTS,
+        prompts={"architecture": "prompts/review/architecture.md"},
+    )
+    ctx = _make_ctx(tmp_path)
+    run_folder = _make_run_folder(tmp_path)
+    review_sig = {
+        "status": "passed",
+        "reviewer_statuses": {"architecture": "changes-requested"},
+        "changes_requested": ["architecture"],
+    }
+
+    with (
+        patch("orchestrator.orchestrate.run_stage", return_value=review_sig),
+        patch("orchestrator.orchestrate.update_plan_md"),
+        patch("orchestrator.orchestrate.subprocess.run", return_value=_git_ok()),
+        patch(
+            "orchestrator.orchestrate.review_cycle_mod.run",
+            return_value={"all_passed": False, "reviewers": ["architecture"]},
+        ),
+    ):
+        result = _dispatch_prompts(stage, {"repo_root": "/tmp"}, run_folder, ctx, {})
+
+    assert result["status"] == "blocked"
+
+
+def test_prompts_diff_patch_written_when_commit_hashes_present(tmp_path):
+    """A git diff is computed and written to diff-round-1.patch before reviewers run."""
+    from orchestrator.orchestrate import _dispatch_prompts
+
+    stage = StageConfig(
+        name="review",
+        expansion=ExpansionKind.PROMPTS,
+        prompts={"architecture": "prompts/review/architecture.md"},
+    )
+    ctx = _make_ctx(tmp_path)
+    run_folder = _make_run_folder(tmp_path)
+    signals = {"implementation": {"commit_hashes": ["aaa", "bbb"]}}
+    review_sig = {"status": "passed", "reviewer_statuses": {"architecture": "passed"}, "changes_requested": []}
+
+    git_diff = MagicMock()
+    git_diff.returncode = 0
+    git_diff.stdout = "diff --git a/f b/f\n"
+    git_diff.stderr = ""
+
+    with (
+        patch("orchestrator.orchestrate.run_stage", return_value=review_sig),
+        patch("orchestrator.orchestrate.update_plan_md"),
+        patch("orchestrator.orchestrate.subprocess.run", return_value=git_diff),
+    ):
+        _dispatch_prompts(stage, {"repo_root": "/tmp"}, run_folder, ctx, signals)
+
+    diff_file = run_folder / "review" / "diff-round-1.patch"
+    assert diff_file.exists()
+    assert "diff --git" in diff_file.read_text()
