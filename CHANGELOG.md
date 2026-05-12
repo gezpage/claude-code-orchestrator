@@ -12,6 +12,7 @@ Format: [Unreleased] at the top, dated releases below, newest first.
 ## [2026-05-12]
 
 ### Changed
+- Raised ADR bar in specification and harvest prompts: added concrete negative test ("if you'd reach the same decision from language idiom or a stated constraint, it is not an ADR"), 2–4 per run target, and explicit deduplication step in harvest against specification ADRs from the same run.
 - Tightened decomposition spec depth: `What to build` placeholder now specifies observable behaviour over implementation detail, with a 100–200 word soft signal; new step 5 requires explicit enumeration of all config fields/env-vars/error paths in acceptance criteria.
 - Strengthened implementation test quality rules: both `{% if context_path %}` and `{% else %}` branches now require concrete value assertions for field-level checks (not just presence).
 

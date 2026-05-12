@@ -14,7 +14,7 @@ You are a harvest agent. Extract knowledge from this run that will help future r
 
 1. Read `{{ review_md }}` and all documents in `{{ run_folder }}`.
 2. Apply the ADR vs KB decision criteria below to identify what to write.
-3. Before writing any new ADR or KB entry, read existing ADRs and KB files in the project directories to avoid duplication.
+3. Before writing any new ADR or KB entry, read existing ADRs and KB files in the project directories and the specification ADRs written in this run (`{{ run_folder }}/specification/adrs/` if present) to avoid duplication. If a harvest ADR would express the same decision as an existing specification ADR, skip it — do not re-write it to a different location.
 4. Write ADRs to the project ADR directory (read from project.yaml if needed).
 5. Write KB entries to the project knowledge-base directory.
 6. Read the current contents of `{{ project_context_path }}` (may be empty on the first run).
@@ -26,7 +26,7 @@ You are a harvest agent. Extract knowledge from this run that will help future r
 - The team made a hard-to-reverse architectural decision (framework choice, data model shape, security model, API design pattern).
 - A future developer encountering the code would reasonably ask "why did they do it this way?"
 - The decision involved real trade-offs between alternatives — not just following obvious convention.
-- Bar: if the decision is obvious in hindsight, do not write an ADR.
+- Bar: if the decision is obvious in hindsight, do not write an ADR. Negative test: if you would reach the same decision by following language idiom, framework convention, or a stated project constraint, it is not an ADR. Target 2–4 ADRs per run across specification and harvest combined.
 
 **Write a KB entry when:**
 - A non-obvious pattern, gotcha, or constraint emerged that future work in this area should know.
