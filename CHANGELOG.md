@@ -9,6 +9,12 @@ Format: [Unreleased] at the top, dated releases below, newest first.
 
 ### Changed
 
+## [2026-05-12]
+
+### Changed
+- Tightened decomposition spec depth: `What to build` placeholder now specifies observable behaviour over implementation detail, with a 100–200 word soft signal; new step 5 requires explicit enumeration of all config fields/env-vars/error paths in acceptance criteria.
+- Strengthened implementation test quality rules: both `{% if context_path %}` and `{% else %}` branches now require concrete value assertions for field-level checks (not just presence).
+
 ## 2026-05-12
 
 - chore: switch to PR-based change workflow; add auto-versioning via GitHub Actions on merge to main

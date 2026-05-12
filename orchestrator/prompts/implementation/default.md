@@ -19,7 +19,7 @@ You are an implementation agent. Implement exactly one slice. Do not loop; imple
    - Write a failing test that asserts the behavior through the public interface. Confirm it fails.
    - Write the minimum code to make it pass. Confirm it passes.
    - Repeat for the next criterion.
-   - **Test quality rules**: tests must use the public API only (no private methods, no internal state assertions). Mock only at system boundaries (external APIs, databases, time, file system) — never mock your own modules. A good test reads like a specification ("user can checkout") and survives an internal refactor unchanged.
+   - **Test quality rules**: tests must use the public API only (no private methods, no internal state assertions). Mock only at system boundaries (external APIs, databases, time, file system) — never mock your own modules. A good test reads like a specification ("user can checkout") and survives an internal refactor unchanged. For field-level assertions (log entries, JSON response bodies, header values) check the concrete value — not just presence. `entry["status"] == 200` is a test; `entry["status"] != nil` is not.
 5. After all tests are GREEN — refactor within slice scope: extract duplication, deepen shallow modules, fix feature envy. Run tests after each step.
 6. Commit all changes to branch `{{ branch }}` in repo `{{ repo_root }}`.
    - Use descriptive commit messages; one commit per logical unit (not one giant squash).
@@ -33,7 +33,7 @@ You are an implementation agent. Implement exactly one slice. Do not loop; imple
    - Write a failing test that asserts the behavior through the public interface. Confirm it fails.
    - Write the minimum code to make it pass. Confirm it passes.
    - Repeat for the next criterion.
-   - **Test quality rules**: tests must use the public API only (no private methods, no internal state assertions). Mock only at system boundaries (external APIs, databases, time, file system) — never mock your own modules. A good test reads like a specification ("user can checkout") and survives an internal refactor unchanged.
+   - **Test quality rules**: tests must use the public API only (no private methods, no internal state assertions). Mock only at system boundaries (external APIs, databases, time, file system) — never mock your own modules. A good test reads like a specification ("user can checkout") and survives an internal refactor unchanged. For field-level assertions (log entries, JSON response bodies, header values) check the concrete value — not just presence. `entry["status"] == 200` is a test; `entry["status"] != nil` is not.
 4. After all tests are GREEN — refactor within slice scope: extract duplication, deepen shallow modules, fix feature envy. Run tests after each step.
 5. Commit all changes to branch `{{ branch }}` in repo `{{ repo_root }}`.
    - Use descriptive commit messages; one commit per logical unit (not one giant squash).

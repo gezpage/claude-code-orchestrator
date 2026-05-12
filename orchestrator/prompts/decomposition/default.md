@@ -21,11 +21,12 @@ You are a decomposition agent. Your task is to break the PRD into implementation
    - If the PRD is ambiguous about what the slice should do, record the ambiguity explicitly in "What to build" rather than silently resolving it.
 
 4. Prefer many thin slices over few thick ones. Each slice must be independently committable and verifiable.
-5. Write each slice to `{{ run_folder }}/decomposition/S-NN-slug.md` using the template below.
-6. Order slices by dependency. A slice may depend on prior slices but must not create circular dependencies.
-7. Write a dependency graph in Mermaid format at `{{ run_folder }}/decomposition/dependency-graph.md`.
-8. `dependency-graph.md` is a reference artifact — do **not** include it in `slice_files`.
-9. Derive **execution waves** from the dependency graph:
+5. For every acceptance criterion that covers a config field, env-var, or error path: enumerate all instances explicitly by name. Do not write a catch-all such as "invalid values → error". Write "Invalid `READ_TIMEOUT`, `WRITE_TIMEOUT`, `IDLE_TIMEOUT` → `Load()` returns non-nil error." An incomplete enumeration becomes a test gap.
+6. Write each slice to `{{ run_folder }}/decomposition/S-NN-slug.md` using the template below.
+7. Order slices by dependency. A slice may depend on prior slices but must not create circular dependencies.
+8. Write a dependency graph in Mermaid format at `{{ run_folder }}/decomposition/dependency-graph.md`.
+9. `dependency-graph.md` is a reference artifact — do **not** include it in `slice_files`.
+10. Derive **execution waves** from the dependency graph:
    - Wave 1: slices with no prerequisites.
    - Wave N: slices whose every prerequisite appears in an earlier wave.
    - Slices in the same wave are independent and will run in parallel — only group slices together if they share no file or data dependency.
@@ -39,7 +40,7 @@ You are a decomposition agent. Your task is to break the PRD into implementation
 
 ## What to build
 
-<Concise description of the end-to-end behavior this slice delivers. If any aspect is ambiguous in the PRD, state the ambiguity here explicitly rather than resolving it silently.>
+<Describe the observable end-to-end behaviour this slice delivers — not implementation steps, function signatures, or algorithm internals. If any aspect is ambiguous in the PRD, state the ambiguity here rather than resolving it silently. Aim for 100–200 words. If this section exceeds 200 words, review whether you are specifying implementation detail rather than behaviour.>
 
 ## Acceptance criteria
 
