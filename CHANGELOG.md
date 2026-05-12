@@ -8,6 +8,10 @@ Format: [Unreleased] at the top, dated releases below, newest first.
 ## [Unreleased]
 
 ### Changed
+
+## 2026-05-12
+
+- chore: switch to PR-based change workflow; add auto-versioning via GitHub Actions on merge to main
 - All three reviewer stages (implementation, architecture, tests) now run with `cwd=repo_root` and receive `{{ repo_root }}` in their prompt templates, enabling purposeful codebase exploration to substantiate findings; fix-cycle re-reviews propagate the same variable and working directory.
 
 - Refactored `plan.py` (782 lines) into a `plan/` subpackage with nine focused private modules; `orchestrate.py` dispatch now branches on `ExpansionKind` (tracks/slices/prompts/none) from a new typed `StageConfig`/`Profile` model in `profile.py`, eliminating all hardcoded stage-name strings from dispatch logic and diagram generation.

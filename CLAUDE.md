@@ -54,7 +54,15 @@ Follow this for every change — bugfix, feature, or refactor.
    New ADRs must have YAML frontmatter (`status`, `date`, `affects`) and a row added
    to the index in `DEVELOPMENT.md`. If the decision is load-bearing for everyday edits,
    add an invariant here too.
-6. Commit: `git -C ~/Dev/tools/orchestrator commit -m "fix|feat|docs: ..."`
+6. Create a feature branch from main:
+   ```
+   git -C ~/Dev/tools/orchestrator fetch origin main
+   git -C ~/Dev/tools/orchestrator checkout -b <type>/<short-description> origin/main
+   ```
+7. Commit: `git -C ~/Dev/tools/orchestrator commit -m "type: message"`
+8. Push: `git -C ~/Dev/tools/orchestrator push -u origin <branch>`
+9. Open PR — do NOT merge, that is always left to the user:
+   `gh pr create --title "<commit message>" --body "..."`
 
 ---
 
@@ -66,14 +74,26 @@ Run `uv run pytest tests/` from the repo root.
 
 ## Auto-Commit
 
-After completing each discrete task, stage and commit all modified files before reporting done.
+After each discrete task, open a pull request — do not commit to main directly.
 
-- Append an entry to `CHANGELOG.md` before committing — one line summarising what changed and why, under the current date heading.
-- Stage specific files by name — never `git add -A` or `git add .`
-- Use `git -C ~/Dev/tools/orchestrator` for all git commands
-- Commit message: conventional format (`fix:`, `feat:`, `chore:`, `docs:`, etc.), one concise sentence, no ticket refs, no emoji
-- "Task complete" means the repo is in a working state — do not commit mid-edit or with failing tests
-- Docs-repo changes (managed by Forge MCP) are excluded — this rule covers the orchestrator codebase only
+- Add a CHANGELOG.md entry (one line, current date heading) before committing
+- Branch from main: `git -C ~/Dev/tools/orchestrator fetch origin main && git -C ~/Dev/tools/orchestrator checkout -b <type>/<slug> origin/main`
+- Stage files by name — never `git add -A` or `git add .`
+- Commit message: conventional format (`fix:`, `feat:`, `chore:`, `docs:`), one sentence, no ticket refs, no emoji
+- Push and open PR: `gh pr create --title "<msg>" --body "..."`
+- Do not merge — leave that to the user
+- "Task complete" = PR is open, tests pass
+- Docs-repo changes (Forge MCP) are excluded from this rule
+
+## Versioning
+
+`.github/workflows/version-tag.yml` auto-tags every push to main:
+
+- `feat!:` / `BREAKING CHANGE` footer → major bump
+- `feat:` → minor bump
+- everything else → patch bump
+
+No manual tagging needed.
 
 ---
 
