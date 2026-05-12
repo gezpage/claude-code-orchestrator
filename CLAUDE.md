@@ -47,8 +47,10 @@ Follow this for every change — bugfix, feature, or refactor.
 1. Read this file (done).
 2. Read the relevant ADR(s) from `docs/adrs/`.
 3. Read only the affected module file(s) — not the whole package.
-4. Make the change and verify (`uv run pytest tests/` from repo root).
-5. **ADR gate** — before committing, ask: is this decision hard to reverse, surprising
+4. Ensure main is current: `git pull origin main`
+5. Enter a worktree: call `EnterWorktree` with name `<type>/<short-description>`
+6. Make the change and verify (`uv run pytest tests/` from repo root).
+7. **ADR gate** — before committing, ask: is this decision hard to reverse, surprising
    without context, and the result of genuine trade-offs? If yes to all three, write an
    ADR first. Use the template at `docs/adrs/_template.md`.
    New ADRs must have YAML frontmatter (`status`, `date`, `affects`). If the decision
@@ -57,16 +59,12 @@ Follow this for every change — bugfix, feature, or refactor.
    **Does not warrant an ADR:** simple bug fixes, naming or formatting choices, adding
    tests, dependency updates, documentation changes, performance tweaks that don't
    change observable behaviour or interface contracts.
-6. Create a feature branch from main:
-   ```
-   git fetch origin main
-   git checkout -b <type>/<short-description> origin/main
-   ```
-7. Commit: `git commit -m "type: message"`
-8. Push: `git push -u origin <branch>`
-9. Open PR — do NOT merge, that is always left to the user:
-   `gh pr create --title "<commit message>" --body "<one or two sentence rationale>"`
-   PR body: why the change was made, nothing else. No file references, no code snippets — the diff covers what changed. Add inline code comments for anything that warrants reviewer attention.
+8. Commit: `git commit -m "type: message"`
+9. Push: `git push -u origin <branch>`
+10. Open PR — do NOT merge, that is always left to the user:
+    `gh pr create --title "<commit message>" --body "<one or two sentence rationale>"`
+    PR body: why the change was made, nothing else. No file references, no code snippets — the diff covers what changed. Add inline code comments for anything that warrants reviewer attention.
+11. Exit and remove the worktree: call `ExitWorktree` with `action: remove`
 
 ---
 
@@ -80,12 +78,13 @@ Run `uv run pytest tests/` from the repo root.
 
 After each discrete task, open a pull request — do not commit to main directly.
 
+- Pull main and enter a worktree before touching any files: `git pull origin main`, then call `EnterWorktree`
 - Add a CHANGELOG.md entry (one line, current date heading) before committing
-- Branch from main: `git fetch origin main && git checkout -b <type>/<slug> origin/main`
 - Stage files by name — never `git add -A` or `git add .`
 - Commit message: conventional format (`fix:`, `feat:`, `chore:`, `docs:`), one sentence, no ticket refs, no emoji
 - Push and open PR: `gh pr create --title "<msg>" --body "<one or two sentence rationale — why, not what>"`
 - Do not merge — leave that to the user
+- Exit and remove the worktree: call `ExitWorktree` with `action: remove`
 - "Task complete" = PR is open, tests pass
 
 ## Versioning
