@@ -7,6 +7,9 @@ Format: [Unreleased] at the top, dated releases below, newest first.
 
 ## [Unreleased]
 
+### Changed
+- Refactored `plan.py` (782 lines) into a `plan/` subpackage with nine focused private modules; `orchestrate.py` dispatch now branches on `ExpansionKind` (tracks/slices/prompts/none) from a new typed `StageConfig`/`Profile` model in `profile.py`, eliminating all hardcoded stage-name strings from dispatch logic and diagram generation.
+
 ### Fixed
 - `orchestrate.py` / `review_cycle.py`: all reviewers were writing to the same `review-prompt.md` / `review-output.md` files because `output_suffix` was never passed to `run_stage()`; now each reviewer in round 1 writes to `review-{reviewer}-{prompt,output}.md` and each fix-cycle reviewer writes to `review-{reviewer}-round{N}-{prompt,output}.md`; fix-implementation cycles write to `fix-implementation-{N}-{prompt,output}.md`.
 - `review_cycle.py`: `context_path` was missing from `review_vars` in fix cycles, causing a Jinja2 `UndefinedError` in all review templates (`architecture`, `implementation`, `tests`); now loaded from the specification signal at the start of `run()`.

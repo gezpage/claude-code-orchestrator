@@ -1,3 +1,4 @@
 name: spike
 stages:
   - stage: discovery
+    expansion: tracks

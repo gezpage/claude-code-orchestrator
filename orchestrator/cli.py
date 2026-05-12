@@ -56,7 +56,6 @@ def stage(stage_name, implementation, input_json, run_folder, docs_root, project
 @click.option("--docs-root", required=True, help="Path to the team-hub docs root.")
 def resume(run_folder, docs_root):
     """Resume a pipeline from a blocked run folder."""
-    from pathlib import Path
     try:
         paths.require_dir(docs_root)
         paths.require_dir(run_folder)

@@ -111,17 +111,20 @@ BLOCKED_SIGNAL = {
 
 def test_full_happy_path(tmp_path):
     stages = [
-        {"stage": "discovery", "prompt": "prompts/discovery/default.md"},
+        {"stage": "discovery", "expansion": "tracks"},
         {"stage": "alignment", "mode": "interactive", "artifact": "alignment-log.md", "prompt": "prompts/alignment/interactive.md"},
         {"stage": "specification", "prompt": "prompts/specification/default.md"},
         {"stage": "decomposition", "prompt": "prompts/decomposition/default.md"},
         {
             "stage": "implementation",
             "prompt": "prompts/implementation/default.md",
+            "expansion": "slices",
+            "slices_from_stage": "decomposition",
         },
         {"stage": "qa", "prompt": "prompts/qa/default.md"},
         {
             "stage": "review",
+            "expansion": "prompts",
             "prompts": {"architecture": "prompts/review/architecture.md"},
         },
         {"stage": "harvest", "prompt": "prompts/harvest/default.md"},
@@ -193,7 +196,7 @@ def test_full_happy_path(tmp_path):
 
 def test_alignment_pause_exits(tmp_path):
     stages = [
-        {"stage": "discovery", "prompt": "prompts/discovery/default.md"},
+        {"stage": "discovery", "expansion": "tracks"},
         {"stage": "alignment", "mode": "interactive", "artifact": "alignment-log.md"},
         {"stage": "specification", "prompt": "prompts/specification/default.md"},
     ]
@@ -289,9 +292,9 @@ def test_resume_skips_completed_stages(tmp_path):
 
 def test_branch_created_at_implementation_start(tmp_path):
     stages = [
-        {"stage": "discovery", "prompt": "prompts/discovery/planning.md"},
+        {"stage": "discovery", "expansion": "tracks"},
         {"stage": "decomposition", "prompt": "prompts/decomposition/default.md"},
-        {"stage": "implementation", "prompt": "prompts/implementation/default.md"},
+        {"stage": "implementation", "prompt": "prompts/implementation/default.md", "expansion": "slices", "slices_from_stage": "decomposition"},
     ]
     docs_root = _setup_docs(tmp_path, stages)
     run_folder_path = tmp_path / "projects" / "myproject" / "workflow" / "runs" / "feat" / "2026-01-01-run-1"
@@ -369,7 +372,7 @@ def test_interactive_stage_not_dispatched_through_run_stage(tmp_path):
 
 def test_plan_md_updated_after_each_stage(tmp_path):
     stages = [
-        {"stage": "discovery", "prompt": "prompts/discovery/default.md"},
+        {"stage": "discovery", "expansion": "tracks"},
         {"stage": "specification", "prompt": "prompts/specification/default.md"},
     ]
     docs_root = _setup_docs(tmp_path, stages)
@@ -396,7 +399,7 @@ def test_plan_md_updated_after_each_stage(tmp_path):
 
 def test_discovery_fanout_calls_planning_then_tracks(tmp_path):
     stages = [
-        {"stage": "discovery", "prompt": "prompts/discovery/planning.md"},
+        {"stage": "discovery", "expansion": "tracks"},
         {"stage": "specification", "prompt": "prompts/specification/default.md"},
     ]
     docs_root = _setup_docs(tmp_path, stages)
@@ -449,7 +452,7 @@ def test_discovery_fanout_calls_planning_then_tracks(tmp_path):
 
 def test_discovery_blocked_when_planning_fails(tmp_path):
     stages = [
-        {"stage": "discovery", "prompt": "prompts/discovery/planning.md"},
+        {"stage": "discovery", "expansion": "tracks"},
         {"stage": "specification", "prompt": "prompts/specification/default.md"},
     ]
     docs_root = _setup_docs(tmp_path, stages)
@@ -472,7 +475,7 @@ def test_discovery_blocked_when_planning_fails(tmp_path):
 
 def test_discovery_blocked_when_any_track_fails(tmp_path):
     stages = [
-        {"stage": "discovery", "prompt": "prompts/discovery/planning.md"},
+        {"stage": "discovery", "expansion": "tracks"},
         {"stage": "specification", "prompt": "prompts/specification/default.md"},
     ]
     docs_root = _setup_docs(tmp_path, stages)
@@ -507,7 +510,7 @@ def test_discovery_blocked_when_any_track_fails(tmp_path):
 
 def test_implementation_filters_non_slice_files(tmp_path):
     stages = [
-        {"stage": "implementation", "prompt": "prompts/implementation/default.md"},
+        {"stage": "implementation", "prompt": "prompts/implementation/default.md", "expansion": "slices", "slices_from_stage": "decomposition"},
     ]
     docs_root = _setup_docs(tmp_path, stages)
     run_folder_path = tmp_path / "projects" / "myproject" / "workflow" / "runs" / "feat" / "2026-01-01-run-1"
@@ -552,7 +555,7 @@ def test_implementation_filters_non_slice_files(tmp_path):
 
 def test_review_md_path_uses_stage_subfolder(tmp_path):
     stages = [
-        {"stage": "review", "prompts": {"architecture": "prompts/review/architecture.md"}},
+        {"stage": "review", "expansion": "prompts", "prompts": {"architecture": "prompts/review/architecture.md"}},
     ]
     docs_root = _setup_docs(tmp_path, stages)
     run_folder_path = tmp_path / "projects" / "myproject" / "workflow" / "runs" / "feat" / "2026-01-01-run-1"

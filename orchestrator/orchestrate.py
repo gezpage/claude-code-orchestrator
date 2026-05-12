@@ -9,60 +9,56 @@ from pathlib import Path
 import yaml
 
 from orchestrator import paths, state as state_mod
-
-_SLICE_RE = re.compile(r'S-\d+-')
 from orchestrator.logger import OrchestratorLogger
-from orchestrator.plan import init_plan_md, expand_impl_nodes, expand_discovery_nodes, update_plan_md
-from orchestrator.run_stage import run_stage, run_interactive_stage, _fmt_elapsed
+from orchestrator.plan import expand_nodes, init_plan_md, update_plan_md
+from orchestrator.profile import ExpansionKind, StageConfig, load_profile
+from orchestrator.run_stage import _fmt_elapsed, run_interactive_stage, run_stage
 import orchestrator.review_cycle as review_cycle_mod
 
+_SLICE_RE = re.compile(r'S-\d+-')
 
-def _output_summary(stage, signal):
-    if stage == "discovery":
+
+def _output_summary(stage: StageConfig, signal: dict) -> str | None:
+    if stage.expansion == ExpansionKind.TRACKS:
         tracks = signal.get("tracks", [])
         n = len(signal.get("findings_files", []))
         if tracks:
             t = len(tracks)
             return f"{t} track{'s' if t != 1 else ''}, {n} finding{'s' if n != 1 else ''}"
         return f"{n} research file{'s' if n != 1 else ''}" if n else None
-    if stage == "specification":
-        parts = []
-        if signal.get("prd_path"):
-            parts.append("PRD")
-        if signal.get("context_path"):
-            parts.append("context")
-        n = len(signal.get("adr_paths", []))
-        if n:
-            parts.append(f"{n} ADR{'s' if n != 1 else ''}")
-        return ", ".join(parts) if parts else None
-    if stage == "decomposition":
-        n = len(signal.get("slice_files", []))
-        return f"{n} implementation slice{'s' if n != 1 else ''}" if n else None
-    if stage == "implementation":
+
+    if stage.expansion == ExpansionKind.SLICES:
         n = len(signal.get("commit_hashes", []))
         return f"{n} commit{'s' if n != 1 else ''}" if n else None
-    if stage == "qa":
-        outcome = signal.get("outcome")
-        return outcome if outcome else None
-    if stage == "review":
+
+    if stage.expansion == ExpansionKind.PROMPTS:
         statuses = signal.get("reviewer_statuses", {})
         if statuses:
             return ", ".join(f"{r}: {v}" for r, v in statuses.items())
         return None
-    if stage == "harvest":
-        kb = len(signal.get("kb_files", []))
-        adr = len(signal.get("adr_files", []))
-        parts = []
-        if kb:
-            parts.append(f"{kb} KB file{'s' if kb != 1 else ''}")
-        if adr:
-            parts.append(f"{adr} ADR{'s' if adr != 1 else ''}")
-        return ", ".join(parts) if parts else None
-    return None
+
+    return _generic_summary(signal)
 
 
+def _generic_summary(signal: dict) -> str | None:
+    """Build a short summary from well-known signal fields without naming the stage."""
+    parts = []
+    if outcome := signal.get("outcome"):
+        parts.append(str(outcome))
+    if signal.get("prd_path"):
+        parts.append("PRD")
+    if signal.get("context_path"):
+        parts.append("context")
+    for key, label in [("adr_paths", "ADR"), ("slice_files", "implementation slice"),
+                        ("kb_files", "KB file"), ("adr_files", "ADR")]:
+        val = signal.get(key)
+        if isinstance(val, list) and val:
+            n = len(val)
+            parts.append(f"{n} {label}{'s' if n != 1 else ''}")
+    return ", ".join(parts) if parts else None
 
-def _load_project_config(docs_root, project):
+
+def _load_project_config(docs_root: str, project: str) -> dict:
     config_path = paths.require_file(
         Path(docs_root) / "projects" / project / "project.yaml"
     )
@@ -72,24 +68,14 @@ def _load_project_config(docs_root, project):
 _BUNDLED_PROFILES_DIR = Path(__file__).parent / "profiles"
 
 
-def _load_profile(profile):
-    if profile.endswith((".yaml", ".yml")):
-        p = Path(profile)
-        if not p.is_file():
-            raise FileNotFoundError(f"Profile file not found: {p}")
-        return yaml.safe_load(p.read_text())
-    bundled = _BUNDLED_PROFILES_DIR / f"{profile}.yaml"
-    if not bundled.is_file():
-        available = ", ".join(p.stem for p in sorted(_BUNDLED_PROFILES_DIR.glob("*.yaml")))
-        raise FileNotFoundError(f"Unknown profile '{profile}'. Available: {available}")
-    return yaml.safe_load(bundled.read_text())
-
-
-def _impl_from_prompt(prompt_path):
+def _impl_from_prompt(prompt_path: str) -> str:
     return Path(prompt_path).stem
 
 
-def _build_variables(stage, signals, branch, feature_path, docs_root, project, run_folder, project_config):
+def _build_variables(
+    stage_name: str, signals: dict, branch: str, feature_path: str,
+    docs_root: str, project: str, run_folder: Path, project_config: dict,
+) -> dict:
     """Collect variables from config and prior signal fields only — no file reads."""
     vars_dict = {
         "run_folder": str(run_folder),
@@ -110,7 +96,7 @@ def _build_variables(stage, signals, branch, feature_path, docs_root, project, r
     return vars_dict
 
 
-def _create_worktree(repo_root: str, temp_branch: str, base_branch: str, logger) -> str:
+def _create_worktree(repo_root: str, temp_branch: str, base_branch: str, logger, stage_name: str) -> str:
     import tempfile
     wt_path = tempfile.mkdtemp(prefix=f"orch-wt-{temp_branch}-")
     result = subprocess.run(
@@ -119,19 +105,19 @@ def _create_worktree(repo_root: str, temp_branch: str, base_branch: str, logger)
     )
     if result.returncode != 0:
         raise RuntimeError(f"git worktree add failed: {result.stderr}")
-    logger.log("implementation", "INFO", f"Created worktree {wt_path} on branch {temp_branch}")
+    logger.log(stage_name, "INFO", f"Created worktree {wt_path} on branch {temp_branch}")
     return wt_path
 
 
-def _remove_worktree(repo_root: str, wt_path: str, temp_branch: str, logger) -> None:
+def _remove_worktree(repo_root: str, wt_path: str, temp_branch: str, logger, stage_name: str) -> None:
     subprocess.run(["git", "-C", repo_root, "worktree", "remove", "--force", wt_path],
                    capture_output=True)
     subprocess.run(["git", "-C", repo_root, "branch", "-D", temp_branch],
                    capture_output=True)
-    logger.log("implementation", "INFO", f"Removed worktree {wt_path}")
+    logger.log(stage_name, "INFO", f"Removed worktree {wt_path}")
 
 
-def _merge_worktree_branch(repo_root: str, temp_branch: str, logger) -> None:
+def _merge_worktree_branch(repo_root: str, temp_branch: str, logger, stage_name: str) -> None:
     result = subprocess.run(
         ["git", "-C", repo_root, "merge", temp_branch, "--no-ff",
          "-m", f"merge parallel slice branch {temp_branch}"],
@@ -139,25 +125,24 @@ def _merge_worktree_branch(repo_root: str, temp_branch: str, logger) -> None:
     )
     if result.returncode != 0:
         raise RuntimeError(f"git merge {temp_branch} failed: {result.stderr}")
-    logger.log("implementation", "INFO", f"Merged {temp_branch} into HEAD")
+    logger.log(stage_name, "INFO", f"Merged {temp_branch} into HEAD")
 
 
-def _create_branch(branch, repo_root, logger):
+def _create_branch(branch: str, repo_root: str, logger, stage_name: str) -> None:
     result = subprocess.run(
         ["git", "-C", repo_root, "checkout", "-b", branch],
-        capture_output=True,
-        text=True,
+        capture_output=True, text=True,
     )
     if result.returncode != 0:
         if "already exists" in result.stderr:
-            logger.log("implementation", "WARN", f"branch '{branch}' already exists — continuing on existing branch")
+            logger.log(stage_name, "WARN", f"branch '{branch}' already exists — continuing on existing branch")
             return
-        logger.log("implementation", "ERROR", f"git checkout -b {branch} failed: {result.stderr}")
+        logger.log(stage_name, "ERROR", f"git checkout -b {branch} failed: {result.stderr}")
         raise RuntimeError(f"Failed to create branch {branch}: {result.stderr}")
-    logger.log("implementation", "INFO", f"Created branch {branch}")
+    logger.log(stage_name, "INFO", f"Created branch {branch}")
 
 
-def _resolve_run_folder(docs_root, project, feature_path, resume):
+def _resolve_run_folder(docs_root: str, project: str, feature_path: str, resume: bool) -> Path:
     date_str = datetime.date.today().isoformat()
     feature_slug = Path(feature_path).stem.lower().replace(" ", "-")
     runs_base = Path(docs_root) / "projects" / project / "workflow" / "runs" / feature_slug
@@ -179,7 +164,14 @@ def _resolve_run_folder(docs_root, project, feature_path, resume):
     return paths.resolve_run_folder(docs_root, project, feature_slug, date_str, n)
 
 
-def run_pipeline(docs_root, project, feature_path, branch, profile_name, resume=False):
+def run_pipeline(
+    docs_root: str,
+    project: str,
+    feature_path: str,
+    branch: str,
+    profile_name: str,
+    resume: bool = False,
+) -> None:
     project_config = _load_project_config(docs_root, project)
     if "repo-root" not in project_config:
         print("ERROR: project.yaml is missing required field 'repo-root'")
@@ -201,7 +193,7 @@ def run_pipeline(docs_root, project, feature_path, branch, profile_name, resume=
     if not project_context.exists():
         project_context.touch()
 
-    profile = _load_profile(profile_name)
+    profile = load_profile(profile_name, _BUNDLED_PROFILES_DIR)
 
     project_log_path = str(Path(docs_root) / "projects" / project)
     log_level = project_config.get("log_level", "DEBUG")
@@ -222,7 +214,6 @@ def run_pipeline(docs_root, project, feature_path, branch, profile_name, resume=
     completed = {
         stage for stage, status in st.get("stages", {}).items() if status == "passed"
     }
-
     st.setdefault("project", project)
     st.setdefault("feature_path", feature_path)
     st.setdefault("branch", branch)
@@ -235,25 +226,24 @@ def run_pipeline(docs_root, project, feature_path, branch, profile_name, resume=
 
     init_plan_md(run_folder, profile)
 
-    for stage_def in profile.get("stages", []):
-        stage_name = stage_def["stage"]
+    for stage in profile.stages:
+        stage_name = stage.name
 
         if stage_name in completed:
             logger.log(stage_name, "DEBUG", "already passed — skipping")
             continue
 
-        if stage_def.get("mode") == "interactive":
-            artifact_name = stage_def.get("artifact")
-            if not artifact_name:
+        if stage.mode == "interactive":
+            if not stage.artifact:
                 print(f"ERROR: interactive stage '{stage_name}' missing required 'artifact' field in profile")
                 sys.exit(1)
-            artifact_path = run_folder / stage_name / artifact_name
+            artifact_path = run_folder / stage_name / stage.artifact
             variables = _build_variables(
                 stage_name, signals, branch, feature_path,
                 docs_root, project, run_folder, project_config,
             )
             if artifact_path.exists():
-                artifact_key = Path(artifact_name).stem.replace("-", "_")
+                artifact_key = Path(stage.artifact).stem.replace("-", "_")
                 sig = {artifact_key: str(artifact_path)}
                 signals[stage_name] = sig
                 state_mod.update_stage_status(run_folder, stage_name, "passed")
@@ -264,7 +254,7 @@ def run_pipeline(docs_root, project, feature_path, branch, profile_name, resume=
             update_plan_md(run_folder, stage_name, "in_progress")
             t0 = time.monotonic()
             sig = run_interactive_stage(
-                stage_name, stage_def.get("prompt"), variables,
+                stage_name, stage.prompt, variables,
                 run_folder, artifact_path, docs_root, project, project_log_path,
             )
             elapsed = time.monotonic() - t0
@@ -273,7 +263,7 @@ def run_pipeline(docs_root, project, feature_path, branch, profile_name, resume=
                 st["blocked_at"] = stage_name
                 state_mod.save_state(run_folder, st)
                 update_plan_md(run_folder, stage_name, "blocked")
-                logger.log(stage_name, "WARN", f"interactive stage '{stage_name}' incomplete: {artifact_name} not created")
+                logger.log(stage_name, "WARN", f"interactive stage '{stage_name}' incomplete: {stage.artifact} not created")
                 print(
                     f"\n[orchestrator] Stage '{stage_name}' incomplete.\n"
                     f"  Expected : {artifact_path}\n"
@@ -291,13 +281,12 @@ def run_pipeline(docs_root, project, feature_path, branch, profile_name, resume=
             docs_root, project, run_folder, project_config,
         )
 
-        if stage_name == "discovery":
+        if stage.expansion == ExpansionKind.TRACKS:
             update_plan_md(run_folder, stage_name, "in_progress")
             t0 = time.monotonic()
 
-            # Phase 1: planning agent always uses planning.md — profile prompt does not apply here
             planning_sig = run_stage(
-                "discovery", "planning", variables, run_folder, docs_root, project, project_log_path,
+                stage_name, "planning", variables, run_folder, docs_root, project, project_log_path,
                 output_suffix="planning", schema_name="discovery_planning",
             )
             if planning_sig.get("status") != "passed":
@@ -305,7 +294,7 @@ def run_pipeline(docs_root, project, feature_path, branch, profile_name, resume=
                 st["blocked_at"] = stage_name
                 state_mod.save_state(run_folder, st)
                 update_plan_md(run_folder, stage_name, planning_sig["status"])
-                logger.log(stage_name, "ERROR", f"pipeline stopped: discovery planning {planning_sig['status']}: {planning_sig.get('message', '')}")
+                logger.log(stage_name, "ERROR", f"pipeline stopped: {stage_name} planning {planning_sig['status']}: {planning_sig.get('message', '')}")
                 sys.exit(1)
 
             tracks = planning_sig.get("tracks", [])
@@ -314,16 +303,13 @@ def run_pipeline(docs_root, project, feature_path, branch, profile_name, resume=
                 st["blocked_at"] = stage_name
                 state_mod.save_state(run_folder, st)
                 update_plan_md(run_folder, stage_name, "blocked")
-                logger.log(stage_name, "ERROR", "pipeline stopped: discovery planning produced no tracks — verify --feature-path is a directory containing overview.md")
+                logger.log(stage_name, "ERROR", f"pipeline stopped: {stage_name} planning produced no tracks — verify --feature-path is a directory containing overview.md")
                 sys.exit(1)
 
             logger.log(stage_name, "INFO", f"planning complete: {len(tracks)} track{'s' if len(tracks) != 1 else ''}")
-
-            # Expand diagram: replace single discovery node with planning + per-track nodes
             planning_elapsed = time.monotonic() - t0
-            track_node_ids = expand_discovery_nodes(run_folder, tracks, planning_elapsed_secs=planning_elapsed)
+            track_node_ids = expand_nodes(run_folder, stage, tracks=tracks, planning_elapsed_secs=planning_elapsed)
 
-            # Phase 2: run all tracks in parallel
             if len(tracks) == 1:
                 track = tracks[0]
                 tid = track_node_ids.get(track["name"])
@@ -331,7 +317,7 @@ def run_pipeline(docs_root, project, feature_path, branch, profile_name, resume=
                     update_plan_md(run_folder, tid, "in_progress")
                 t_start = time.monotonic()
                 sig = run_stage(
-                    "discovery", "pregenerated", dict(variables),
+                    stage_name, "pregenerated", dict(variables),
                     run_folder, docs_root, project, project_log_path,
                     output_suffix=track["name"],
                     prompt_file=track["prompt_file"],
@@ -351,7 +337,7 @@ def run_pipeline(docs_root, project, feature_path, branch, profile_name, resume=
                         update_plan_md(run_folder, tid, "in_progress")
                     t_start = time.monotonic()
                     sig = run_stage(
-                        "discovery", "pregenerated", variables_copy,
+                        stage_name, "pregenerated", variables_copy,
                         run_folder, docs_root, project, project_log_path,
                         track["name"],        # output_suffix
                         None,                 # cwd
@@ -375,14 +361,13 @@ def run_pipeline(docs_root, project, feature_path, branch, profile_name, resume=
             if failed_tracks:
                 for name in failed_tracks:
                     s = track_results[name]
-                    logger.log(stage_name, "ERROR", f"discovery track '{name}' {s.get('status')}: {s.get('message', '')}")
+                    logger.log(stage_name, "ERROR", f"{stage_name} track '{name}' {s.get('status')}: {s.get('message', '')}")
                 st = state_mod.load_state(run_folder)
                 st["blocked_at"] = stage_name
                 state_mod.save_state(run_folder, st)
                 update_plan_md(run_folder, stage_name, "blocked")
                 sys.exit(1)
 
-            # Phase 3: aggregate
             elapsed = time.monotonic() - t0
             aggregated_tracks = []
             findings_files = []
@@ -397,32 +382,28 @@ def run_pipeline(docs_root, project, feature_path, branch, profile_name, resume=
                 if ff:
                     findings_files.append(ff)
 
-            discovery_sig = {
-                "stage": "discovery",
+            aggregated_sig = {
+                "stage": stage_name,
                 "status": "passed",
                 "tracks": aggregated_tracks,
                 "findings_files": findings_files,
             }
-            signals[stage_name] = discovery_sig
+            signals[stage_name] = aggregated_sig
             state_mod.update_stage_status(run_folder, stage_name, "passed")
-            state_mod.save_stage_signal(run_folder, stage_name, discovery_sig)
-            update_plan_md(run_folder, stage_name, "passed", elapsed_secs=elapsed, output_summary=_output_summary(stage_name, discovery_sig), signal=discovery_sig)
+            state_mod.save_stage_signal(run_folder, stage_name, aggregated_sig)
+            update_plan_md(run_folder, stage_name, "passed", elapsed_secs=elapsed, output_summary=_output_summary(stage, aggregated_sig), signal=aggregated_sig)
             n_tracks = len(tracks)
             n_findings = len(findings_files)
             logger.log(stage_name, "INFO",
-                f"discovery passed ({_fmt_elapsed(elapsed)}) — {n_tracks} track{'s' if n_tracks != 1 else ''}, {n_findings} findings file{'s' if n_findings != 1 else ''}")
+                f"{stage_name} passed ({_fmt_elapsed(elapsed)}) — {n_tracks} track{'s' if n_tracks != 1 else ''}, {n_findings} findings file{'s' if n_findings != 1 else ''}")
             continue
 
-        if stage_name == "implementation":
-            stage_standards = project_standards if stage_def.get("standards") else None
-            _create_branch(branch, variables["repo_root"], logger)
-            slice_files = []
-            slice_groups = []
-            for sig in signals.values():
-                if isinstance(sig, dict) and "slice_files" in sig:
-                    slice_files = sig["slice_files"]
-                    slice_groups = sig.get("slice_groups", [])
-                    break
+        elif stage.expansion == ExpansionKind.SLICES:
+            stage_standards = project_standards if stage.standards else None
+            _create_branch(branch, variables["repo_root"], logger, stage_name)
+            prior_sig = signals.get(stage.slices_from_stage, {}) if stage.slices_from_stage else {}
+            slice_files = prior_sig.get("slice_files", [])
+            slice_groups = prior_sig.get("slice_groups", [])
             pre_count = len(slice_files)
             slice_files = [sf for sf in slice_files if _SLICE_RE.search(Path(sf).name)]
             if len(slice_files) != pre_count:
@@ -436,11 +417,10 @@ def run_pipeline(docs_root, project, feature_path, branch, profile_name, resume=
                 slice_groups = [g for g in slice_groups if g]
             if not slice_groups:
                 slice_groups = [[sf] for sf in slice_files]
-            # Flatten groups to get canonical ordered list (for sub_id assignment)
             all_slices = [sf for group in slice_groups for sf in group]
             slice_to_id = {sf: f"impl_{i+1}" for i, sf in enumerate(all_slices)}
-            expand_impl_nodes(run_folder, all_slices, slice_groups)
-            impl = _impl_from_prompt(stage_def.get("prompt", "prompts/implementation/default.md"))
+            expand_nodes(run_folder, stage, slice_files=all_slices, slice_groups=slice_groups)
+            impl = _impl_from_prompt(stage.prompt or f"prompts/{stage_name}/default.md")
             all_commits = []
             for group in slice_groups:
                 if len(group) == 1:
@@ -471,15 +451,16 @@ def run_pipeline(docs_root, project, feature_path, branch, profile_name, resume=
                         for sf in group:
                             sub_id = slice_to_id[sf]
                             temp_branch = f"{branch}-{sub_id}"
-                            wt_path = _create_worktree(repo_root, temp_branch, branch, logger)
+                            wt_path = _create_worktree(repo_root, temp_branch, branch, logger, stage_name)
                             worktrees[sub_id] = (wt_path, temp_branch)
                             update_plan_md(run_folder, sub_id, "in_progress")
+
                         def _run_timed(sn, im, vc, rf, dr, pr, lp, sid, wt, std):
                             t = time.monotonic()
                             sig = run_stage(sn, im, vc, rf, dr, pr, lp, sid, cwd=wt, standards=std)
                             return sig, time.monotonic() - t
 
-                        futures: dict[concurrent.futures.Future, tuple[str, str]] = {}
+                        futures2: dict[concurrent.futures.Future, tuple[str, str]] = {}
                         with concurrent.futures.ThreadPoolExecutor(max_workers=len(group)) as executor:
                             for slice_file in group:
                                 sub_id = slice_to_id[slice_file]
@@ -491,9 +472,9 @@ def run_pipeline(docs_root, project, feature_path, branch, profile_name, resume=
                                     run_folder, docs_root, project, project_log_path,
                                     sub_id, wt_path, stage_standards,
                                 )
-                                futures[fut] = (sub_id, slice_file)
+                                futures2[fut] = (sub_id, slice_file)
                         failed = False
-                        for fut, (sub_id, slice_file) in futures.items():
+                        for fut, (sub_id, slice_file) in futures2.items():
                             sig, elapsed = fut.result()
                             if sig.get("status") != "passed":
                                 st = state_mod.load_state(run_folder)
@@ -504,7 +485,7 @@ def run_pipeline(docs_root, project, feature_path, branch, profile_name, resume=
                                 failed = True
                             else:
                                 _, temp_branch = worktrees[sub_id]
-                                _merge_worktree_branch(repo_root, temp_branch, logger)
+                                _merge_worktree_branch(repo_root, temp_branch, logger, stage_name)
                                 commits = sig.get("commit_hashes", [])
                                 all_commits.extend(commits)
                                 update_plan_md(run_folder, sub_id, "passed", elapsed_secs=elapsed,
@@ -514,37 +495,40 @@ def run_pipeline(docs_root, project, feature_path, branch, profile_name, resume=
                             sys.exit(1)
                     finally:
                         for sub_id, (wt_path, temp_branch) in worktrees.items():
-                            _remove_worktree(repo_root, wt_path, temp_branch, logger)
-            signals[stage_name] = {"status": "passed", "commit_hashes": all_commits, "branch": branch}
+                            _remove_worktree(repo_root, wt_path, temp_branch, logger, stage_name)
+            final_sig = {"status": "passed", "commit_hashes": all_commits, "branch": branch}
+            signals[stage_name] = final_sig
             state_mod.update_stage_status(run_folder, stage_name, "passed")
-            state_mod.save_stage_signal(run_folder, stage_name, signals[stage_name])
+            state_mod.save_stage_signal(run_folder, stage_name, final_sig)
             n_commits = len(all_commits)
             logger.log(stage_name, "INFO",
-                f"implementation passed — {n_commits} commit{'s' if n_commits != 1 else ''} on {branch}")
+                f"{stage_name} passed — {n_commits} commit{'s' if n_commits != 1 else ''} on {branch}")
             continue
 
-        if stage_name == "review":
-            review_md_path = run_folder / "review" / "review-log.md"
+        elif stage.expansion == ExpansionKind.PROMPTS:
+            review_md_path = run_folder / stage_name / "review-log.md"
             review_md_path.parent.mkdir(parents=True, exist_ok=True)
             variables["review_md"] = str(review_md_path)
             variables["round"] = "1"
-            impl_sig = signals.get("implementation", {})
-            commit_hashes = impl_sig.get("commit_hashes", [])
+            commit_hashes = next(
+                (sig.get("commit_hashes", []) for sig in signals.values()
+                 if isinstance(sig, dict) and sig.get("commit_hashes")),
+                [],
+            )
             if commit_hashes and "repo_root" in variables:
                 first, last = commit_hashes[0], commit_hashes[-1]
                 diff_result = subprocess.run(
                     ["git", "-C", variables["repo_root"], "diff", f"{first}^..{last}"],
                     capture_output=True, text=True,
                 )
-                diff_path = run_folder / "review" / "diff-round-1.patch"
+                diff_path = run_folder / stage_name / "diff-round-1.patch"
                 diff_path.write_text(diff_result.stdout)
                 variables["diff"] = str(diff_path)
             else:
                 variables["diff"] = ""
-            prompts = stage_def.get("prompts", {})
             reviewer_statuses = {}
             changes_requested = []
-            for reviewer, prompt_path in prompts.items():
+            for reviewer, prompt_path in stage.prompts.items():
                 sub_id = f"{stage_name}_{reviewer}"
                 update_plan_md(run_folder, sub_id, "in_progress")
                 impl = _impl_from_prompt(prompt_path)
@@ -572,35 +556,36 @@ def run_pipeline(docs_root, project, feature_path, branch, profile_name, resume=
                 )
                 if not result.get("all_passed"):
                     st = state_mod.load_state(run_folder)
-                    st["blocked_at"] = "review"
+                    st["blocked_at"] = stage_name
                     state_mod.save_state(run_folder, st)
                     update_plan_md(run_folder, stage_name, "blocked")
                     logger.log(stage_name, "ERROR", f"pipeline stopped: review cycle blocked, reviewers={result.get('reviewers', [])}")
                     sys.exit(1)
             state_mod.update_stage_status(run_folder, stage_name, "passed")
             state_mod.save_stage_signal(run_folder, stage_name, review_signal)
-            update_plan_md(run_folder, stage_name, "passed", output_summary=_output_summary(stage_name, review_signal), signal=review_signal)
+            update_plan_md(run_folder, stage_name, "passed", output_summary=_output_summary(stage, review_signal), signal=review_signal)
             continue
 
-        update_plan_md(run_folder, stage_name, "in_progress")
-        impl = _impl_from_prompt(stage_def.get("prompt", f"prompts/{stage_name}/default.md"))
-        t0 = time.monotonic()
-        stage_cwd = variables.get("repo_root") if stage_name == "qa" else None
-        stage_standards = project_standards if stage_def.get("standards") else None
-        sig = run_stage(stage_name, impl, variables, run_folder, docs_root, project, project_log_path, cwd=stage_cwd, standards=stage_standards)
-        elapsed = time.monotonic() - t0
-        signals[stage_name] = sig
+        else:
+            update_plan_md(run_folder, stage_name, "in_progress")
+            impl = _impl_from_prompt(stage.prompt or f"prompts/{stage_name}/default.md")
+            t0 = time.monotonic()
+            stage_cwd = variables.get("repo_root") if stage.cwd_from_repo_root else None
+            stage_standards = project_standards if stage.standards else None
+            sig = run_stage(stage_name, impl, variables, run_folder, docs_root, project, project_log_path, cwd=stage_cwd, standards=stage_standards)
+            elapsed = time.monotonic() - t0
+            signals[stage_name] = sig
 
-        if sig.get("status") in ("blocked", "failed"):
-            st = state_mod.load_state(run_folder)
-            st["blocked_at"] = stage_name
-            state_mod.save_state(run_folder, st)
-            update_plan_md(run_folder, stage_name, sig["status"])
-            logger.log(stage_name, "ERROR", f"pipeline stopped: stage {stage_name} {sig['status']}: {sig.get('message', '')}")
-            sys.exit(1)
+            if sig.get("status") in ("blocked", "failed"):
+                st = state_mod.load_state(run_folder)
+                st["blocked_at"] = stage_name
+                state_mod.save_state(run_folder, st)
+                update_plan_md(run_folder, stage_name, sig["status"])
+                logger.log(stage_name, "ERROR", f"pipeline stopped: stage {stage_name} {sig['status']}: {sig.get('message', '')}")
+                sys.exit(1)
 
-        state_mod.update_stage_status(run_folder, stage_name, "passed")
-        state_mod.save_stage_signal(run_folder, stage_name, sig)
-        update_plan_md(run_folder, stage_name, "passed", elapsed_secs=elapsed, output_summary=_output_summary(stage_name, sig), signal=sig, impl_name=impl)
+            state_mod.update_stage_status(run_folder, stage_name, "passed")
+            state_mod.save_stage_signal(run_folder, stage_name, sig)
+            update_plan_md(run_folder, stage_name, "passed", elapsed_secs=elapsed, output_summary=_output_summary(stage, sig), signal=sig, impl_name=impl)
 
     logger.log("pipeline", "INFO", "pipeline completed successfully")
