@@ -232,16 +232,6 @@ orchestrator stage \
 
 Exits `0` on success, `1` on failure. Prints the stage signal JSON to stdout.
 
-## Claude Code skill setup
-
-To make `/orchestrator` available in Claude Code sessions, symlink the skill directory:
-
-```bash
-ln -s /path/to/orchestrator/claude-skill ~/.claude/skills/orchestrator
-```
-
-Edits to `claude-skill/SKILL.md` are immediately live — no copy step needed.
-
 ## Tests
 
 ```bash
