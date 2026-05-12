@@ -12,6 +12,10 @@ from orchestrator.run_stage import run_stage
 
 _MAX_CYCLES = 2
 
+# Tracks findings across all reviewers and cycles for plan.md summary.
+# Structure: {reviewer: [(finding_text, resolved_in_cycle_or_None)]}
+_FindingsMap = dict[str, list[tuple[str, int | None]]]
+
 
 def _parse_frontmatter(content: str):
     if content.startswith("---\n"):
@@ -63,6 +67,49 @@ def _update_review_md(review_md_path: Path, reviewer: str, verdict: str, round_n
     review_md_path.write_text(_write_frontmatter(meta, body + section))
 
 
+def _inject_fix_divider(review_md_path: Path, cycle_num: int, commit_messages: list[str]) -> None:
+    """Insert a fix-cycle commit marker into review-log.md before the next review round."""
+    if not review_md_path.exists():
+        return
+    commits_str = ", ".join(f"`{c}`" for c in commit_messages) if commit_messages else "no commits"
+    divider = f"\n---\n**Fix Cycle {cycle_num + 1}:** {commits_str}\n\n---\n"
+    review_md_path.write_text(review_md_path.read_text() + divider)
+
+
+def _append_findings_summary(plan_path: Path, findings_map: _FindingsMap, reviewer_statuses: dict) -> None:
+    """Append a Review Findings section to plan.md after all cycles complete."""
+    if not plan_path.exists() or not findings_map:
+        return
+
+    lines = ["\n## Review Findings\n"]
+    for reviewer, findings in findings_map.items():
+        if not findings:
+            final_verdict = reviewer_statuses.get(reviewer, "approved")
+            lines.append(f"**{reviewer}** — {final_verdict}, no blocking issues\n")
+            continue
+        lines.append(f"**{reviewer}:**\n")
+        for text, resolved_cycle in findings:
+            if resolved_cycle is not None:
+                lines.append(f"- {text} → Fixed in Fix Cycle {resolved_cycle + 1}")
+            else:
+                lines.append(f"- {text} → Unresolved")
+        lines.append("")
+
+    section = "\n".join(lines)
+    content = plan_path.read_text()
+    markers = ["\n## File Manifest", "\n## Run Summary"]
+    insert_at = len(content)
+    for marker in markers:
+        idx = content.find(marker)
+        if 0 <= idx < insert_at:
+            insert_at = idx
+
+    if insert_at < len(content):
+        plan_path.write_text(content[:insert_at] + section + content[insert_at:])
+    else:
+        plan_path.write_text(content + section)
+
+
 def run(run_folder, docs_root, project, branch, review_signal, project_log_path, repo_root: str = "") -> dict:
     run_folder = Path(run_folder)
     logger = OrchestratorLogger(run_folder, str(project_log_path))
@@ -78,6 +125,12 @@ def run(run_folder, docs_root, project, branch, review_signal, project_log_path,
 
     review_md_path = run_folder / "review" / "review-log.md"
     review_md_path.parent.mkdir(parents=True, exist_ok=True)
+
+    # Seed findings from round-1 signals; resolved_cycle filled in when a later review approves.
+    findings_map: _FindingsMap = {
+        r: [(f, None) for f in review_signal.get("reviewer_findings", {}).get(r, [])]
+        for r in changes_requested
+    }
 
     for cycle in range(1, _MAX_CYCLES + 1):
         round_num = cycle + 1  # Round 2 for first cycle, Round 3 for second
@@ -119,6 +172,9 @@ def run(run_folder, docs_root, project, branch, review_signal, project_log_path,
         )
         logger.log("review-cycle", "INFO", f"fix-implementation round {round_num}: {fix_status}")
 
+        commit_messages = fix_sig.get("commit_messages", commit_hashes)
+        _inject_fix_divider(review_md_path, cycle, commit_messages)
+
         for reviewer in list(changes_requested):
             review_vars = {
                 "run_folder": str(run_folder),
@@ -153,10 +209,18 @@ def run(run_folder, docs_root, project, branch, review_signal, project_log_path,
             )
             logger.log("review-cycle", "INFO", f"reviewer {reviewer} round {round_num}: {verdict}")
 
+            if verdict == "approved":
+                findings_map[reviewer] = [
+                    (text, cycle if resolved is None else resolved)
+                    for text, resolved in findings_map.get(reviewer, [])
+                ]
+
         state_mod.update_stage_status(run_folder, f"review-cycle-{cycle}", "passed")
 
         changes_requested = [r for r, s in reviewer_statuses.items() if s == "changes-requested"]
         if not changes_requested:
+            _append_findings_summary(run_folder / "plan.md", findings_map, reviewer_statuses)
             return {"all_passed": True}
 
+    _append_findings_summary(run_folder / "plan.md", findings_map, reviewer_statuses)
     return {"all_passed": False, "blocked": True, "reviewers": changes_requested}

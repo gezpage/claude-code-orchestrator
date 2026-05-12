@@ -10,6 +10,7 @@ Format: [Unreleased] at the top, dated releases below, newest first.
 ### Changed
 - Added branch housekeeping step (step 5) to Change Workflow: prunes merged-PR branches via `gh pr list --state merged` before each new worktree, covering squash-merge repos where `git branch --merged` is unreliable.
 - Refactored `orchestrate.py`: extracted five stage dispatcher functions (`_dispatch_default`, `_dispatch_interactive`, `_dispatch_tracks`, `_dispatch_slices`, `_dispatch_prompts`) from the 424-line `run_pipeline` god function; each dispatcher is independently unit-tested (24 new tests); `_PipelineContext` dataclass replaces 8-argument function signatures; `_DISPATCHERS` dict replaces the `if/elif` expansion chain; `run_pipeline` reduced from 424 to 147 lines.
+- Review findings correlation: reviewer prompts now emit a `findings` array in their SIGNAL_JSON (one sentence per blocking issue); `review_cycle.py` injects a fix-commit divider into `review-log.md` between rounds and appends a `## Review Findings` table to `plan.md` after all cycles complete, linking each finding to the fix cycle that resolved it or marking it unresolved.
 
 ## [2026-05-12]
 

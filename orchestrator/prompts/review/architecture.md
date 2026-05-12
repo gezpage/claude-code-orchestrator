@@ -97,13 +97,13 @@ Write your findings under `## Architecture Review — Round {{ round }}` in `{{ 
 Emit exactly one line:
 
 ```
-SIGNAL_JSON: {"stage": "review", "status": "passed", "reviewer_statuses": {"architecture": "approved"}, "changes_requested": []}
+SIGNAL_JSON: {"stage": "review", "status": "passed", "reviewer_statuses": {"architecture": "approved"}, "changes_requested": [], "findings": []}
 ```
 
-If changes are required:
+If changes are required, populate `findings` with one short sentence per blocking issue (the issue only — no file paths, no fix instructions):
 
 ```
-SIGNAL_JSON: {"stage": "review", "status": "passed", "reviewer_statuses": {"architecture": "changes-requested"}, "changes_requested": ["architecture"]}
+SIGNAL_JSON: {"stage": "review", "status": "passed", "reviewer_statuses": {"architecture": "changes-requested"}, "changes_requested": ["architecture"], "findings": ["Module augmentation path targets wrong module namespace", "Handler list mutates shared registry without synchronisation"]}
 ```
 
-Required fields: `stage`, `status`, `reviewer_statuses`, `changes_requested`.
+Required fields: `stage`, `status`, `reviewer_statuses`, `changes_requested`, `findings`.
