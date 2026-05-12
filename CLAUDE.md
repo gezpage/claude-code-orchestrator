@@ -48,9 +48,18 @@ Follow this for every change — bugfix, feature, or refactor.
 2. Read the relevant ADR(s) from `docs/adrs/`.
 3. Read only the affected module file(s) — not the whole package.
 4. Ensure main is current: `git pull origin main`
-5. Enter a worktree: call `EnterWorktree` with name `<type>/<short-description>`
-6. Make the change and verify (`uv run pytest tests/` from repo root).
-7. **ADR gate** — before committing, ask: is this decision hard to reverse, surprising
+5. **Branch housekeeping** — prune branches whose PRs have been merged since the last task:
+   ```
+   git fetch --prune
+   for branch in $(gh pr list --state merged --json headRefName --jq '.[].headRefName'); do
+     git push origin --delete "$branch" 2>/dev/null || true
+     git branch -D "$branch" 2>/dev/null || true
+   done
+   ```
+   `-D` is safe here because the loop only runs for branches confirmed merged via `gh`. Also run `git worktree prune` to clear any stale worktree entries.
+6. Enter a worktree: call `EnterWorktree` with name `<type>/<short-description>`
+7. Make the change and verify (`uv run pytest tests/` from repo root).
+8. **ADR gate** — before committing, ask: is this decision hard to reverse, surprising
    without context, and the result of genuine trade-offs? If yes to all three, write an
    ADR first. Use the template at `docs/adrs/_template.md`.
    New ADRs must have YAML frontmatter (`status`, `date`, `affects`). If the decision
@@ -59,12 +68,12 @@ Follow this for every change — bugfix, feature, or refactor.
    **Does not warrant an ADR:** simple bug fixes, naming or formatting choices, adding
    tests, dependency updates, documentation changes, performance tweaks that don't
    change observable behaviour or interface contracts.
-8. Commit: `git commit -m "type: message"`
-9. Push: `git push -u origin <branch>`
-10. Open PR — do NOT merge, that is always left to the user:
+9. Commit: `git commit -m "type: message"`
+10. Push: `git push -u origin <branch>`
+11. Open PR — do NOT merge, that is always left to the user:
     `gh pr create --title "<commit message>" --body "<one or two sentence rationale>"`
     PR body: why the change was made, nothing else. No file references, no code snippets — the diff covers what changed. Add inline code comments for anything that warrants reviewer attention.
-11. Exit and remove the worktree: call `ExitWorktree` with `action: remove`
+12. Exit and remove the worktree: call `ExitWorktree` with `action: remove`
 
 ---
 
