@@ -17,6 +17,8 @@ Format: [Unreleased] at the top, dated releases below, newest first.
 
 ## 2026-05-12
 
+- chore: adopt git worktree workflow in CLAUDE.md so concurrent Claude sessions are fully isolated
+
 - chore: switch to PR-based change workflow; add auto-versioning via GitHub Actions on merge to main
 - All three reviewer stages (implementation, architecture, tests) now run with `cwd=repo_root` and receive `{{ repo_root }}` in their prompt templates, enabling purposeful codebase exploration to substantiate findings; fix-cycle re-reviews propagate the same variable and working directory.
 
