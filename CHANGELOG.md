@@ -209,3 +209,7 @@ Format: [Unreleased] at the top, dated releases below, newest first.
   limit enforced via `_MAX_CYCLES`.
 - **S-09** — `cli.py` + `profiles/full.yaml`: Click CLI with `run` and `resume`
   commands; `full.yaml` profile wiring all eight stages in order.
+
+## 2026-05-12
+
+- docs: rewrote README with overview, design philosophy, and accurate pipeline table for GitHub audience
