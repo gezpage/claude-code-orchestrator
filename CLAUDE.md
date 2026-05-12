@@ -6,23 +6,23 @@ Developer-facing reference. Read before touching any orchestrator code.
 
 ## Invariants
 
-- **`--dangerously-skip-permissions` is mandatory in every `run_stage()` call.** Not a shortcut — it is the documented use case for unattended, trusted pipeline execution. Removing it breaks all unattended stage dispatch.
+- **`--dangerously-skip-permissions` is mandatory in every `run_stage()` call.** Not a shortcut — it is the documented use case for unattended, trusted pipeline execution. Removing it breaks all unattended stage dispatch. See ADR-003.
 
 - **`--bare` is mandatory in every `run_stage()` call.** Skips MCP server loading and hook execution at stage startup. Stage agents have no access to MCP tools by design. See ADR-012.
 
-- **The main orchestration session never reads stage output file contents.** `orchestrate.py` receives file paths and status values via signal JSON only. It must not `open()` or `Read` any stage output file. Adding a file read to `orchestrate.py` violates the token-minimisation invariant and will cause unbounded context growth across long pipelines.
+- **The main orchestration session never reads stage output file contents.** `orchestrate.py` receives file paths and status values via signal JSON only. It must not `open()` or `Read` any stage output file. Adding a file read to `orchestrate.py` violates the token-minimisation invariant and will cause unbounded context growth across long pipelines. See ADR-004.
 
-- **All context a downstream stage needs must be surfaced in the signal JSON.** Stage output schemas are designed around this constraint. If a downstream stage appears to need file content from a prior stage, the solution is to add a reference field to the upstream signal JSON — not to read the file in `orchestrate.py`.
+- **All context a downstream stage needs must be surfaced in the signal JSON.** Stage output schemas are designed around this constraint. If a downstream stage appears to need file content from a prior stage, the solution is to add a reference field to the upstream signal JSON — not to read the file in `orchestrate.py`. See ADR-004.
 
-- **`workflow/` paths are fixed convention — do not add config for them.** Python derives all orchestrator paths from `{docs-root}/projects/{project}/workflow/`. Do not introduce a `project.yaml.folders` key or any path override mechanism.
+- **`workflow/` paths are fixed convention — do not add config for them.** Python derives all orchestrator paths from `{docs-root}/projects/{project}/workflow/`. Do not introduce a `project.yaml.folders` key or any path override mechanism. See ADR-006.
 
-- **Interactive stages (`mode: interactive`) are dispatched through `run_interactive_stage()` in `run_stage.py` — not `run_stage()`.** Python launches an interactive `claude` session (no `--bare`, no `--dangerously-skip-permissions`), waits for it to exit, then checks for the declared `artifact` file. The `--bare`/`--dangerously-skip-permissions` invariants apply only to `run_stage()`.
+- **Interactive stages (`mode: interactive`) are dispatched through `run_interactive_stage()` in `run_stage.py` — not `run_stage()`.** Python launches an interactive `claude` session (no `--bare`, no `--dangerously-skip-permissions`), waits for it to exit, then checks for the declared `artifact` file. The `--bare`/`--dangerously-skip-permissions` invariants apply only to `run_stage()`. See ADR-007.
 
-- **Stage output schemas are the interface contract — they belong to the stage, not the implementation.** All implementations of a stage must satisfy the same schema.
+- **Stage output schemas are the interface contract — they belong to the stage, not the implementation.** All implementations of a stage must satisfy the same schema. See ADR-008.
 
-- **Fix cycles run in the current run folder — do not create a new run.** `_state.yaml`, `review.md`, and all fix-cycle output accumulate in the existing run folder.
+- **Fix cycles run in the current run folder — do not create a new run.** `_state.yaml`, `review.md`, and all fix-cycle output accumulate in the existing run folder. See ADR-009.
 
-- **The fix cycle limit is 2 and is enforced in `review_cycle.py` via `_MAX_CYCLES`.** Not configurable via `project.yaml`.
+- **The fix cycle limit is 2 and is enforced in `review_cycle.py` via `_MAX_CYCLES`.** Not configurable via `project.yaml`. See ADR-011.
 
 ---
 
@@ -45,15 +45,18 @@ Python pre-validates all required paths before any Claude invocation. Missing re
 Follow this for every change — bugfix, feature, or refactor.
 
 1. Read this file (done).
-2. Read the relevant ADR(s) from `team-hub/projects/orchestrator/adrs/`.
+2. Read the relevant ADR(s) from `docs/adrs/`.
 3. Read only the affected module file(s) — not the whole package.
 4. Make the change and verify (`uv run pytest tests/` from repo root).
 5. **ADR gate** — before committing, ask: is this decision hard to reverse, surprising
    without context, and the result of genuine trade-offs? If yes to all three, write an
-   ADR first. Use the template at `team-hub/projects/orchestrator/adrs/_template.md`.
-   New ADRs must have YAML frontmatter (`status`, `date`, `affects`) and a row added
-   to the index in `DEVELOPMENT.md`. If the decision is load-bearing for everyday edits,
-   add an invariant here too.
+   ADR first. Use the template at `docs/adrs/_template.md`.
+   New ADRs must have YAML frontmatter (`status`, `date`, `affects`). If the decision
+   is load-bearing for everyday edits, add an invariant here too (with an ADR reference).
+
+   **Does not warrant an ADR:** simple bug fixes, naming or formatting choices, adding
+   tests, dependency updates, documentation changes, performance tweaks that don't
+   change observable behaviour or interface contracts.
 6. Create a feature branch from main:
    ```
    git fetch origin main
@@ -84,7 +87,6 @@ After each discrete task, open a pull request — do not commit to main directly
 - Push and open PR: `gh pr create --title "<msg>" --body "<one or two sentence rationale — why, not what>"`
 - Do not merge — leave that to the user
 - "Task complete" = PR is open, tests pass
-- Docs-repo changes (Forge MCP) are excluded from this rule
 
 ## Versioning
 
@@ -96,9 +98,3 @@ After each discrete task, open a pull request — do not commit to main directly
 
 No manual tagging needed.
 
----
-
-## Reference
-
-Full development guide, ADR index, and open bug list:
-`team-hub/projects/orchestrator/DEVELOPMENT.md`
