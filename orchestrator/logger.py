@@ -1,5 +1,5 @@
 # Dual-sink logger; writes timestamped entries to both the per-run log and the project-wide log.
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 _PRINT_LEVELS = {"INFO", "WARN", "ERROR"}
@@ -13,7 +13,7 @@ class OrchestratorLogger:
 
     def log(self, stage: str, level: str, message: str) -> None:
         level = level.upper()
-        ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        ts = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
         run_id = self.run_folder.name
         line = f"{ts} {run_id} [{level:<5}] [{stage:<14}] {message}\n"
 
@@ -29,4 +29,4 @@ class OrchestratorLogger:
 
         if level in _PRINT_LEVELS:
             lvl_tag = f" [{level}]" if level != "INFO" else ""
-            print(f"[orchestrator]{lvl_tag} [{stage}] {message}", flush=True)
+            print(f"[orchestrator]{lvl_tag} [{stage}] {message}", flush=True)  # noqa: T201

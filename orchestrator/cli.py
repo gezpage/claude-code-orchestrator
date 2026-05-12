@@ -4,9 +4,8 @@ import sys
 
 import click
 
-from orchestrator import paths
+from orchestrator import orchestrate, paths
 from orchestrator import state as state_mod
-from orchestrator import orchestrate
 from orchestrator.run_stage import run_stage
 
 
@@ -18,15 +17,22 @@ def main():
 @main.command()
 @click.option("--docs-root", required=True, help="Path to your docs root.")
 @click.option("--project", required=True, help="Project name under docs-root/projects/.")
-@click.option("--feature-path", required=True, help="Docs-relative path to the feature directory (must contain overview.md).")
+@click.option(
+    "--feature-path", required=True, help="Docs-relative path to the feature directory (must contain overview.md)."
+)
 @click.option("--branch", required=True, help="Git branch name to create for implementation.")
-@click.option("--profile", default="full", show_default=True, help="Built-in profile name (full, spike) or path to a profile YAML file.")
+@click.option(
+    "--profile",
+    default="full",
+    show_default=True,
+    help="Built-in profile name (full, spike) or path to a profile YAML file.",
+)
 def run(docs_root, project, feature_path, branch, profile):
     """Run the full pipeline for a feature."""
     try:
         paths.require_dir(docs_root)
     except FileNotFoundError as e:
-        raise click.UsageError(str(e))
+        raise click.UsageError(str(e)) from e
     orchestrate.run_pipeline(docs_root, project, feature_path, branch, profile)
 
 
@@ -43,8 +49,9 @@ def stage(stage_name, implementation, input_json, run_folder, docs_root, project
     try:
         paths.require_dir(docs_root)
     except FileNotFoundError as e:
-        raise click.UsageError(str(e))
+        raise click.UsageError(str(e)) from e
     from pathlib import Path
+
     variables = json.loads(Path(input_json).read_text())
     sig = run_stage(stage_name, implementation, variables, run_folder, docs_root, project, project_log_path)
     click.echo(json.dumps(sig, indent=2))
@@ -60,7 +67,7 @@ def resume(run_folder, docs_root):
         paths.require_dir(docs_root)
         paths.require_dir(run_folder)
     except FileNotFoundError as e:
-        raise click.UsageError(str(e))
+        raise click.UsageError(str(e)) from e
 
     st = state_mod.load_state(run_folder)
 

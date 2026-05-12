@@ -1,4 +1,3 @@
-import pytest
 from orchestrator.signal import extract_signal
 
 
@@ -9,7 +8,7 @@ def test_valid_sentinel():
 
 
 def test_sentinel_buried_in_prose():
-    stdout = "Some reasoning here\nMore text\nSIGNAL_JSON: {\"stage\": \"qa\", \"status\": \"passed\"}\nTrailing text"
+    stdout = 'Some reasoning here\nMore text\nSIGNAL_JSON: {"stage": "qa", "status": "passed"}\nTrailing text'
     result = extract_signal(stdout)
     assert result["stage"] == "qa"
     assert result["status"] == "passed"

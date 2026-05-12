@@ -1,5 +1,3 @@
-import pytest
-from pathlib import Path
 from unittest.mock import patch
 
 from orchestrator.plan import add_fix_cycle_node, expand_nodes, init_plan_md, update_plan_md
@@ -29,14 +27,15 @@ def _impl_stage() -> StageConfig:
 
 # --- init_plan_md ---
 
+
 def test_init_plan_md_creates_file(tmp_path):
     run_folder = _make_run_folder(tmp_path)
     profile = _simple_profile("discovery", "specification")
     init_plan_md(run_folder, profile)
     content = (run_folder / "plan.md").read_text()
     assert "flowchart TD" in content
-    assert 'discovery[' in content
-    assert 'specification[' in content
+    assert "discovery[" in content
+    assert "specification[" in content
     assert "classDef pending" in content
 
 
@@ -51,11 +50,14 @@ def test_init_plan_md_idempotent(tmp_path):
 
 def test_init_plan_md_alignment_gate_shape(tmp_path):
     run_folder = _make_run_folder(tmp_path)
-    profile = Profile(name="test", stages=(
-        StageConfig(name="specification", prompt="prompts/specification/default.md"),
-        StageConfig(name="alignment", mode="interactive", artifact="alignment-log.md"),
-        StageConfig(name="decomposition", prompt="prompts/decomposition/default.md"),
-    ))
+    profile = Profile(
+        name="test",
+        stages=(
+            StageConfig(name="specification", prompt="prompts/specification/default.md"),
+            StageConfig(name="alignment", mode="interactive", artifact="alignment-log.md"),
+            StageConfig(name="decomposition", prompt="prompts/decomposition/default.md"),
+        ),
+    )
     init_plan_md(run_folder, profile)
     content = (run_folder / "plan.md").read_text()
     assert 'alignment{{"✋ Alignment"}}' in content
@@ -64,31 +66,45 @@ def test_init_plan_md_alignment_gate_shape(tmp_path):
 
 def test_init_plan_md_review_stage_with_prompts(tmp_path):
     run_folder = _make_run_folder(tmp_path)
-    profile = Profile(name="test", stages=(
-        StageConfig(name="implementation", prompt="prompts/implementation/default.md"),
-        StageConfig(name="review", expansion=ExpansionKind.PROMPTS, prompts={
-            "arch": "prompts/review/arch.md",
-            "security": "prompts/review/security.md",
-        }),
-    ))
+    profile = Profile(
+        name="test",
+        stages=(
+            StageConfig(name="implementation", prompt="prompts/implementation/default.md"),
+            StageConfig(
+                name="review",
+                expansion=ExpansionKind.PROMPTS,
+                prompts={
+                    "arch": "prompts/review/arch.md",
+                    "security": "prompts/review/security.md",
+                },
+            ),
+        ),
+    )
     init_plan_md(run_folder, profile)
     content = (run_folder / "plan.md").read_text()
-    assert 'review_arch[' in content
-    assert 'review_security[' in content
+    assert "review_arch[" in content
+    assert "review_security[" in content
     assert "review --> review_arch & review_security" in content
 
 
 def test_init_plan_md_review_fan_in_to_next_stage(tmp_path):
     """Reviewer sub-nodes must fan-in to the stage after review, not via review --> next."""
     run_folder = _make_run_folder(tmp_path)
-    profile = Profile(name="test", stages=(
-        StageConfig(name="implementation", prompt="prompts/implementation/default.md"),
-        StageConfig(name="review", expansion=ExpansionKind.PROMPTS, prompts={
-            "arch": "prompts/review/arch.md",
-            "security": "prompts/review/security.md",
-        }),
-        StageConfig(name="harvest", prompt="prompts/harvest/default.md"),
-    ))
+    profile = Profile(
+        name="test",
+        stages=(
+            StageConfig(name="implementation", prompt="prompts/implementation/default.md"),
+            StageConfig(
+                name="review",
+                expansion=ExpansionKind.PROMPTS,
+                prompts={
+                    "arch": "prompts/review/arch.md",
+                    "security": "prompts/review/security.md",
+                },
+            ),
+            StageConfig(name="harvest", prompt="prompts/harvest/default.md"),
+        ),
+    )
     init_plan_md(run_folder, profile)
     content = (run_folder / "plan.md").read_text()
     assert "review --> review_arch & review_security" in content
@@ -101,8 +117,8 @@ def test_init_plan_md_start_done_nodes(tmp_path):
     profile = _simple_profile("discovery", "specification")
     init_plan_md(run_folder, profile)
     content = (run_folder / "plan.md").read_text()
-    assert 'Start([' in content
-    assert 'Done([' in content
+    assert "Start([" in content
+    assert "Done([" in content
     assert "class Start startend" in content
     assert "class Done startend" in content
     assert "Start --> discovery" in content
@@ -121,11 +137,14 @@ def test_init_plan_md_start_done_single_stage(tmp_path):
 def test_init_plan_md_start_done_with_review(tmp_path):
     """Done should connect from the stage after review fan-in, not from review parent."""
     run_folder = _make_run_folder(tmp_path)
-    profile = Profile(name="test", stages=(
-        StageConfig(name="implementation", prompt="prompts/implementation/default.md"),
-        StageConfig(name="review", expansion=ExpansionKind.PROMPTS, prompts={"arch": "prompts/review/arch.md"}),
-        StageConfig(name="harvest", prompt="prompts/harvest/default.md"),
-    ))
+    profile = Profile(
+        name="test",
+        stages=(
+            StageConfig(name="implementation", prompt="prompts/implementation/default.md"),
+            StageConfig(name="review", expansion=ExpansionKind.PROMPTS, prompts={"arch": "prompts/review/arch.md"}),
+            StageConfig(name="harvest", prompt="prompts/harvest/default.md"),
+        ),
+    )
     init_plan_md(run_folder, profile)
     content = (run_folder / "plan.md").read_text()
     assert "harvest --> Done" in content
@@ -185,9 +204,13 @@ def test_update_plan_md_commit_messages_in_section(tmp_path):
     signal = {"commit_hashes": ["abc12345def67890"]}
     with patch("orchestrator.plan._update._fetch_commit_messages", return_value=["feat: add auth (abc12345)"]):
         update_plan_md(
-            run_folder, "implementation", "passed",
-            elapsed_secs=30, output_summary="1 commit",
-            signal=signal, repo_root="/some/repo",
+            run_folder,
+            "implementation",
+            "passed",
+            elapsed_secs=30,
+            output_summary="1 commit",
+            signal=signal,
+            repo_root="/some/repo",
         )
     content = (run_folder / "plan.md").read_text()
     assert "`feat: add auth (abc12345)`" in content
@@ -195,12 +218,16 @@ def test_update_plan_md_commit_messages_in_section(tmp_path):
 
 # --- expand_nodes (TRACKS) ---
 
+
 def _discovery_profile() -> Profile:
-    return Profile(name="test", stages=(
-        StageConfig(name="discovery", expansion=ExpansionKind.TRACKS),
-        StageConfig(name="alignment", mode="interactive", artifact="alignment-log.md"),
-        StageConfig(name="specification", prompt="prompts/specification/default.md"),
-    ))
+    return Profile(
+        name="test",
+        stages=(
+            StageConfig(name="discovery", expansion=ExpansionKind.TRACKS),
+            StageConfig(name="alignment", mode="interactive", artifact="alignment-log.md"),
+            StageConfig(name="specification", prompt="prompts/specification/default.md"),
+        ),
+    )
 
 
 def test_expand_nodes_tracks_multi_track(tmp_path):
@@ -209,20 +236,20 @@ def test_expand_nodes_tracks_multi_track(tmp_path):
     tracks = [{"name": "architecture"}, {"name": "product-requirements"}]
     result = expand_nodes(run_folder, _discovery_stage(), tracks=tracks)
     content = (run_folder / "plan.md").read_text()
-    assert 'discovery_planning[' in content
-    assert 'discovery_architecture[' in content
-    assert 'discovery_product_requirements[' in content
-    assert 'discovery_fanout' in content
-    assert 'discovery_fanin' in content
-    assert 'discovery_planning --> discovery_fanout' in content
-    assert 'discovery_fanout --> discovery_architecture & discovery_product_requirements' in content
-    assert 'discovery_architecture & discovery_product_requirements --> discovery_fanin' in content
-    assert 'discovery_fanin --> alignment' in content
-    assert 'class discovery_planning complete' in content
-    assert 'class discovery_architecture pending' in content
-    assert 'class discovery_product_requirements pending' in content
-    assert 'class discovery_fanout fannode' in content
-    assert 'class discovery_fanin fannode' in content
+    assert "discovery_planning[" in content
+    assert "discovery_architecture[" in content
+    assert "discovery_product_requirements[" in content
+    assert "discovery_fanout" in content
+    assert "discovery_fanin" in content
+    assert "discovery_planning --> discovery_fanout" in content
+    assert "discovery_fanout --> discovery_architecture & discovery_product_requirements" in content
+    assert "discovery_architecture & discovery_product_requirements --> discovery_fanin" in content
+    assert "discovery_fanin --> alignment" in content
+    assert "class discovery_planning complete" in content
+    assert "class discovery_architecture pending" in content
+    assert "class discovery_product_requirements pending" in content
+    assert "class discovery_fanout fannode" in content
+    assert "class discovery_fanin fannode" in content
     assert '    discovery["' not in content
 
 
@@ -232,13 +259,13 @@ def test_expand_nodes_tracks_single_track(tmp_path):
     tracks = [{"name": "risk"}]
     expand_nodes(run_folder, _discovery_stage(), tracks=tracks)
     content = (run_folder / "plan.md").read_text()
-    assert 'discovery_planning[' in content
-    assert 'discovery_risk[' in content
-    assert 'discovery_fanout' not in content
-    assert 'discovery_fanin' not in content
-    assert 'discovery_planning --> discovery_risk --> alignment' in content
-    assert 'class discovery_planning complete' in content
-    assert 'class discovery_risk pending' in content
+    assert "discovery_planning[" in content
+    assert "discovery_risk[" in content
+    assert "discovery_fanout" not in content
+    assert "discovery_fanin" not in content
+    assert "discovery_planning --> discovery_risk --> alignment" in content
+    assert "class discovery_planning complete" in content
+    assert "class discovery_risk pending" in content
 
 
 def test_expand_nodes_tracks_noop_when_no_tracks(tmp_path):
@@ -278,15 +305,16 @@ def test_expand_nodes_tracks_planning_elapsed_in_label(tmp_path):
 
 # --- expand_nodes (SLICES) ---
 
+
 def test_expand_nodes_slices_replaces_node_and_chain(tmp_path):
     run_folder = _make_run_folder(tmp_path)
     profile = _simple_profile("decomposition", "implementation", "qa")
     init_plan_md(run_folder, profile)
     expand_nodes(run_folder, _impl_stage(), slice_files=["slice-1.md", "slice-2.md", "slice-3.md"])
     content = (run_folder / "plan.md").read_text()
-    assert 'impl_1[' in content
-    assert 'impl_2[' in content
-    assert 'impl_3[' in content
+    assert "impl_1[" in content
+    assert "impl_2[" in content
+    assert "impl_3[" in content
     assert '    implementation["' not in content
     assert "impl_1 --> impl_2 --> impl_3" in content
     assert "class impl_1 pending" in content
@@ -303,6 +331,7 @@ def test_expand_nodes_slices_noop_when_no_slices(tmp_path):
 
 
 # --- update_plan_md ---
+
 
 def test_update_plan_md_updates_style(tmp_path):
     run_folder = _make_run_folder(tmp_path)
@@ -336,14 +365,22 @@ def test_update_plan_md_creates_file_when_missing(tmp_path):
 
 # --- add_fix_cycle_node ---
 
+
 def _profile_with_review() -> Profile:
-    return Profile(name="test", stages=(
-        StageConfig(name="implementation", prompt="prompts/implementation/default.md"),
-        StageConfig(name="review", expansion=ExpansionKind.PROMPTS, prompts={
-            "tests": "prompts/review/tests.md",
-        }),
-        StageConfig(name="harvest", prompt="prompts/harvest/default.md"),
-    ))
+    return Profile(
+        name="test",
+        stages=(
+            StageConfig(name="implementation", prompt="prompts/implementation/default.md"),
+            StageConfig(
+                name="review",
+                expansion=ExpansionKind.PROMPTS,
+                prompts={
+                    "tests": "prompts/review/tests.md",
+                },
+            ),
+            StageConfig(name="harvest", prompt="prompts/harvest/default.md"),
+        ),
+    )
 
 
 def test_add_fix_cycle_node_cycle1_single_reviewer(tmp_path):
@@ -351,12 +388,12 @@ def test_add_fix_cycle_node_cycle1_single_reviewer(tmp_path):
     init_plan_md(run_folder, _profile_with_review())
     add_fix_cycle_node(run_folder, cycle_num=1, reviewers=["tests"])
     content = (run_folder / "plan.md").read_text()
-    assert 'fix_impl_1[' in content
-    assert 'review_tests_2[' in content
-    assert 'review_tests --> fix_impl_1' in content
-    assert 'fix_impl_1 --> review_tests_2' in content
-    assert 'class fix_impl_1 active' in content
-    assert 'class review_tests_2 pending' in content
+    assert "fix_impl_1[" in content
+    assert "review_tests_2[" in content
+    assert "review_tests --> fix_impl_1" in content
+    assert "fix_impl_1 --> review_tests_2" in content
+    assert "class fix_impl_1 active" in content
+    assert "class review_tests_2 pending" in content
 
 
 def test_add_fix_cycle_node_cycle2_sources_previous_round(tmp_path):
@@ -365,28 +402,35 @@ def test_add_fix_cycle_node_cycle2_sources_previous_round(tmp_path):
     add_fix_cycle_node(run_folder, cycle_num=1, reviewers=["tests"])
     add_fix_cycle_node(run_folder, cycle_num=2, reviewers=["tests"])
     content = (run_folder / "plan.md").read_text()
-    assert 'fix_impl_2[' in content
-    assert 'review_tests_3[' in content
-    assert 'review_tests_2 --> fix_impl_2' in content
-    assert 'fix_impl_2 --> review_tests_3' in content
+    assert "fix_impl_2[" in content
+    assert "review_tests_3[" in content
+    assert "review_tests_2 --> fix_impl_2" in content
+    assert "fix_impl_2 --> review_tests_3" in content
 
 
 def test_add_fix_cycle_node_multiple_reviewers(tmp_path):
     run_folder = _make_run_folder(tmp_path)
-    profile = Profile(name="test", stages=(
-        StageConfig(name="review", expansion=ExpansionKind.PROMPTS, prompts={
-            "architecture": "prompts/review/architecture.md",
-            "tests": "prompts/review/tests.md",
-        }),
-    ))
+    profile = Profile(
+        name="test",
+        stages=(
+            StageConfig(
+                name="review",
+                expansion=ExpansionKind.PROMPTS,
+                prompts={
+                    "architecture": "prompts/review/architecture.md",
+                    "tests": "prompts/review/tests.md",
+                },
+            ),
+        ),
+    )
     init_plan_md(run_folder, profile)
     add_fix_cycle_node(run_folder, cycle_num=1, reviewers=["architecture", "tests"])
     content = (run_folder / "plan.md").read_text()
-    assert 'fix_impl_1[' in content
-    assert 'review_architecture_2[' in content
-    assert 'review_tests_2[' in content
-    assert 'review_architecture & review_tests --> fix_impl_1' in content
-    assert 'fix_impl_1 --> review_architecture_2 & review_tests_2' in content
+    assert "fix_impl_1[" in content
+    assert "review_architecture_2[" in content
+    assert "review_tests_2[" in content
+    assert "review_architecture & review_tests --> fix_impl_1" in content
+    assert "fix_impl_1 --> review_architecture_2 & review_tests_2" in content
 
 
 def test_add_fix_cycle_node_noop_when_no_plan(tmp_path):

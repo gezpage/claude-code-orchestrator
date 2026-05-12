@@ -3,6 +3,7 @@
 Thread safety: add_fix_cycle_node acquires _plan_lock before delegating.
 _add_fix_cycle_node must NOT be called without holding the lock.
 """
+
 from pathlib import Path
 
 from orchestrator.plan._helpers import _node_label
@@ -36,10 +37,10 @@ def _add_fix_cycle_node(run_folder: Path, cycle_num: int, reviewers: list[str]) 
     fix_label = _node_label("Fix Implementation", f"fix-{cycle_num}", status="in_progress")
     new_subgraph_lines = [f'    subgraph sg_fix_{cycle_num}["Fix Cycle {round_num}"]']
     new_subgraph_lines.append(f'    {fix_node_id}["{fix_label}"]')
-    for reviewer, rerun_id in zip(reviewers, rerun_ids):
+    for reviewer, rerun_id in zip(reviewers, rerun_ids, strict=True):
         rerun_label = _node_label(reviewer.title(), reviewer, status="pending")
         new_subgraph_lines.append(f'    {rerun_id}["{rerun_label}"]')
-    new_subgraph_lines.append('    end')
+    new_subgraph_lines.append("    end")
 
     src_str = " & ".join(source_ids)
     dst_str = " & ".join(rerun_ids)

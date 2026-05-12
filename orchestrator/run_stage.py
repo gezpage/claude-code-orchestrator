@@ -5,7 +5,8 @@ import sys
 import time
 from pathlib import Path
 
-from orchestrator import renderer, signal as signal_mod, validator
+from orchestrator import renderer, validator
+from orchestrator import signal as signal_mod
 from orchestrator.logger import OrchestratorLogger
 
 
@@ -17,7 +18,7 @@ def _fmt_elapsed(secs: float) -> str:
 
 def _signal_summary(sig: dict) -> str:
     if "summary" in sig:
-        s = sig["summary"]
+        s: str = sig["summary"]
         return s.split(".")[0].strip() if "." in s[:200] else s[:200].strip()
     if "commit_hashes" in sig:
         h = sig["commit_hashes"]
@@ -35,7 +36,7 @@ def _signal_summary(sig: dict) -> str:
                 parts.append(f"{k}={sig[k]}")
         return " ".join(parts)
     if "message" in sig:
-        return sig["message"][:200]
+        return str(sig["message"])[:200]
     return ""
 
 
@@ -58,9 +59,11 @@ def _run_claude(prompt: str, cwd: str | None = None) -> str:
         text=True,
         cwd=cwd,
     )
+    if proc.stdout is None:
+        raise RuntimeError("Popen stdout is None — subprocess was not opened with PIPE")
     lines = []
     for line in proc.stdout:
-        print(line, end="", flush=True)
+        print(line, end="", flush=True)  # noqa: T201
         lines.append(line)
     proc.wait()
     return "".join(lines)
@@ -92,6 +95,7 @@ def run_stage(
             prompt = renderer.render_prompt(stage, implementation, variables, docs_root, project, standards=standards)
         except Exception as exc:
             import traceback as _tb
+
             logger.log(stage, "ERROR", f"prompt render failed: {exc}\n{_tb.format_exc()}")
             return {"stage": stage, "status": "blocked", "message": f"Prompt render failed: {exc}"}
 
@@ -200,8 +204,13 @@ if __name__ == "__main__":
 
     variables = json.loads(Path(args.input_json).read_text())
     sig = run_stage(
-        args.stage, args.implementation, variables,
-        args.run_folder, args.docs_root, args.project, args.project_log_path,
+        args.stage,
+        args.implementation,
+        variables,
+        args.run_folder,
+        args.docs_root,
+        args.project,
+        args.project_log_path,
     )
-    print(json.dumps(sig, indent=2))
+    print(json.dumps(sig, indent=2))  # noqa: T201
     sys.exit(0 if sig.get("status") == "passed" else 1)

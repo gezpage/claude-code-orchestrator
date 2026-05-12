@@ -1,5 +1,6 @@
 # Prompt renderer; merges Jinja2 stage templates with optional project-specific convention extensions.
 from pathlib import Path
+
 from jinja2 import Environment, FileSystemLoader, StrictUndefined
 
 from orchestrator import standards as standards_mod
@@ -19,7 +20,7 @@ def render_prompt(
     if not core_path.exists():
         raise FileNotFoundError(f"Core prompt template not found: {core_path}")
 
-    env = Environment(
+    env = Environment(  # noqa: S701
         loader=FileSystemLoader(str(_PROMPTS_DIR)),
         undefined=StrictUndefined,
         keep_trailing_newline=True,
@@ -34,7 +35,7 @@ def render_prompt(
 
     ext_path = Path(docs_root) / "projects" / project / "workflow" / "prompts" / f"{stage}.md"
     if ext_path.exists():
-        ext_env = Environment(
+        ext_env = Environment(  # noqa: S701
             loader=FileSystemLoader(str(ext_path.parent)),
             undefined=StrictUndefined,
             keep_trailing_newline=True,

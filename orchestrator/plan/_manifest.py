@@ -60,7 +60,7 @@ def _update_run_files_table(plan_path: Path, run_folder: Path) -> None:
             elif prompt_f:
                 rows.append(f"| {_link(prompt_f)} | | {_fmt_time(mtime)} |")
             else:
-                rows.append(f"| | {_link(output_f)} | {_fmt_time(mtime)} |")
+                rows.append(f"| | {_link(output_f)} | {_fmt_time(mtime)} |")  # type: ignore[arg-type]
 
     table_text = "\n".join(rows)
     content = plan_path.read_text()

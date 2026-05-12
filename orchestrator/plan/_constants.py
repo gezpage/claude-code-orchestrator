@@ -1,19 +1,19 @@
 _STATUS_CLASS: dict[str, str] = {
-    "pending":     "pending",
-    "passed":      "complete",
-    "blocked":     "blocked",
-    "failed":      "blocked",
+    "pending": "pending",
+    "passed": "complete",
+    "blocked": "blocked",
+    "failed": "blocked",
     "in_progress": "active",
-    "skipped":     "skipped",
+    "skipped": "skipped",
 }
 
 _STATUS_ICON: dict[str, str] = {
-    "pending":     "-",
-    "passed":      "✅",
-    "blocked":     "🔴",
-    "failed":      "🔴",
+    "pending": "-",
+    "passed": "✅",
+    "blocked": "🔴",
+    "failed": "🔴",
     "in_progress": "⏳",
-    "skipped":     "-",
+    "skipped": "-",
 }
 
 _CLASSDEFS = [
@@ -28,9 +28,9 @@ _CLASSDEFS = [
 ]
 
 _DURATION_COLORS: list[tuple[int | None, str]] = [
-    (30,   "#22c55e"),   # < 30s  — green
-    (120,  "#a3e635"),   # < 2m   — lime
-    (300,  "#fbbf24"),   # < 5m   — amber
-    (900,  "#f97316"),   # < 15m  — orange
-    (None, "#ef4444"),   # ≥ 15m  — red
+    (30, "#22c55e"),  # < 30s  — green
+    (120, "#a3e635"),  # < 2m   — lime
+    (300, "#fbbf24"),  # < 5m   — amber
+    (900, "#f97316"),  # < 15m  — orange
+    (None, "#ef4444"),  # ≥ 15m  — red
 ]
