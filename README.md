@@ -42,14 +42,14 @@ Stages with `tracks` expansion run a planning agent first, then fan out to N par
 Requires Python 3.11+ and [pipx](https://pipx.pypa.io/).
 
 ```bash
-pipx install -e ~/Dev/tools/orchestrator
+pipx install -e /path/to/orchestrator
 ```
 
 ## Concepts
 
 | Term | Meaning |
 |------|---------|
-| **docs-root** | Root of your team-hub docs repo (e.g. `/path/to/team-hub`). All project config and run output lives here. |
+| **docs-root** | Root of your docs repo (e.g. `/path/to/docs`). All project config and run output lives here. |
 | **project** | Folder name under `{docs-root}/projects/`. Contains `project.yaml` with `repo-root` and optional settings. |
 | **feature-path** | Docs-relative path to the feature directory. Must contain `overview.md`. The orchestrator reads this to understand what to build. |
 | **branch** | Git branch created in the code repo when the implementation stage starts. |
@@ -63,7 +63,7 @@ Each project requires a `project.yaml` file at `{docs-root}/projects/{project}/p
 ```yaml
 name: my-api
 description: REST API for the platform
-repo-root: ~/Dev/my-api        # path to the code repository
+repo-root: /path/to/my-api     # path to the code repository
 default-profile: full          # profile used when --profile is omitted
 merge-target: main             # branch PRs merge into
 agent-rules: CLAUDE.md         # agent rules file in the code repo
@@ -145,7 +145,7 @@ Interactive stages require `mode: interactive` and an `artifact` field:
 
 ```bash
 orchestrator run \
-  --docs-root <path>       # required: path to team-hub docs root
+  --docs-root <path>       # required: path to your docs root
   --project <name>         # required: project folder under docs-root/projects/
   --feature-path <path>    # required: docs-relative path to feature directory
   --branch <name>          # required: git branch to create for implementation
@@ -157,14 +157,14 @@ orchestrator run \
 ```bash
 # Full pipeline with default profile
 orchestrator run \
-  --docs-root ~/Dev/docs/team-hub \
+  --docs-root /path/to/docs \
   --project my-api \
   --feature-path projects/my-api/features/auth-refresh \
   --branch feat/auth-refresh
 
 # Research only (no implementation)
 orchestrator run \
-  --docs-root ~/Dev/docs/team-hub \
+  --docs-root /path/to/docs \
   --project my-api \
   --feature-path projects/my-api/features/auth-refresh \
   --branch feat/auth-refresh \
@@ -172,7 +172,7 @@ orchestrator run \
 
 # Custom profile from a file
 orchestrator run \
-  --docs-root ~/Dev/docs/team-hub \
+  --docs-root /path/to/docs \
   --project my-api \
   --feature-path projects/my-api/features/auth-refresh \
   --branch feat/auth-refresh \
@@ -188,7 +188,7 @@ The pipeline pauses automatically at interactive stages (e.g. alignment) and pri
 ```bash
 orchestrator resume \
   --run-folder <path>      # required: path to the blocked run folder
-  --docs-root <path>       # required: path to team-hub docs root
+  --docs-root <path>       # required: path to your docs root
 ```
 
 The run folder path is printed by the orchestrator when the pipeline pauses. Project, feature, branch, and profile are read from the run folder's saved state.
@@ -197,8 +197,8 @@ The run folder path is printed by the orchestrator when the pipeline pauses. Pro
 
 ```bash
 orchestrator resume \
-  --run-folder ~/Dev/docs/team-hub/projects/my-api/workflow/runs/auth-refresh/2026-05-10-run-1 \
-  --docs-root ~/Dev/docs/team-hub
+  --run-folder /path/to/docs/projects/my-api/workflow/runs/auth-refresh/2026-05-10-run-1 \
+  --docs-root /path/to/docs
 ```
 
 ---
@@ -212,7 +212,7 @@ orchestrator stage \
   --stage <name>               # required: stage name (e.g. discovery, specification)
   --input <path>               # required: path to JSON file containing input variables
   --run-folder <path>          # required: path to the run folder
-  --docs-root <path>           # required: path to team-hub docs root
+  --docs-root <path>           # required: path to your docs root
   --project <name>             # required: project name
   --project-log-path <path>    # required: path for project-level orchestrator.log
   --implementation <name>      # optional: prompt implementation name (default: default)
@@ -224,23 +224,13 @@ orchestrator stage \
 orchestrator stage \
   --stage specification \
   --input /tmp/spec-input.json \
-  --run-folder ~/Dev/docs/team-hub/projects/my-api/workflow/runs/auth-refresh/2026-05-10-run-1 \
-  --docs-root ~/Dev/docs/team-hub \
+  --run-folder /path/to/docs/projects/my-api/workflow/runs/auth-refresh/2026-05-10-run-1 \
+  --docs-root /path/to/docs \
   --project my-api \
-  --project-log-path ~/Dev/docs/team-hub/projects/my-api
+  --project-log-path /path/to/docs/projects/my-api
 ```
 
 Exits `0` on success, `1` on failure. Prints the stage signal JSON to stdout.
-
-## Claude Code skill setup
-
-To make `/orchestrator` available in Claude Code sessions, symlink the skill directory:
-
-```bash
-ln -s ~/Dev/tools/orchestrator/claude-skill ~/.claude/skills/orchestrator
-```
-
-Edits to `claude-skill/SKILL.md` are immediately live — no copy step needed.
 
 ## Tests
 

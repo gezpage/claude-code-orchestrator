@@ -16,7 +16,7 @@ def main():
 
 
 @main.command()
-@click.option("--docs-root", required=True, help="Path to the team-hub docs root.")
+@click.option("--docs-root", required=True, help="Path to your docs root.")
 @click.option("--project", required=True, help="Project name under docs-root/projects/.")
 @click.option("--feature-path", required=True, help="Docs-relative path to the feature directory (must contain overview.md).")
 @click.option("--branch", required=True, help="Git branch name to create for implementation.")
@@ -35,7 +35,7 @@ def run(docs_root, project, feature_path, branch, profile):
 @click.option("--implementation", default="default", show_default=True, help="Prompt implementation.")
 @click.option("--input", "input_json", required=True, help="Path to JSON file with input variables.")
 @click.option("--run-folder", required=True, help="Path to the run folder.")
-@click.option("--docs-root", required=True, help="Path to the team-hub docs root.")
+@click.option("--docs-root", required=True, help="Path to your docs root.")
 @click.option("--project", required=True, help="Project name.")
 @click.option("--project-log-path", required=True, help="Path for project-level orchestrator.log.")
 def stage(stage_name, implementation, input_json, run_folder, docs_root, project, project_log_path):
@@ -53,7 +53,7 @@ def stage(stage_name, implementation, input_json, run_folder, docs_root, project
 
 @main.command()
 @click.option("--run-folder", required=True, help="Path to an existing run folder to resume.")
-@click.option("--docs-root", required=True, help="Path to the team-hub docs root.")
+@click.option("--docs-root", required=True, help="Path to your docs root.")
 def resume(run_folder, docs_root):
     """Resume a pipeline from a blocked run folder."""
     try:

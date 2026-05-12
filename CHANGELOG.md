@@ -217,3 +217,5 @@ Format: [Unreleased] at the top, dated releases below, newest first.
 ## 2026-05-12
 
 - docs: rewrote README with overview, design philosophy, and accurate pipeline table for GitHub audience
+- chore: remove internal references (team-hub names, personal paths, internal MCP permissions) ahead of open-source publication
+- docs: move ADRs into repo under docs/adrs/ and add cross-references from CLAUDE.md invariants to their ADRs
