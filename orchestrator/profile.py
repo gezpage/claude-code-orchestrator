@@ -1,17 +1,17 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from enum import Enum
+from enum import StrEnum
 from pathlib import Path
 from typing import Literal
 
 import yaml
 
 
-class ExpansionKind(str, Enum):
+class ExpansionKind(StrEnum):
     NONE = "none"
-    TRACKS = "tracks"    # two-phase: planning phase + parallel track sub-nodes
-    SLICES = "slices"    # parallel per-slice nodes driven by prior stage signal
+    TRACKS = "tracks"  # two-phase: planning phase + parallel track sub-nodes
+    SLICES = "slices"  # parallel per-slice nodes driven by prior stage signal
     PROMPTS = "prompts"  # fan-out to named prompt sub-nodes (e.g. multi-reviewer)
 
 
@@ -21,7 +21,7 @@ class StageConfig:
     mode: Literal["auto", "interactive"] = "auto"
     prompt: str | None = None
     prompts: dict[str, str] = field(default_factory=dict)
-    artifact: str | None = None        # interactive stages only
+    artifact: str | None = None  # interactive stages only
     standards: bool = False
     expansion: ExpansionKind = ExpansionKind.NONE
     slices_from_stage: str | None = None  # SLICES: which prior signal carries slice_files

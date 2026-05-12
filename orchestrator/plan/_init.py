@@ -32,8 +32,8 @@ def init_plan_md(run_folder: Path, profile: Profile) -> None:
 
         if stage.mode == "interactive":
             lines.append(f'    subgraph sg_{name}["{display_name}"]')
-            lines.append(f'    {name}{{{{\"✋ {name.title()}\"}}}}')
-            lines.append('    end')
+            lines.append(f'    {name}{{{{"✋ {name.title()}"}}}}')
+            lines.append("    end")
             chain_ids.append(name)
             class_assignments.append(f"    class {name} gate")
 
@@ -47,7 +47,7 @@ def init_plan_md(run_folder: Path, profile: Profile) -> None:
                 lines.append(f'    {sub_id}["{label}"]')
                 review_sub_ids.append((name, sub_id))
                 class_assignments.append(f"    class {sub_id} pending")
-            lines.append('    end')
+            lines.append("    end")
             chain_ids.append(name)
             class_assignments.append(f"    class {name} pending")
 
@@ -58,7 +58,7 @@ def init_plan_md(run_folder: Path, profile: Profile) -> None:
             label = _node_label(name.title(), impl)
             lines.append(f'    subgraph sg_{name}["{display_name}"]')
             lines.append(f'    {name}["{label}"]')
-            lines.append('    end')
+            lines.append("    end")
             chain_ids.append(name)
             class_assignments.append(f"    class {name} pending")
 

@@ -17,7 +17,7 @@ def _parse_frontmatter(content: str):
     if content.startswith("---\n"):
         end = content.find("\n---\n", 4)
         if end >= 0:
-            return yaml.safe_load(content[4:end]) or {}, content[end + 5:]
+            return yaml.safe_load(content[4:end]) or {}, content[end + 5 :]
     return {}, content
 
 
@@ -31,8 +31,8 @@ def _extract_changes_sections(content: str, reviewers: list) -> str:
     sections = []
     lines = body.splitlines(keepends=True)
     capturing = False
-    current = []
-    heading_re = re.compile(r'^#{1,3}\s+(.+)')
+    current: list[str] = []
+    heading_re = re.compile(r"^#{1,3}\s+(.+)")
 
     for line in lines:
         m = heading_re.match(line)
@@ -84,9 +84,7 @@ def run(run_folder, docs_root, project, branch, review_signal, project_log_path,
 
         changes_brief = ""
         if review_md_path.exists():
-            changes_brief = _extract_changes_sections(
-                review_md_path.read_text(), changes_requested
-            )
+            changes_brief = _extract_changes_sections(review_md_path.read_text(), changes_requested)
 
         plan_mod.add_fix_cycle_node(run_folder, cycle, changes_requested)
 
@@ -98,8 +96,13 @@ def run(run_folder, docs_root, project, branch, review_signal, project_log_path,
         }
         fix_t0 = time.monotonic()
         fix_sig = run_stage(
-            "fix-implementation", "default", fix_vars,
-            run_folder, docs_root, project, str(project_log_path),
+            "fix-implementation",
+            "default",
+            fix_vars,
+            run_folder,
+            docs_root,
+            project,
+            str(project_log_path),
             output_suffix=str(cycle),
             cwd=repo_root or None,
         )
@@ -108,9 +111,11 @@ def run(run_folder, docs_root, project, branch, review_signal, project_log_path,
         commit_hashes = fix_sig.get("commit_hashes", [])
         fix_summary = f"{len(commit_hashes)} commit{'s' if len(commit_hashes) != 1 else ''}" if commit_hashes else None
         plan_mod.update_plan_md(
-            run_folder, f"fix_impl_{cycle}",
+            run_folder,
+            f"fix_impl_{cycle}",
             "passed" if fix_status == "passed" else "blocked",
-            elapsed_secs=fix_elapsed, output_summary=fix_summary,
+            elapsed_secs=fix_elapsed,
+            output_summary=fix_summary,
         )
         logger.log("review-cycle", "INFO", f"fix-implementation round {round_num}: {fix_status}")
 
@@ -125,8 +130,13 @@ def run(run_folder, docs_root, project, branch, review_signal, project_log_path,
             }
             review_t0 = time.monotonic()
             sig = run_stage(
-                "review", reviewer, review_vars,
-                run_folder, docs_root, project, str(project_log_path),
+                "review",
+                reviewer,
+                review_vars,
+                run_folder,
+                docs_root,
+                project,
+                str(project_log_path),
                 output_suffix=f"{reviewer}-round{round_num}",
                 cwd=repo_root or None,
             )
@@ -135,9 +145,11 @@ def run(run_folder, docs_root, project, branch, review_signal, project_log_path,
             reviewer_statuses[reviewer] = verdict
             _update_review_md(review_md_path, reviewer, verdict, round_num, sig.get("message", ""))
             plan_mod.update_plan_md(
-                run_folder, f"review_{reviewer}_{round_num}",
+                run_folder,
+                f"review_{reviewer}_{round_num}",
                 "blocked" if verdict == "changes-requested" else "passed",
-                elapsed_secs=review_elapsed, output_summary=verdict,
+                elapsed_secs=review_elapsed,
+                output_summary=verdict,
             )
             logger.log("review-cycle", "INFO", f"reviewer {reviewer} round {round_num}: {verdict}")
 

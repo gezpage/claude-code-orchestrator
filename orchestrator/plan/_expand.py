@@ -3,6 +3,7 @@
 Thread safety: expand_nodes acquires _plan_lock before calling private helpers.
 Private _expand_* functions must NOT be called without holding the lock.
 """
+
 import re
 from pathlib import Path
 
@@ -70,7 +71,7 @@ def _expand_tracks(
         new_subgraph_lines.append(f'    {tid}["{_node_label(display, track["name"])}"]')
     if len(tracks) > 1:
         new_subgraph_lines.append(f'    {fanin_node}((" "))')
-    new_subgraph_lines.append('    end')
+    new_subgraph_lines.append("    end")
 
     new_subgraph = "\n".join(new_subgraph_lines)
     sg_pattern = rf'    subgraph sg_{re.escape(stage_name)}\["[^"]*"\]\n.*?    end'
@@ -79,7 +80,7 @@ def _expand_tracks(
     else:
         old_def = re.search(rf'    {re.escape(stage_name)}\["[^"]*"\]', content)
         if old_def:
-            content = content[:old_def.start()] + new_subgraph + content[old_def.end():]
+            content = content[: old_def.start()] + new_subgraph + content[old_def.end() :]
 
     # Rewrite outgoing chain edge: {stage_name} --> next
     if len(tracks) > 1:
@@ -111,8 +112,8 @@ def _expand_tracks(
 
     # Rewrite any incoming edge to this stage → point to planning node
     content = re.sub(
-        rf'    (\w+) --> {re.escape(stage_name)}\n',
-        rf'    \1 --> {planning_node}\n',
+        rf"    (\w+) --> {re.escape(stage_name)}\n",
+        rf"    \1 --> {planning_node}\n",
         content,
     )
 
@@ -126,7 +127,7 @@ def _expand_tracks(
             new_classes.append(f"    class {track_node_ids[track['name']]} pending")
         if len(tracks) > 1:
             new_classes.append(f"    class {fanin_node} fannode")
-        content = content[:old_class.start()] + "\n".join(new_classes) + content[old_class.end():]
+        content = content[: old_class.start()] + "\n".join(new_classes) + content[old_class.end() :]
 
     plan_path.write_text(content)
     return track_node_ids
@@ -164,7 +165,7 @@ def _expand_slices(
             new_subgraph_lines.append(f'    {nid}["{display_name} Slice {i + 1} -\\n{title}"]')
         if len(group) > 1:
             new_subgraph_lines.append(f'    fanin_{g_idx + 1}((" "))')
-    new_subgraph_lines.append('    end')
+    new_subgraph_lines.append("    end")
     new_subgraph = "\n".join(new_subgraph_lines)
 
     sg_pattern = rf'    subgraph sg_{re.escape(stage_name)}\["[^"]*"\]\n.*?    end'
@@ -173,9 +174,10 @@ def _expand_slices(
     else:
         old_def = re.search(rf'    {re.escape(stage_name)}\["[^"]*"\]', content)
         if old_def:
-            content = content[:old_def.start()] + new_subgraph + content[old_def.end():]
+            content = content[: old_def.start()] + new_subgraph + content[old_def.end() :]
 
     if has_parallel:
+
         def _parallel_chain(next_stage: str | None) -> str:
             parts: list[str] = []
             prev = prior_stage_name
@@ -197,7 +199,7 @@ def _expand_slices(
             return "\n".join(parts)
 
         content = re.sub(
-            rf'{re.escape(prior_stage_name)} --> {re.escape(stage_name)}(?: --> (\w+))?',
+            rf"{re.escape(prior_stage_name)} --> {re.escape(stage_name)}(?: --> (\w+))?",
             lambda m: _parallel_chain(m.group(1)),
             content,
         )
@@ -205,7 +207,7 @@ def _expand_slices(
         sub_ids = [slice_to_id[sf] for sf in all_slices]
         chain = " --> ".join(sub_ids)
         content = re.sub(
-            rf'{re.escape(prior_stage_name)} --> {re.escape(stage_name)}(?: --> (\w+))?',
+            rf"{re.escape(prior_stage_name)} --> {re.escape(stage_name)}(?: --> (\w+))?",
             lambda m: f"{prior_stage_name} --> {chain}" + (f" --> {m.group(1)}" if m.group(1) else ""),
             content,
         )
@@ -218,18 +220,18 @@ def _expand_slices(
         last_chain_node = slice_to_id[last_group[-1]]
 
     content = re.sub(
-        rf'    {re.escape(stage_name)} --> (\w+)',
+        rf"    {re.escape(stage_name)} --> (\w+)",
         lambda m: f"    {last_chain_node} --> {m.group(1)}",
         content,
     )
 
-    old_class = re.search(rf'    class {re.escape(stage_name)} \w+', content)
+    old_class = re.search(rf"    class {re.escape(stage_name)} \w+", content)
     if old_class:
         new_classes = [f"    class {slice_to_id[sf]} pending" for sf in all_slices]
         for g_idx, group in enumerate(slice_groups):
             if len(group) > 1:
                 new_classes.append(f"    class fanout_{g_idx + 1} fannode")
                 new_classes.append(f"    class fanin_{g_idx + 1} fannode")
-        content = content[:old_class.start()] + "\n".join(new_classes) + content[old_class.end():]
+        content = content[: old_class.start()] + "\n".join(new_classes) + content[old_class.end() :]
 
     plan_path.write_text(content)

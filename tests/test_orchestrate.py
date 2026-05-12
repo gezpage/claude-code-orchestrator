@@ -1,19 +1,17 @@
+from unittest.mock import MagicMock, patch
+
 import pytest
-from pathlib import Path
-from unittest.mock import patch, MagicMock, call
 import yaml
 
 from orchestrator import orchestrate
 
-
 # ── helpers ──────────────────────────────────────────────────────────────────
+
 
 def _setup_docs(tmp_path, stages, profile_name="test", feature_path="feature"):
     project_dir = tmp_path / "projects" / "myproject"
     project_dir.mkdir(parents=True)
-    (project_dir / "project.yaml").write_text(
-        "repo-root: /tmp\nlog_level: DEBUG\n"
-    )
+    (project_dir / "project.yaml").write_text("repo-root: /tmp\nlog_level: DEBUG\n")
     profile_path = tmp_path / f"{profile_name}.yaml"
     profile_path.write_text(yaml.dump({"name": profile_name, "stages": stages}))
     feature_dir = tmp_path / feature_path
@@ -53,7 +51,13 @@ DISCOVERY_TRACK_SIGNAL = {
 DISCOVERY_SIGNAL = {
     "stage": "discovery",
     "status": "passed",
-    "tracks": [{"name": "code-entry-points", "summary": "Found 3 relevant entry points in the auth module.", "findings_file": "/tmp/discovery-code-entry-points.md"}],
+    "tracks": [
+        {
+            "name": "code-entry-points",
+            "summary": "Found 3 relevant entry points in the auth module.",
+            "findings_file": "/tmp/discovery-code-entry-points.md",
+        }
+    ],
     "findings_files": ["/tmp/discovery-code-entry-points.md"],
 }
 
@@ -109,10 +113,16 @@ BLOCKED_SIGNAL = {
 
 # ── full happy path ───────────────────────────────────────────────────────────
 
+
 def test_full_happy_path(tmp_path):
     stages = [
         {"stage": "discovery", "expansion": "tracks"},
-        {"stage": "alignment", "mode": "interactive", "artifact": "alignment-log.md", "prompt": "prompts/alignment/interactive.md"},
+        {
+            "stage": "alignment",
+            "mode": "interactive",
+            "artifact": "alignment-log.md",
+            "prompt": "prompts/alignment/interactive.md",
+        },
         {"stage": "specification", "prompt": "prompts/specification/default.md"},
         {"stage": "decomposition", "prompt": "prompts/decomposition/default.md"},
         {
@@ -135,8 +145,8 @@ def test_full_happy_path(tmp_path):
     runs_base = tmp_path / "projects" / "myproject" / "workflow" / "runs"
 
     stage_signals = [
-        DISCOVERY_PLANNING_SIGNAL,   # discovery — planning phase
-        DISCOVERY_TRACK_SIGNAL,      # discovery — single track (parallel dispatch)
+        DISCOVERY_PLANNING_SIGNAL,  # discovery — planning phase
+        DISCOVERY_TRACK_SIGNAL,  # discovery — single track (parallel dispatch)
         SPEC_SIGNAL,
         DECOMP_SIGNAL,
         IMPL_SIGNAL,  # called twice (2 slices)
@@ -147,7 +157,20 @@ def test_full_happy_path(tmp_path):
     ]
     signal_iter = iter(stage_signals)
 
-    def fake_run_stage(stage, impl, variables, run_folder, docs_root, project, log_path, output_suffix="", cwd=None, prompt_file=None, schema_name=None, standards=None):
+    def fake_run_stage(
+        stage,
+        impl,
+        variables,
+        run_folder,
+        docs_root,
+        project,
+        log_path,
+        output_suffix="",
+        cwd=None,
+        prompt_file=None,
+        schema_name=None,
+        standards=None,
+    ):
         if stage == "review":
             assert "review_md" in variables
             assert "diff" in variables
@@ -156,10 +179,12 @@ def test_full_happy_path(tmp_path):
 
     git_mock = MagicMock(return_value=_git_ok())
 
-    with patch("orchestrator.orchestrate.run_stage", side_effect=fake_run_stage) as mock_rs, \
-         patch("orchestrator.orchestrate.run_interactive_stage") as mock_ris, \
-         patch("orchestrator.orchestrate.update_plan_md") as mock_plan, \
-         patch("orchestrator.orchestrate.subprocess.run", return_value=_git_ok()):
+    with (
+        patch("orchestrator.orchestrate.run_stage", side_effect=fake_run_stage) as mock_rs,
+        patch("orchestrator.orchestrate.run_interactive_stage") as mock_ris,
+        patch("orchestrator.orchestrate.update_plan_md") as mock_plan,
+        patch("orchestrator.orchestrate.subprocess.run", return_value=_git_ok()),
+    ):
         # alignment-log.md must exist inside the actual run folder; patch resolve to a known path
         run_folder_path = runs_base / "feature-xyz" / "2026-01-01-run-1"
         run_folder_path.mkdir(parents=True)
@@ -167,9 +192,7 @@ def test_full_happy_path(tmp_path):
         (run_folder_path / "alignment" / "alignment-log.md").write_text("# Alignment\n")
 
         with patch("orchestrator.orchestrate._resolve_run_folder", return_value=run_folder_path):
-            orchestrate.run_pipeline(
-                docs_root, "myproject", "feature-xyz", "feat/test", str(tmp_path / "test.yaml")
-            )
+            orchestrate.run_pipeline(docs_root, "myproject", "feature-xyz", "feat/test", str(tmp_path / "test.yaml"))
 
     # run_stage called for: discovery-planning, discovery-track, specification, decomposition,
     # 2x implementation, qa, review, harvest = 9
@@ -194,6 +217,7 @@ def test_full_happy_path(tmp_path):
 
 # ── alignment pause exit ──────────────────────────────────────────────────────
 
+
 def test_alignment_pause_exits(tmp_path):
     stages = [
         {"stage": "discovery", "expansion": "tracks"},
@@ -206,15 +230,17 @@ def test_alignment_pause_exits(tmp_path):
     # No alignment-log.md → interactive session launched but returns blocked (user didn't create artifact)
     blocked_signal = {"stage": "alignment", "status": "blocked", "message": "Artifact not created: alignment-log.md"}
 
-    with patch("orchestrator.orchestrate.run_stage", side_effect=[DISCOVERY_PLANNING_SIGNAL, DISCOVERY_TRACK_SIGNAL]) as mock_rs, \
-         patch("orchestrator.orchestrate.run_interactive_stage", return_value=blocked_signal), \
-         patch("orchestrator.orchestrate.update_plan_md"), \
-         patch("orchestrator.orchestrate.subprocess.run", return_value=_git_ok()), \
-         patch("orchestrator.orchestrate._resolve_run_folder", return_value=run_folder_path):
+    with (
+        patch(
+            "orchestrator.orchestrate.run_stage", side_effect=[DISCOVERY_PLANNING_SIGNAL, DISCOVERY_TRACK_SIGNAL]
+        ) as mock_rs,
+        patch("orchestrator.orchestrate.run_interactive_stage", return_value=blocked_signal),
+        patch("orchestrator.orchestrate.update_plan_md"),
+        patch("orchestrator.orchestrate.subprocess.run", return_value=_git_ok()),
+        patch("orchestrator.orchestrate._resolve_run_folder", return_value=run_folder_path),
+    ):
         with pytest.raises(SystemExit) as exc_info:
-            orchestrate.run_pipeline(
-                docs_root, "myproject", "feature", "feat/test", str(tmp_path / "test.yaml")
-            )
+            orchestrate.run_pipeline(docs_root, "myproject", "feature", "feat/test", str(tmp_path / "test.yaml"))
 
     assert exc_info.value.code == 0
     # alignment stage never reached run_stage
@@ -222,11 +248,13 @@ def test_alignment_pause_exits(tmp_path):
     assert "alignment" not in all_stages_called
     # state saved with blocked_at=alignment
     import yaml as _yaml
+
     state = _yaml.safe_load((run_folder_path / "_state.yaml").read_text())
     assert state.get("blocked_at") == "alignment"
 
 
 # ── blocked stage exit ────────────────────────────────────────────────────────
+
 
 def test_blocked_stage_exits(tmp_path):
     stages = [
@@ -237,14 +265,14 @@ def test_blocked_stage_exits(tmp_path):
     run_folder_path = tmp_path / "projects" / "myproject" / "workflow" / "runs" / "feat" / "2026-01-01-run-1"
     run_folder_path.mkdir(parents=True)
 
-    with patch("orchestrator.orchestrate.run_stage", return_value=BLOCKED_SIGNAL), \
-         patch("orchestrator.orchestrate.update_plan_md") as mock_plan, \
-         patch("orchestrator.orchestrate.subprocess.run", return_value=_git_ok()), \
-         patch("orchestrator.orchestrate._resolve_run_folder", return_value=run_folder_path):
+    with (
+        patch("orchestrator.orchestrate.run_stage", return_value=BLOCKED_SIGNAL),
+        patch("orchestrator.orchestrate.update_plan_md") as mock_plan,
+        patch("orchestrator.orchestrate.subprocess.run", return_value=_git_ok()),
+        patch("orchestrator.orchestrate._resolve_run_folder", return_value=run_folder_path),
+    ):
         with pytest.raises(SystemExit) as exc_info:
-            orchestrate.run_pipeline(
-                docs_root, "myproject", "feature", "feat/test", str(tmp_path / "test.yaml")
-            )
+            orchestrate.run_pipeline(docs_root, "myproject", "feature", "feat/test", str(tmp_path / "test.yaml"))
 
     assert exc_info.value.code == 1
     state = yaml.safe_load((run_folder_path / "_state.yaml").read_text())
@@ -254,6 +282,7 @@ def test_blocked_stage_exits(tmp_path):
 
 
 # ── resume skips completed stages ─────────────────────────────────────────────
+
 
 def test_resume_skips_completed_stages(tmp_path):
     stages = [
@@ -266,20 +295,34 @@ def test_resume_skips_completed_stages(tmp_path):
 
     # Pre-populate state with discovery=passed
     import yaml as _yaml
-    (run_folder_path / "_state.yaml").write_text(
-        _yaml.dump({"stages": {"discovery": "passed"}})
-    )
+
+    (run_folder_path / "_state.yaml").write_text(_yaml.dump({"stages": {"discovery": "passed"}}))
 
     called_stages = []
 
-    def fake_run_stage(stage, impl, variables, run_folder, docs_root, project, log_path, output_suffix="", cwd=None, prompt_file=None, schema_name=None, standards=None):
+    def fake_run_stage(
+        stage,
+        impl,
+        variables,
+        run_folder,
+        docs_root,
+        project,
+        log_path,
+        output_suffix="",
+        cwd=None,
+        prompt_file=None,
+        schema_name=None,
+        standards=None,
+    ):
         called_stages.append(stage)
         return SPEC_SIGNAL
 
-    with patch("orchestrator.orchestrate.run_stage", side_effect=fake_run_stage), \
-         patch("orchestrator.orchestrate.update_plan_md"), \
-         patch("orchestrator.orchestrate.subprocess.run", return_value=_git_ok()), \
-         patch("orchestrator.orchestrate._resolve_run_folder", return_value=run_folder_path):
+    with (
+        patch("orchestrator.orchestrate.run_stage", side_effect=fake_run_stage),
+        patch("orchestrator.orchestrate.update_plan_md"),
+        patch("orchestrator.orchestrate.subprocess.run", return_value=_git_ok()),
+        patch("orchestrator.orchestrate._resolve_run_folder", return_value=run_folder_path),
+    ):
         orchestrate.run_pipeline(
             docs_root, "myproject", "feature", "feat/test", str(tmp_path / "test.yaml"), resume=True
         )
@@ -290,11 +333,17 @@ def test_resume_skips_completed_stages(tmp_path):
 
 # ── branch created at implementation start ────────────────────────────────────
 
+
 def test_branch_created_at_implementation_start(tmp_path):
     stages = [
         {"stage": "discovery", "expansion": "tracks"},
         {"stage": "decomposition", "prompt": "prompts/decomposition/default.md"},
-        {"stage": "implementation", "prompt": "prompts/implementation/default.md", "expansion": "slices", "slices_from_stage": "decomposition"},
+        {
+            "stage": "implementation",
+            "prompt": "prompts/implementation/default.md",
+            "expansion": "slices",
+            "slices_from_stage": "decomposition",
+        },
     ]
     docs_root = _setup_docs(tmp_path, stages)
     run_folder_path = tmp_path / "projects" / "myproject" / "workflow" / "runs" / "feat" / "2026-01-01-run-1"
@@ -304,7 +353,20 @@ def test_branch_created_at_implementation_start(tmp_path):
     git_cmds = []
     sig_iter = iter([DISCOVERY_PLANNING_SIGNAL, DISCOVERY_TRACK_SIGNAL, DECOMP_SIGNAL, IMPL_SIGNAL, IMPL_SIGNAL])
 
-    def fake_run_stage(stage, impl, variables, run_folder, docs_root, project, log_path, output_suffix="", cwd=None, prompt_file=None, schema_name=None, standards=None):
+    def fake_run_stage(
+        stage,
+        impl,
+        variables,
+        run_folder,
+        docs_root,
+        project,
+        log_path,
+        output_suffix="",
+        cwd=None,
+        prompt_file=None,
+        schema_name=None,
+        standards=None,
+    ):
         call_order.append(("run_stage", stage))
         return next(sig_iter)
 
@@ -314,13 +376,13 @@ def test_branch_created_at_implementation_start(tmp_path):
             call_order.append(("git_checkout",))
         return _git_ok()
 
-    with patch("orchestrator.orchestrate.run_stage", side_effect=fake_run_stage), \
-         patch("orchestrator.orchestrate.update_plan_md"), \
-         patch("orchestrator.orchestrate.subprocess.run", side_effect=fake_git), \
-         patch("orchestrator.orchestrate._resolve_run_folder", return_value=run_folder_path):
-        orchestrate.run_pipeline(
-            docs_root, "myproject", "feature", "feat/test", str(tmp_path / "test.yaml")
-        )
+    with (
+        patch("orchestrator.orchestrate.run_stage", side_effect=fake_run_stage),
+        patch("orchestrator.orchestrate.update_plan_md"),
+        patch("orchestrator.orchestrate.subprocess.run", side_effect=fake_git),
+        patch("orchestrator.orchestrate._resolve_run_folder", return_value=run_folder_path),
+    ):
+        orchestrate.run_pipeline(docs_root, "myproject", "feature", "feat/test", str(tmp_path / "test.yaml"))
 
     # git checkout should come after discovery but before implementation
     assert ("git_checkout",) in call_order
@@ -337,6 +399,7 @@ def test_branch_created_at_implementation_start(tmp_path):
 
 # ── interactive stage not dispatched through run_stage ────────────────────────
 
+
 def test_interactive_stage_not_dispatched_through_run_stage(tmp_path):
     stages = [
         {"stage": "alignment", "mode": "interactive", "artifact": "alignment-log.md"},
@@ -351,24 +414,38 @@ def test_interactive_stage_not_dispatched_through_run_stage(tmp_path):
 
     called_stages = []
 
-    def fake_run_stage(stage, impl, variables, run_folder, docs_root, project, log_path, output_suffix="", cwd=None, prompt_file=None, schema_name=None, standards=None):
+    def fake_run_stage(
+        stage,
+        impl,
+        variables,
+        run_folder,
+        docs_root,
+        project,
+        log_path,
+        output_suffix="",
+        cwd=None,
+        prompt_file=None,
+        schema_name=None,
+        standards=None,
+    ):
         called_stages.append(stage)
         return SPEC_SIGNAL
 
-    with patch("orchestrator.orchestrate.run_stage", side_effect=fake_run_stage), \
-         patch("orchestrator.orchestrate.run_interactive_stage") as mock_ris, \
-         patch("orchestrator.orchestrate.update_plan_md"), \
-         patch("orchestrator.orchestrate.subprocess.run", return_value=_git_ok()), \
-         patch("orchestrator.orchestrate._resolve_run_folder", return_value=run_folder_path):
-        orchestrate.run_pipeline(
-            docs_root, "myproject", "feature", "feat/test", str(tmp_path / "test.yaml")
-        )
+    with (
+        patch("orchestrator.orchestrate.run_stage", side_effect=fake_run_stage),
+        patch("orchestrator.orchestrate.run_interactive_stage") as mock_ris,
+        patch("orchestrator.orchestrate.update_plan_md"),
+        patch("orchestrator.orchestrate.subprocess.run", return_value=_git_ok()),
+        patch("orchestrator.orchestrate._resolve_run_folder", return_value=run_folder_path),
+    ):
+        orchestrate.run_pipeline(docs_root, "myproject", "feature", "feat/test", str(tmp_path / "test.yaml"))
 
     assert "alignment" not in called_stages
     mock_ris.assert_not_called()
 
 
 # ── update_plan_md called after each stage ────────────────────────────────────
+
 
 def test_plan_md_updated_after_each_stage(tmp_path):
     stages = [
@@ -382,13 +459,13 @@ def test_plan_md_updated_after_each_stage(tmp_path):
     signals = [DISCOVERY_PLANNING_SIGNAL, DISCOVERY_TRACK_SIGNAL, SPEC_SIGNAL]
     sig_iter = iter(signals)
 
-    with patch("orchestrator.orchestrate.run_stage", side_effect=lambda *a, **kw: next(sig_iter)), \
-         patch("orchestrator.orchestrate.update_plan_md") as mock_plan, \
-         patch("orchestrator.orchestrate.subprocess.run", return_value=_git_ok()), \
-         patch("orchestrator.orchestrate._resolve_run_folder", return_value=run_folder_path):
-        orchestrate.run_pipeline(
-            docs_root, "myproject", "feature", "feat/test", str(tmp_path / "test.yaml")
-        )
+    with (
+        patch("orchestrator.orchestrate.run_stage", side_effect=lambda *a, **kw: next(sig_iter)),
+        patch("orchestrator.orchestrate.update_plan_md") as mock_plan,
+        patch("orchestrator.orchestrate.subprocess.run", return_value=_git_ok()),
+        patch("orchestrator.orchestrate._resolve_run_folder", return_value=run_folder_path),
+    ):
+        orchestrate.run_pipeline(docs_root, "myproject", "feature", "feat/test", str(tmp_path / "test.yaml"))
 
     plan_calls = [(c.args[1], c.args[2]) for c in mock_plan.call_args_list]
     assert ("discovery", "passed") in plan_calls
@@ -396,6 +473,7 @@ def test_plan_md_updated_after_each_stage(tmp_path):
 
 
 # ── discovery fan-out ─────────────────────────────────────────────────────────
+
 
 def test_discovery_fanout_calls_planning_then_tracks(tmp_path):
     stages = [
@@ -410,24 +488,55 @@ def test_discovery_fanout_calls_planning_then_tracks(tmp_path):
         "stage": "discovery-planning",
         "status": "passed",
         "tracks": [
-            {"name": "code-entry-points", "prompt_file": "/tmp/stages/discovery-code-entry-points-prompt.md", "focus": "Find entry points"},
+            {
+                "name": "code-entry-points",
+                "prompt_file": "/tmp/stages/discovery-code-entry-points-prompt.md",
+                "focus": "Find entry points",
+            },
             {"name": "risk", "prompt_file": "/tmp/stages/discovery-risk-prompt.md", "focus": "Identify risks"},
         ],
     }
-    track_signal_a = {"stage": "discovery-code-entry-points", "status": "passed", "findings_file": "/tmp/code.md", "summary": "Found 2 entry points"}
-    track_signal_b = {"stage": "discovery-risk", "status": "passed", "findings_file": "/tmp/risk.md", "summary": "Low risk"}
+    track_signal_a = {
+        "stage": "discovery-code-entry-points",
+        "status": "passed",
+        "findings_file": "/tmp/code.md",
+        "summary": "Found 2 entry points",
+    }
+    track_signal_b = {
+        "stage": "discovery-risk",
+        "status": "passed",
+        "findings_file": "/tmp/risk.md",
+        "summary": "Low risk",
+    }
 
     call_log = []
     sig_iter = iter([planning_signal, track_signal_a, track_signal_b, SPEC_SIGNAL])
 
-    def fake_run_stage(stage, impl, variables, run_folder, docs_root, project, log_path, output_suffix="", cwd=None, prompt_file=None, schema_name=None, standards=None):
-        call_log.append({"stage": stage, "output_suffix": output_suffix, "schema_name": schema_name, "prompt_file": prompt_file})
+    def fake_run_stage(
+        stage,
+        impl,
+        variables,
+        run_folder,
+        docs_root,
+        project,
+        log_path,
+        output_suffix="",
+        cwd=None,
+        prompt_file=None,
+        schema_name=None,
+        standards=None,
+    ):
+        call_log.append(
+            {"stage": stage, "output_suffix": output_suffix, "schema_name": schema_name, "prompt_file": prompt_file}
+        )
         return next(sig_iter)
 
-    with patch("orchestrator.orchestrate.run_stage", side_effect=fake_run_stage), \
-         patch("orchestrator.orchestrate.update_plan_md"), \
-         patch("orchestrator.orchestrate.subprocess.run", return_value=_git_ok()), \
-         patch("orchestrator.orchestrate._resolve_run_folder", return_value=run_folder_path):
+    with (
+        patch("orchestrator.orchestrate.run_stage", side_effect=fake_run_stage),
+        patch("orchestrator.orchestrate.update_plan_md"),
+        patch("orchestrator.orchestrate.subprocess.run", return_value=_git_ok()),
+        patch("orchestrator.orchestrate._resolve_run_folder", return_value=run_folder_path),
+    ):
         orchestrate.run_pipeline(docs_root, "myproject", "feature", "feat/test", str(tmp_path / "test.yaml"))
 
     # Planning call: schema_name=discovery_planning, output_suffix=planning
@@ -443,7 +552,6 @@ def test_discovery_fanout_calls_planning_then_tracks(tmp_path):
         assert tc["prompt_file"] is not None
 
     # Aggregated signal has both tracks and both findings_files
-    import yaml as _yaml
     sig_file = run_folder_path / "_state.yaml"
     # Just verify the pipeline reached specification (discovery signal saved correctly)
     spec_call = next(c for c in call_log if c["output_suffix"] not in ("planning", "code-entry-points", "risk"))
@@ -461,10 +569,12 @@ def test_discovery_blocked_when_planning_fails(tmp_path):
 
     blocked_planning = {"stage": "discovery-planning", "status": "blocked", "message": "No overview"}
 
-    with patch("orchestrator.orchestrate.run_stage", return_value=blocked_planning), \
-         patch("orchestrator.orchestrate.update_plan_md") as mock_plan, \
-         patch("orchestrator.orchestrate.subprocess.run", return_value=_git_ok()), \
-         patch("orchestrator.orchestrate._resolve_run_folder", return_value=run_folder_path):
+    with (
+        patch("orchestrator.orchestrate.run_stage", return_value=blocked_planning),
+        patch("orchestrator.orchestrate.update_plan_md") as mock_plan,
+        patch("orchestrator.orchestrate.subprocess.run", return_value=_git_ok()),
+        patch("orchestrator.orchestrate._resolve_run_folder", return_value=run_folder_path),
+    ):
         with pytest.raises(SystemExit) as exc_info:
             orchestrate.run_pipeline(docs_root, "myproject", "feature", "feat/test", str(tmp_path / "test.yaml"))
 
@@ -483,7 +593,8 @@ def test_discovery_blocked_when_any_track_fails(tmp_path):
     run_folder_path.mkdir(parents=True)
 
     planning_signal = {
-        "stage": "discovery-planning", "status": "passed",
+        "stage": "discovery-planning",
+        "status": "passed",
         "tracks": [
             {"name": "code", "prompt_file": "/tmp/code-prompt.md", "focus": "x"},
             {"name": "risk", "prompt_file": "/tmp/risk-prompt.md", "focus": "y"},
@@ -494,10 +605,12 @@ def test_discovery_blocked_when_any_track_fails(tmp_path):
 
     sig_iter = iter([planning_signal, track_ok, track_fail])
 
-    with patch("orchestrator.orchestrate.run_stage", side_effect=lambda *a, **kw: next(sig_iter)), \
-         patch("orchestrator.orchestrate.update_plan_md") as mock_plan, \
-         patch("orchestrator.orchestrate.subprocess.run", return_value=_git_ok()), \
-         patch("orchestrator.orchestrate._resolve_run_folder", return_value=run_folder_path):
+    with (
+        patch("orchestrator.orchestrate.run_stage", side_effect=lambda *a, **kw: next(sig_iter)),
+        patch("orchestrator.orchestrate.update_plan_md") as mock_plan,
+        patch("orchestrator.orchestrate.subprocess.run", return_value=_git_ok()),
+        patch("orchestrator.orchestrate._resolve_run_folder", return_value=run_folder_path),
+    ):
         with pytest.raises(SystemExit) as exc_info:
             orchestrate.run_pipeline(docs_root, "myproject", "feature", "feat/test", str(tmp_path / "test.yaml"))
 
@@ -508,9 +621,15 @@ def test_discovery_blocked_when_any_track_fails(tmp_path):
 
 # ── non-slice artifacts are filtered from slice_files before implementation ───
 
+
 def test_implementation_filters_non_slice_files(tmp_path):
     stages = [
-        {"stage": "implementation", "prompt": "prompts/implementation/default.md", "expansion": "slices", "slices_from_stage": "decomposition"},
+        {
+            "stage": "implementation",
+            "prompt": "prompts/implementation/default.md",
+            "expansion": "slices",
+            "slices_from_stage": "decomposition",
+        },
     ]
     docs_root = _setup_docs(tmp_path, stages)
     run_folder_path = tmp_path / "projects" / "myproject" / "workflow" / "runs" / "feat" / "2026-01-01-run-1"
@@ -520,38 +639,55 @@ def test_implementation_filters_non_slice_files(tmp_path):
     artifact = str(run_folder_path / "decomposition" / "dependency-graph.md")
 
     import yaml as _yaml
-    (run_folder_path / "_state.yaml").write_text(_yaml.dump({
-        "stages": {},
-        "signals": {
-            "decomposition": {
-                "stage": "decomposition",
-                "status": "passed",
-                "slice_files": [real_slice, artifact],
+
+    (run_folder_path / "_state.yaml").write_text(
+        _yaml.dump(
+            {
+                "stages": {},
+                "signals": {
+                    "decomposition": {
+                        "stage": "decomposition",
+                        "status": "passed",
+                        "slice_files": [real_slice, artifact],
+                    }
+                },
             }
-        },
-    }))
+        )
+    )
 
     called_with = []
 
-    def fake_run_stage(stage, impl, variables, run_folder, docs_root, project, log_path, output_suffix="", cwd=None, prompt_file=None, schema_name=None, standards=None):
+    def fake_run_stage(
+        stage,
+        impl,
+        variables,
+        run_folder,
+        docs_root,
+        project,
+        log_path,
+        output_suffix="",
+        cwd=None,
+        prompt_file=None,
+        schema_name=None,
+        standards=None,
+    ):
         called_with.append(variables.get("slice_file"))
         return IMPL_SIGNAL
 
-    with patch("orchestrator.orchestrate.run_stage", side_effect=fake_run_stage), \
-         patch("orchestrator.orchestrate.update_plan_md"), \
-         patch("orchestrator.orchestrate.subprocess.run", return_value=_git_ok()), \
-         patch("orchestrator.orchestrate._resolve_run_folder", return_value=run_folder_path):
-        orchestrate.run_pipeline(
-            docs_root, "myproject", "feature", "feat/test", str(tmp_path / "test.yaml")
-        )
+    with (
+        patch("orchestrator.orchestrate.run_stage", side_effect=fake_run_stage),
+        patch("orchestrator.orchestrate.update_plan_md"),
+        patch("orchestrator.orchestrate.subprocess.run", return_value=_git_ok()),
+        patch("orchestrator.orchestrate._resolve_run_folder", return_value=run_folder_path),
+    ):
+        orchestrate.run_pipeline(docs_root, "myproject", "feature", "feat/test", str(tmp_path / "test.yaml"))
 
-    assert called_with == [real_slice], (
-        f"Expected only the real slice to be dispatched, got: {called_with}"
-    )
+    assert called_with == [real_slice], f"Expected only the real slice to be dispatched, got: {called_with}"
     assert artifact not in called_with
 
 
 # ── review_md points to review/review-log.md ─────────────────────────────────
+
 
 def test_review_md_path_uses_stage_subfolder(tmp_path):
     stages = [
@@ -563,17 +699,30 @@ def test_review_md_path_uses_stage_subfolder(tmp_path):
 
     captured_vars = {}
 
-    def fake_run_stage(stage, impl, variables, run_folder, docs_root, project, log_path, output_suffix="", cwd=None, prompt_file=None, schema_name=None, standards=None):
+    def fake_run_stage(
+        stage,
+        impl,
+        variables,
+        run_folder,
+        docs_root,
+        project,
+        log_path,
+        output_suffix="",
+        cwd=None,
+        prompt_file=None,
+        schema_name=None,
+        standards=None,
+    ):
         captured_vars.update(variables)
         return REVIEW_ARCH_SIGNAL
 
-    with patch("orchestrator.orchestrate.run_stage", side_effect=fake_run_stage), \
-         patch("orchestrator.orchestrate.update_plan_md"), \
-         patch("orchestrator.orchestrate.subprocess.run", return_value=_git_ok()), \
-         patch("orchestrator.orchestrate._resolve_run_folder", return_value=run_folder_path):
-        orchestrate.run_pipeline(
-            docs_root, "myproject", "feature", "feat/test", str(tmp_path / "test.yaml")
-        )
+    with (
+        patch("orchestrator.orchestrate.run_stage", side_effect=fake_run_stage),
+        patch("orchestrator.orchestrate.update_plan_md"),
+        patch("orchestrator.orchestrate.subprocess.run", return_value=_git_ok()),
+        patch("orchestrator.orchestrate._resolve_run_folder", return_value=run_folder_path),
+    ):
+        orchestrate.run_pipeline(docs_root, "myproject", "feature", "feat/test", str(tmp_path / "test.yaml"))
 
     expected = str(run_folder_path / "review" / "review-log.md")
     assert captured_vars.get("review_md") == expected, (
@@ -582,6 +731,7 @@ def test_review_md_path_uses_stage_subfolder(tmp_path):
 
 
 # ── interactive artifact placed inside stage subfolder ────────────────────────
+
 
 def test_interactive_artifact_path_in_stage_subfolder(tmp_path):
     stages = [
@@ -598,15 +748,15 @@ def test_interactive_artifact_path_in_stage_subfolder(tmp_path):
         captured_artifact["path"] = artifact_path
         return {"stage": stage, "status": "blocked", "message": "Artifact not created: alignment-log.md"}
 
-    with patch("orchestrator.orchestrate.run_stage", return_value=SPEC_SIGNAL), \
-         patch("orchestrator.orchestrate.run_interactive_stage", side_effect=fake_interactive), \
-         patch("orchestrator.orchestrate.update_plan_md"), \
-         patch("orchestrator.orchestrate.subprocess.run", return_value=_git_ok()), \
-         patch("orchestrator.orchestrate._resolve_run_folder", return_value=run_folder_path):
+    with (
+        patch("orchestrator.orchestrate.run_stage", return_value=SPEC_SIGNAL),
+        patch("orchestrator.orchestrate.run_interactive_stage", side_effect=fake_interactive),
+        patch("orchestrator.orchestrate.update_plan_md"),
+        patch("orchestrator.orchestrate.subprocess.run", return_value=_git_ok()),
+        patch("orchestrator.orchestrate._resolve_run_folder", return_value=run_folder_path),
+    ):
         with pytest.raises(SystemExit):
-            orchestrate.run_pipeline(
-                docs_root, "myproject", "feature", "feat/test", str(tmp_path / "test.yaml")
-            )
+            orchestrate.run_pipeline(docs_root, "myproject", "feature", "feat/test", str(tmp_path / "test.yaml"))
 
     expected = run_folder_path / "alignment" / "alignment-log.md"
     assert captured_artifact.get("path") == expected, (
@@ -615,6 +765,7 @@ def test_interactive_artifact_path_in_stage_subfolder(tmp_path):
 
 
 # ── project_context_path injected into variables ──────────────────────────────
+
 
 def test_project_context_path_injected_into_variables(tmp_path):
     stages = [
@@ -626,17 +777,30 @@ def test_project_context_path_injected_into_variables(tmp_path):
 
     captured_vars = {}
 
-    def fake_run_stage(stage, impl, variables, run_folder, docs_root, project, log_path, output_suffix="", cwd=None, prompt_file=None, schema_name=None, standards=None):
+    def fake_run_stage(
+        stage,
+        impl,
+        variables,
+        run_folder,
+        docs_root,
+        project,
+        log_path,
+        output_suffix="",
+        cwd=None,
+        prompt_file=None,
+        schema_name=None,
+        standards=None,
+    ):
         captured_vars.update(variables)
         return SPEC_SIGNAL
 
-    with patch("orchestrator.orchestrate.run_stage", side_effect=fake_run_stage), \
-         patch("orchestrator.orchestrate.update_plan_md"), \
-         patch("orchestrator.orchestrate.subprocess.run", return_value=_git_ok()), \
-         patch("orchestrator.orchestrate._resolve_run_folder", return_value=run_folder_path):
-        orchestrate.run_pipeline(
-            docs_root, "myproject", "feature", "feat/test", str(tmp_path / "test.yaml")
-        )
+    with (
+        patch("orchestrator.orchestrate.run_stage", side_effect=fake_run_stage),
+        patch("orchestrator.orchestrate.update_plan_md"),
+        patch("orchestrator.orchestrate.subprocess.run", return_value=_git_ok()),
+        patch("orchestrator.orchestrate._resolve_run_folder", return_value=run_folder_path),
+    ):
+        orchestrate.run_pipeline(docs_root, "myproject", "feature", "feat/test", str(tmp_path / "test.yaml"))
 
     expected = str(tmp_path / "projects" / "myproject" / "context.md")
     assert captured_vars.get("project_context_path") == expected, (
@@ -645,6 +809,7 @@ def test_project_context_path_injected_into_variables(tmp_path):
 
 
 # ── project context file created when absent ──────────────────────────────────
+
 
 def test_project_context_file_created_when_absent(tmp_path):
     stages = [
@@ -657,13 +822,13 @@ def test_project_context_file_created_when_absent(tmp_path):
     project_context = tmp_path / "projects" / "myproject" / "context.md"
     assert not project_context.exists(), "Precondition: file must not exist before pipeline runs"
 
-    with patch("orchestrator.orchestrate.run_stage", return_value=SPEC_SIGNAL), \
-         patch("orchestrator.orchestrate.update_plan_md"), \
-         patch("orchestrator.orchestrate.subprocess.run", return_value=_git_ok()), \
-         patch("orchestrator.orchestrate._resolve_run_folder", return_value=run_folder_path):
-        orchestrate.run_pipeline(
-            docs_root, "myproject", "feature", "feat/test", str(tmp_path / "test.yaml")
-        )
+    with (
+        patch("orchestrator.orchestrate.run_stage", return_value=SPEC_SIGNAL),
+        patch("orchestrator.orchestrate.update_plan_md"),
+        patch("orchestrator.orchestrate.subprocess.run", return_value=_git_ok()),
+        patch("orchestrator.orchestrate._resolve_run_folder", return_value=run_folder_path),
+    ):
+        orchestrate.run_pipeline(docs_root, "myproject", "feature", "feat/test", str(tmp_path / "test.yaml"))
 
     assert project_context.exists(), "project context.md should be created by run_pipeline when absent"
     assert project_context.read_text() == "", "newly created project context.md should be empty"
@@ -671,13 +836,13 @@ def test_project_context_file_created_when_absent(tmp_path):
 
 # ── orchestrate.py source contains no open() calls ───────────────────────────
 
+
 def test_orchestrate_source_has_no_open_calls():
-    import orchestrator.orchestrate as orch_mod
     import inspect
+
+    import orchestrator.orchestrate as orch_mod
+
     source = inspect.getsource(orch_mod)
     # Filter out this very assertion and comments
-    lines = [
-        line for line in source.splitlines()
-        if "open(" in line and not line.strip().startswith("#")
-    ]
-    assert lines == [], f"orchestrate.py contains open() calls:\n" + "\n".join(lines)
+    lines = [line for line in source.splitlines() if "open(" in line and not line.strip().startswith("#")]
+    assert lines == [], "orchestrate.py contains open() calls:\n" + "\n".join(lines)

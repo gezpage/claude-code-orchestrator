@@ -11,13 +11,13 @@ _GENERAL_ID = "general"
 
 def discover() -> dict[str, Path]:
     """Return {identifier: SKILL.md path} for every harsh-*-engineering-standards dir found."""
-    result = {}
+    result: dict[str, Path] = {}
     if not _SKILLS_DIR.is_dir():
         return result
     for entry in _SKILLS_DIR.iterdir():
         name = entry.name
         if name.startswith(_PREFIX) and name.endswith(_SUFFIX):
-            identifier = name[len(_PREFIX): -len(_SUFFIX)]
+            identifier = name[len(_PREFIX) : -len(_SUFFIX)]
             skill_file = entry / "SKILL.md"
             if skill_file.exists():
                 result[identifier] = skill_file
@@ -31,7 +31,7 @@ def _strip_frontmatter(text: str) -> str:
     end = text.find("\n---", 3)
     if end == -1:
         return text
-    return text[end + 4:].lstrip("\n")
+    return text[end + 4 :].lstrip("\n")
 
 
 def _extract_h1(text: str) -> tuple[str, str]:

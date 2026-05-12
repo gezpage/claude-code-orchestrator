@@ -8,9 +8,9 @@ def extract_signal(stdout: str) -> dict | None:
     for line in stdout.splitlines():
         stripped = line.strip().strip("`")
         if stripped.startswith(SENTINEL):
-            payload = stripped[len(SENTINEL):].strip()
+            payload = stripped[len(SENTINEL) :].strip()
             try:
-                return json.loads(payload)
+                return json.loads(payload)  # type: ignore[no-any-return]
             except json.JSONDecodeError:
                 return None
     return None

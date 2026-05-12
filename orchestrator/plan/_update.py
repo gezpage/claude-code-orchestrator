@@ -3,6 +3,7 @@
 Thread safety: all public functions acquire _plan_lock before delegating to
 private _* helpers. Private helpers must NOT be called without holding the lock.
 """
+
 import datetime
 import os
 import re
@@ -54,9 +55,7 @@ def _update_plan_md(
     if not plan_path.exists():
         plan_path.parent.mkdir(parents=True, exist_ok=True)
         classdefs = "\n".join(_CLASSDEFS)
-        plan_path.write_text(
-            f"```mermaid\nflowchart TD\n{classdefs}\n    class {stage} {css_class}\n```\n"
-        )
+        plan_path.write_text(f"```mermaid\nflowchart TD\n{classdefs}\n    class {stage} {css_class}\n```\n")
         return
 
     content = plan_path.read_text()
@@ -75,10 +74,10 @@ def _update_plan_md(
     m = re.search(node_pattern, content)
     if m:
         parts = m.group(1).split("\\n")
-        display = re.sub(r'\s+(?:✅|⏳|🔴|-)\s*$', '', parts[0]).strip()
+        display = re.sub(r"\s+(?:✅|⏳|🔴|-)\s*$", "", parts[0]).strip()
         impl = parts[1] if len(parts) > 1 else ""
         new_label = _node_label(display, impl, status=status, elapsed_secs=elapsed_secs)
-        content = content[:m.start()] + f'    {stage}["{new_label}"]' + content[m.end():]
+        content = content[: m.start()] + f'    {stage}["{new_label}"]' + content[m.end() :]
 
     plan_path.write_text(content)
 
@@ -109,8 +108,8 @@ def _append_stage_section(
     m = re.search(node_pattern, content)
     if m:
         parts = m.group(1).split("\\n")
-        display = re.sub(r'\s+(?:✅|⏳|🔴|-)\s*$', '', parts[0]).strip()
-        display = re.sub(r'\s*-\s*$', '', display)
+        display = re.sub(r"\s+(?:✅|⏳|🔴|-)\s*$", "", parts[0]).strip()
+        display = re.sub(r"\s*-\s*$", "", display)
     else:
         display = stage.replace("_", " ").title()
 
@@ -153,7 +152,7 @@ def _append_stage_section(
         run_folder = Path(run_folder)
         for f in files:
             try:
-                rel = Path(f).relative_to(run_folder)
+                rel: Path | str = Path(f).relative_to(run_folder)
             except ValueError:
                 rel = os.path.relpath(f, run_folder)
             section.append(f"- [{Path(f).name}]({rel})")

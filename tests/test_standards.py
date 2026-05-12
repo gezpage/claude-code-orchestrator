@@ -1,8 +1,7 @@
-import pytest
 from pathlib import Path
 from unittest.mock import patch
 
-from orchestrator.standards import discover, _strip_frontmatter, _extract_h1, load, _SKILLS_DIR
+from orchestrator.standards import _extract_h1, _strip_frontmatter, discover, load
 
 
 def _make_skill(skills_dir: Path, identifier: str, content: str) -> None:
@@ -12,7 +11,9 @@ def _make_skill(skills_dir: Path, identifier: str, content: str) -> None:
 
 
 GENERAL_CONTENT = "---\nname: harsh-general-engineering-standards\ndescription: General rules.\n---\n\n# General Standards\n\nDo good work.\n"
-PHP_CONTENT = "---\nname: harsh-php-engineering-standards\ndescription: PHP rules.\n---\n\n# PHP Standards\n\nUse strict_types.\n"
+PHP_CONTENT = (
+    "---\nname: harsh-php-engineering-standards\ndescription: PHP rules.\n---\n\n# PHP Standards\n\nUse strict_types.\n"
+)
 ORPHAN_DIR_CONTENT = "# Not a skill"  # dir without SKILL.md
 
 
@@ -96,6 +97,7 @@ class TestLoad:
         assert "### General Standards" in result
         # No bare H1 lines remain (only ### prefix, not # or ##)
         import re
+
         assert not re.search(r"^# ", result, re.MULTILINE)
 
     def test_identifier_used_as_label_when_no_h1(self, tmp_path):
@@ -137,6 +139,7 @@ class TestLoad:
         _make_skill(tmp_path, "general", GENERAL_CONTENT)
         with patch("orchestrator.standards._SKILLS_DIR", tmp_path):
             import logging
+
             with caplog.at_level(logging.WARNING, logger="orchestrator.standards"):
                 result = load(["nonexistent"])
         assert "nonexistent" in caplog.text

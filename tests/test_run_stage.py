@@ -1,7 +1,4 @@
-import json
-import pytest
-from pathlib import Path
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 
 from orchestrator.run_stage import run_stage
 
@@ -95,8 +92,16 @@ def test_prompt_file_overrides_template_rendering(tmp_path):
     custom_prompt_file.write_text("Custom prompt content\nSIGNAL_JSON: " + GOOD_SIGNAL)
     stdout = f"SIGNAL_JSON: {GOOD_SIGNAL}"
     with patch("orchestrator.run_stage._run_claude", return_value=stdout) as mock_claude:
-        run_stage("discovery", "default", VARS, run_folder, str(tmp_path), "myproject", str(log_path),
-                  prompt_file=str(custom_prompt_file))
+        run_stage(
+            "discovery",
+            "default",
+            VARS,
+            run_folder,
+            str(tmp_path),
+            "myproject",
+            str(log_path),
+            prompt_file=str(custom_prompt_file),
+        )
     # prompt passed to Claude must be the file content, not a rendered template
     called_prompt = mock_claude.call_args.args[0]
     assert "Custom prompt content" in called_prompt
@@ -108,8 +113,17 @@ def test_schema_name_overrides_stage_for_validation(tmp_path):
     planning_signal = '{"stage": "discovery-planning", "status": "passed", "tracks": []}'
     stdout = f"SIGNAL_JSON: {planning_signal}"
     with patch("orchestrator.run_stage._run_claude", return_value=stdout):
-        result = run_stage("discovery", "default", VARS, run_folder, str(tmp_path), "myproject", str(log_path),
-                           output_suffix="planning", schema_name="discovery_planning")
+        result = run_stage(
+            "discovery",
+            "default",
+            VARS,
+            run_folder,
+            str(tmp_path),
+            "myproject",
+            str(log_path),
+            output_suffix="planning",
+            schema_name="discovery_planning",
+        )
     assert result["status"] == "passed"
     assert result["stage"] == "discovery-planning"
 
@@ -118,6 +132,7 @@ def test_run_stage_does_not_read_stage_output_files(tmp_path):
     run_folder, log_path = _setup_run_folder(tmp_path)
     stdout = f"SIGNAL_JSON: {GOOD_SIGNAL}"
     import builtins
+
     original_open = builtins.open
     opened_files = []
 

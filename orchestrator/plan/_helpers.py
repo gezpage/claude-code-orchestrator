@@ -43,14 +43,16 @@ def _track_node_id(stage_name: str, track_name: str) -> str:
 
 def _run_header(run_folder: Path) -> str:
     run_name = run_folder.name
-    feature  = run_folder.parent.name
-    project  = run_folder.parent.parent.parent.parent.name
-    started  = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    return "\n".join([
-        f"# {project} · {feature}",
-        "",
-        f"**Run:** {run_name} &nbsp;·&nbsp; **Started:** {started}",
-    ])
+    feature = run_folder.parent.name
+    project = run_folder.parent.parent.parent.parent.name
+    started = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    return "\n".join(
+        [
+            f"# {project} · {feature}",
+            "",
+            f"**Run:** {run_name} &nbsp;·&nbsp; **Started:** {started}",
+        ]
+    )
 
 
 def _read_slice_title(path: str | Path) -> str | None:
@@ -86,11 +88,13 @@ def _fetch_commit_messages(hashes: list[str], repo_root: str) -> list[str]:
         try:
             r = subprocess.run(
                 ["git", "-C", repo_root, "log", "--format=%s", "-1", h],
-                capture_output=True, text=True, timeout=10,
+                capture_output=True,
+                text=True,
+                timeout=10,
             )
             msg = r.stdout.strip()
             if msg:
                 results.append(f"{msg} ({h[:8]})")
-        except Exception:
+        except Exception:  # noqa: S110
             pass
     return results

@@ -1,6 +1,7 @@
 # Output validator; checks stage signals against their JSON schemas before the pipeline advances.
 import json
 from pathlib import Path
+
 import jsonschema
 
 _SCHEMAS_DIR = Path(__file__).parent / "schemas"

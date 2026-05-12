@@ -1,5 +1,6 @@
 # State persistence; loads and saves per-run YAML state including stage statuses and upstream signals.
 from pathlib import Path
+
 import yaml
 
 
@@ -30,7 +31,7 @@ def save_stage_signal(run_folder, stage: str, signal: dict) -> None:
 
 def load_signals(run_folder) -> dict:
     state = load_state(run_folder)
-    return state.get("signals", {})
+    return state.get("signals", {})  # type: ignore[no-any-return]
 
 
 def save_stage_elapsed(run_folder, stage: str, secs: float) -> None:
@@ -41,4 +42,4 @@ def save_stage_elapsed(run_folder, stage: str, secs: float) -> None:
 
 def load_elapsed(run_folder) -> dict:
     state = load_state(run_folder)
-    return state.get("elapsed", {})
+    return state.get("elapsed", {})  # type: ignore[no-any-return]
