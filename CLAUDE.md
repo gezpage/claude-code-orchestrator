@@ -62,7 +62,8 @@ Follow this for every change — bugfix, feature, or refactor.
 7. Commit: `git commit -m "type: message"`
 8. Push: `git push -u origin <branch>`
 9. Open PR — do NOT merge, that is always left to the user:
-   `gh pr create --title "<commit message>" --body "..."`
+   `gh pr create --title "<commit message>" --body "<one or two sentence rationale>"`
+   PR body: why the change was made, nothing else. No file references, no code snippets — the diff covers what changed. Add inline code comments for anything that warrants reviewer attention.
 
 ---
 
@@ -80,7 +81,7 @@ After each discrete task, open a pull request — do not commit to main directly
 - Branch from main: `git fetch origin main && git checkout -b <type>/<slug> origin/main`
 - Stage files by name — never `git add -A` or `git add .`
 - Commit message: conventional format (`fix:`, `feat:`, `chore:`, `docs:`), one sentence, no ticket refs, no emoji
-- Push and open PR: `gh pr create --title "<msg>" --body "..."`
+- Push and open PR: `gh pr create --title "<msg>" --body "<one or two sentence rationale — why, not what>"`
 - Do not merge — leave that to the user
 - "Task complete" = PR is open, tests pass
 - Docs-repo changes (Forge MCP) are excluded from this rule
