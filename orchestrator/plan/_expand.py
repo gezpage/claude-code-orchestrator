@@ -74,7 +74,7 @@ def _expand_tracks(
 
     new_subgraph = "\n".join(new_subgraph_lines)
     sg_pattern = rf'    subgraph sg_{re.escape(stage_name)}\["[^"]*"\]\n.*?    end'
-    if re.search(sg_pattern, content):
+    if re.search(sg_pattern, content, flags=re.DOTALL):
         content = re.sub(sg_pattern, new_subgraph, content, flags=re.DOTALL)
     else:
         old_def = re.search(rf'    {re.escape(stage_name)}\["[^"]*"\]', content)
@@ -168,7 +168,7 @@ def _expand_slices(
     new_subgraph = "\n".join(new_subgraph_lines)
 
     sg_pattern = rf'    subgraph sg_{re.escape(stage_name)}\["[^"]*"\]\n.*?    end'
-    if re.search(sg_pattern, content):
+    if re.search(sg_pattern, content, flags=re.DOTALL):
         content = re.sub(sg_pattern, new_subgraph, content, flags=re.DOTALL)
     else:
         old_def = re.search(rf'    {re.escape(stage_name)}\["[^"]*"\]', content)
