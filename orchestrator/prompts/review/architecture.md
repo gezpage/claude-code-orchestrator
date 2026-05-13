@@ -87,10 +87,29 @@ Explore only what is needed to confirm or rule out a concern identified from the
 
 You are triaging, not exhaustively cataloguing.
 
-- Report **at most 5 blocking findings** (Critical or High). If more than 5 exist, keep the highest-leverage ones and drop the rest.
-- Block only on issues that materially threaten correctness, safety, or the architectural invariants in scope. Style preferences, naming nits, and speculative future-proofing are **not** blocking.
-- Non-blocking findings: cap at 5. Skip anything that would be a one-line drive-by comment.
-- If nothing blocking is found, approve. Do not invent borderline issues to justify the review.
+- Report at most 5 blocking findings (Critical or High).
+- If more than 5 exist, keep the highest-leverage issues and drop the rest.
+- Block only on issues that materially threaten:
+  - correctness
+  - safety
+  - determinism
+  - architectural invariants
+  - operational reliability
+
+- Style preferences, naming nits, speculative future-proofing, and low-confidence hypotheticals are not blocking.
+
+- Non-blocking findings: cap at 5.
+- Ignore low-value drive-by comments.
+
+- Every blocking finding must include:
+  - concrete evidence
+  - affected files
+  - exact failure mode
+  - reproduction/probe OR violated invariant
+
+- If no blocking findings are identified with evidence, approve.
+- Do not invent borderline issues to justify the review.
+- Do not reject based on speculative concerns lacking concrete evidence.
 
 ## Review format
 
