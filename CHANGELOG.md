@@ -7,6 +7,9 @@ Format: [Unreleased] at the top, dated releases below, newest first.
 
 ## [Unreleased]
 
+### Added
+- Safety notice block at the top of `README.md`, new `SECURITY.md` (reporting, threat model summary, safe execution, credential handling, unsafe-mode warning, secret-scanning guidance), and new `docs/threat-model.md` (trust boundaries, filesystem/subprocess/network/credential assumptions, sandbox expectations, known unsafe modes, hardening roadmap) covering items 1–3 of issue #53.
+
 ### Changed
 - Reformatted `orchestrator/review_cycle.py` and `tests/test_review_cycle.py` with ruff to unblock the CI quality gate on PR #13.
 - CI workflow opts into Node.js 24 via `FORCE_JAVASCRIPT_ACTIONS_TO_NODE24` to silence GitHub Actions deprecation warnings

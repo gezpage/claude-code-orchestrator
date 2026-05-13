@@ -4,6 +4,27 @@
 
 Pipeline sequencer for feature development. Takes a feature spec and drives it through a fixed sequence of stages — discovery, alignment, specification, decomposition, implementation, QA, review, harvest — by orchestrating Claude Code agents, managing state, and coordinating parallel execution.
 
+> ## Safety notice — read before running
+>
+> Orchestrator dispatches Claude Code agents with `--dangerously-skip-permissions` and `--bare` (see [ADR-003](docs/adrs/ADR-003-dangerously-skip-permissions.md) and [ADR-012](docs/adrs/ADR-012-bare-flag-on-stage-invocations.md)). Each stage runs **unattended** and has full ability to:
+>
+> - **execute arbitrary shell commands** in your `repo-root` and `docs-root`
+> - **read, write, and delete files** under those roots
+> - **make and amend git commits**, create branches, and create worktrees
+> - **invoke any tool the Claude Code CLI exposes** to the stage agent
+>
+> There are no per-tool permission prompts, no human approvals between stages, and no built-in sandbox. The pipeline is designed for **trusted, single-tenant developer workstations and controlled CI runners** — not shared, multi-tenant, or untrusted environments.
+>
+> Before running:
+>
+> 1. **Treat `repo-root` and `docs-root` as fully writable** by the agent — back up or commit anything you can't lose.
+> 2. **Run inside isolation** when feasible: a dedicated container, VM, or devcontainer with no host filesystem mounts beyond the repos. Sandbox/container isolation is the recommended deployment posture (tracked in [issue #14](https://github.com/gezpage/claude-code-orchestrator/issues/14)).
+> 3. **Review every PR by hand before merging.** Stage agents commit and push on their own; merge is the human gate. Do not auto-merge.
+> 4. **Do not expose orchestrator-managed repositories or credentials to untrusted input** — a malicious feature spec or downstream prompt could steer an agent into unintended actions.
+> 5. **Keep credentials out of the repos.** Use short-lived tokens, scope them tightly, and rotate after long runs.
+>
+> See [SECURITY.md](SECURITY.md) for the full threat model summary, vulnerability reporting process, and credential handling guidance, and [docs/threat-model.md](docs/threat-model.md) for trust boundaries and known unsafe modes.
+
 ## Overview
 
 Building a feature with an AI agent is straightforward for a single task. Building one that requires research, specification, parallel implementation across multiple worktrees, and multi-pass code review is not. Context grows unboundedly, state is lost between sessions, and there is no structure to enforce quality gates between phases.
