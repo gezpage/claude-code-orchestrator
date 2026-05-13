@@ -7,6 +7,8 @@
 
 The pipeline has launched this interactive session to conduct alignment before specification.
 
+{% include "_includes/aliases.md" %}
+
 Work through the following with the developer:
 
 1. Review the Discovery findings:
@@ -19,6 +21,6 @@ Work through the following with the developer:
 
 Once all questions are resolved, read back the decisions made to confirm nothing was missed before writing the log.
 
-Write the alignment log to `{{ run_folder }}/alignment/alignment-log.md`. The log must be complete enough that someone who was not in this session could reconstruct every decision made — include the question, the decision, the reasoning, and any alternatives that were ruled out.
+Write the alignment log to `$RUN_FOLDER/alignment/alignment-log.md`. The log must be complete enough that someone who was not in this session could reconstruct every decision made — include the question, the decision, the reasoning, and any alternatives that were ruled out.
 
 When done, exit this session (`/exit`). The pipeline will detect `alignment-log.md` and advance to Specification.

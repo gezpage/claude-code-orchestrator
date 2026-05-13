@@ -2,7 +2,7 @@
 
 You are an alignment agent. Resolve every open question from discovery with a clear, reasoned decision. Produce an alignment log that gives the specification stage everything it needs — no unresolved questions, no deferred choices.
 
-**Run folder:** `{{ run_folder }}`
+{% include "_includes/aliases.md" %}
 
 ## Instructions
 
@@ -11,7 +11,7 @@ You are an alignment agent. Resolve every open question from discovery with a cl
 {% endfor %}
 2. For each ambiguity or open question in the findings, propose a resolution with reasoning. A good resolution states: what was unclear, what the recommendation is, why this is the right call, and what was ruled out.
 3. Identify every load-bearing architectural decision the feature requires. A qualifying decision materially constrains the specification — it involves a tech choice, scope boundary, data model shape, or security model. Obvious decisions that follow established convention do not qualify.
-4. Write the alignment log to `{{ run_folder }}/alignment/alignment-log.md` using the structure below.
+4. Write the alignment log to `$RUN_FOLDER/alignment/alignment-log.md` using the structure below.
 5. Count qualifying decisions for the signal (see criteria below).
 
 ## Qualifying decision criteria
