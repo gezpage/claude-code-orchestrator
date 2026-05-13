@@ -16,6 +16,7 @@ Format: [Unreleased] at the top, dated releases below, newest first.
 - `version-tag.yml`: removed the `uv lock` + `git push origin main` steps that committed the lockfile back to main from CI — lockfile updates must be committed by developers to avoid push-to-main conflicts with branch protection and CI-loop risks.
 
 ### Changed
+- Repository hygiene (issue #53 items 4–6): removed ``.idea/.gitignore`` from the git index (`.gitignore` already ignores `.idea/`); removed eight machine-specific `.claude/skills/` symlinks that pointed to absolute local paths (unusable on other machines — `.claude/` is and remains fully gitignored); verified `.gitignore`, CI workflow YAMLs, and `pyproject.toml` are correctly formatted with no single-line array issues.
 - Reformatted `orchestrator/review_cycle.py` and `tests/test_review_cycle.py` with ruff to unblock the CI quality gate on PR #13.
 - CI workflow opts into Node.js 24 via `FORCE_JAVASCRIPT_ACTIONS_TO_NODE24` to silence GitHub Actions deprecation warnings
 - Added branch housekeeping step (step 5) to Change Workflow: prunes merged-PR branches via `gh pr list --state merged` before each new worktree, covering squash-merge repos where `git branch --merged` is unreliable.
