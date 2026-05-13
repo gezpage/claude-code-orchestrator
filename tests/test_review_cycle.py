@@ -345,3 +345,174 @@ def test_plan_update_called_for_fix_and_rerun_nodes(tmp_path):
     # The re-review node should be marked passed (approved verdict)
     rerun_call = next(c for c in update_calls if c.args[1] == "review_tests_2")
     assert rerun_call.args[2] == "passed"
+
+
+# ── fix divider injection ─────────────────────────────────────────────────────
+
+
+def test_fix_divider_injected_between_rounds(tmp_path):
+    """A fix-commit divider is appended to review-log.md before the next review round."""
+    run_folder, log_path = _setup(tmp_path)
+    review_md = run_folder / "review" / "review-log.md"
+    review_md.parent.mkdir()
+    review_md.write_text("---\nreviewer_statuses: {}\n---\n## Tests Review — Round 1\nsome content\n")
+
+    signal = _review_signal({"tests": "changes-requested"})
+    stage_returns = [
+        {
+            "stage": "fix-implementation",
+            "status": "passed",
+            "commit_hashes": ["abc123"],
+            "commit_messages": ["fix: add async dlq test (abc123)"],
+            "diff": "",
+        },
+        _reviewer_sig("tests", "approved"),
+    ]
+    ret_iter = iter(stage_returns)
+
+    with patch("orchestrator.review_cycle.run_stage", side_effect=lambda *a, **kw: next(ret_iter)):
+        review_cycle.run(run_folder, "/docs", "proj", "feat/x", signal, log_path)
+
+    content = review_md.read_text()
+    assert "Fix Cycle 2" in content
+    assert "fix: add async dlq test (abc123)" in content
+    # Divider appears before the Round 2 section
+    fix_pos = content.index("Fix Cycle 2")
+    round2_pos = content.index("Round 2")
+    assert fix_pos < round2_pos
+
+
+def test_fix_divider_not_injected_when_review_log_absent(tmp_path):
+    """If review-log.md doesn't exist yet, inject is a no-op — no error raised."""
+    run_folder, log_path = _setup(tmp_path)
+    signal = _review_signal({"tests": "changes-requested"})
+
+    stage_returns = [_fix_sig(), _reviewer_sig("tests", "approved")]
+    ret_iter = iter(stage_returns)
+
+    with patch("orchestrator.review_cycle.run_stage", side_effect=lambda *a, **kw: next(ret_iter)):
+        result = review_cycle.run(run_folder, "/docs", "proj", "feat/x", signal, log_path)
+
+    assert result == {"all_passed": True}
+
+
+# ── findings summary written to plan.md ──────────────────────────────────────
+
+
+def _signal_with_findings(statuses: dict, findings: dict) -> dict:
+    return {
+        "stage": "review",
+        "status": "passed",
+        "reviewer_statuses": statuses,
+        "reviewer_findings": findings,
+        "changes_requested": [r for r, s in statuses.items() if s == "changes-requested"],
+    }
+
+
+def test_findings_summary_appended_to_plan_md(tmp_path):
+    """After all cycles resolve, a findings table is written to plan.md."""
+    run_folder, log_path = _setup(tmp_path)
+    plan_md = run_folder / "plan.md"
+    plan_md.write_text("# Project\n\n## Review\n_some content_\n")
+
+    signal = _signal_with_findings(
+        {"tests": "changes-requested"},
+        {"tests": ["Async onDeadLetter await contract untested", "withRetry has no direct unit tests"]},
+    )
+    stage_returns = [_fix_sig(), _reviewer_sig("tests", "approved")]
+    ret_iter = iter(stage_returns)
+
+    with patch("orchestrator.review_cycle.run_stage", side_effect=lambda *a, **kw: next(ret_iter)):
+        review_cycle.run(run_folder, "/docs", "proj", "feat/x", signal, log_path)
+
+    content = plan_md.read_text()
+    assert "## Review Findings" in content
+    assert "Async onDeadLetter await contract untested" in content
+    assert "withRetry has no direct unit tests" in content
+    # resolved_cycle=1 (first loop iteration) → label "Fix Cycle 2" matching diagram convention
+    assert "Fix Cycle 2" in content
+
+
+def test_findings_summary_marks_unresolved_after_max_cycles(tmp_path):
+    """Findings still open after all cycles are marked Unresolved."""
+    run_folder, log_path = _setup(tmp_path)
+    plan_md = run_folder / "plan.md"
+    plan_md.write_text("# Project\n")
+
+    signal = _signal_with_findings(
+        {"tests": "changes-requested"},
+        {"tests": ["Critical untested contract"]},
+    )
+    stage_returns = [
+        _fix_sig(),
+        _reviewer_sig("tests", "changes-requested"),
+        _fix_sig(),
+        _reviewer_sig("tests", "changes-requested"),
+    ]
+    ret_iter = iter(stage_returns)
+
+    with patch("orchestrator.review_cycle.run_stage", side_effect=lambda *a, **kw: next(ret_iter)):
+        review_cycle.run(run_folder, "/docs", "proj", "feat/x", signal, log_path)
+
+    content = plan_md.read_text()
+    assert "Critical untested contract" in content
+    assert "Unresolved" in content
+    assert "Fix Cycle" not in content.split("Critical untested contract")[1].split("\n")[0]
+
+
+def test_findings_summary_appended_at_end_when_no_markers(tmp_path):
+    """When plan.md has no File Manifest/Run Summary markers, findings are appended at end."""
+    run_folder, log_path = _setup(tmp_path)
+    plan_md = run_folder / "plan.md"
+    plan_md.write_text("# Project\n")
+
+    signal = _signal_with_findings(
+        {"tests": "changes-requested"},
+        {"tests": ["Some blocking issue"]},
+    )
+    stage_returns = [_fix_sig(), _reviewer_sig("tests", "approved")]
+    ret_iter = iter(stage_returns)
+
+    with patch("orchestrator.review_cycle.run_stage", side_effect=lambda *a, **kw: next(ret_iter)):
+        review_cycle.run(run_folder, "/docs", "proj", "feat/x", signal, log_path)
+
+    content = plan_md.read_text()
+    assert "## Review Findings" in content
+    assert "Some blocking issue" in content
+
+
+def test_append_findings_summary_else_branch_no_markers(tmp_path):
+    """Directly tests _append_findings_summary when plan.md has no section markers."""
+    from orchestrator.review_cycle import _append_findings_summary
+
+    plan_md = tmp_path / "plan.md"
+    plan_md.write_text("# Project\n")
+    findings_map = {"tests": [("Some issue", None)]}
+    _append_findings_summary(plan_md, findings_map, {"tests": "changes-requested"})
+
+    content = plan_md.read_text()
+    assert "## Review Findings" in content
+    assert "Some issue → Unresolved" in content
+    assert content.index("# Project") < content.index("## Review Findings")
+
+
+def test_findings_summary_inserted_before_file_manifest(tmp_path):
+    """Findings section is inserted before the File Manifest marker when present."""
+    run_folder, log_path = _setup(tmp_path)
+    plan_md = run_folder / "plan.md"
+    plan_md.write_text("# Project\n\n## Review\ncontent\n\n## File Manifest\n| file |\n| --- |\n")
+
+    signal = _signal_with_findings(
+        {"tests": "changes-requested"},
+        {"tests": ["Missing assertion on error message"]},
+    )
+    stage_returns = [_fix_sig(), _reviewer_sig("tests", "approved")]
+    ret_iter = iter(stage_returns)
+
+    with patch("orchestrator.review_cycle.run_stage", side_effect=lambda *a, **kw: next(ret_iter)):
+        review_cycle.run(run_folder, "/docs", "proj", "feat/x", signal, log_path)
+
+    content = plan_md.read_text()
+    findings_pos = content.index("## Review Findings")
+    manifest_pos = content.index("## File Manifest")
+    assert findings_pos < manifest_pos

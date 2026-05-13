@@ -115,13 +115,13 @@ Write your findings under `## Implementation Review — Round {{ round }}` in `{
 Emit exactly one line:
 
 ```
-SIGNAL_JSON: {"stage": "review", "status": "passed", "reviewer_statuses": {"implementation": "approved"}, "changes_requested": []}
+SIGNAL_JSON: {"stage": "review", "status": "passed", "reviewer_statuses": {"implementation": "approved"}, "changes_requested": [], "findings": []}
 ```
 
-If changes are required:
+If changes are required, populate `findings` with one short sentence per blocking issue (the issue only — no file paths, no fix instructions):
 
 ```
-SIGNAL_JSON: {"stage": "review", "status": "passed", "reviewer_statuses": {"implementation": "changes-requested"}, "changes_requested": ["implementation"]}
+SIGNAL_JSON: {"stage": "review", "status": "passed", "reviewer_statuses": {"implementation": "changes-requested"}, "changes_requested": ["implementation"], "findings": ["Retry delay formula applies wrong exponent base", "Dead-letter callback errors are silently swallowed"]}
 ```
 
-Required fields: `stage`, `status`, `reviewer_statuses`, `changes_requested`.
+Required fields: `stage`, `status`, `reviewer_statuses`, `changes_requested`, `findings`.

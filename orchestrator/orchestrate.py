@@ -572,6 +572,7 @@ def _dispatch_prompts(
         variables["diff"] = ""
 
     reviewer_statuses: dict[str, str] = {}
+    reviewer_findings: dict[str, list[str]] = {}
     changes_requested: list[str] = []
     for reviewer, prompt_path in stage.prompts.items():
         sub_id = f"{stage.name}_{reviewer}"
@@ -592,6 +593,9 @@ def _dispatch_prompts(
         elapsed = time.monotonic() - t0
         verdict = sig.get("reviewer_statuses", {}).get(reviewer, sig.get("status", "unknown"))
         reviewer_statuses[reviewer] = verdict
+        findings = sig.get("findings", [])
+        if isinstance(findings, list) and findings:
+            reviewer_findings[reviewer] = findings
         if verdict == "changes-requested":
             changes_requested.append(reviewer)
         sub_status = "blocked" if verdict == "changes-requested" else "passed"
@@ -600,6 +604,7 @@ def _dispatch_prompts(
     review_signal: dict = {
         "status": "passed",
         "reviewer_statuses": reviewer_statuses,
+        "reviewer_findings": reviewer_findings,
         "changes_requested": changes_requested,
         "review_md": str(review_md_path),
     }

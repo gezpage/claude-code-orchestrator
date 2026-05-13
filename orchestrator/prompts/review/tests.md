@@ -99,13 +99,13 @@ Write your findings under `## Tests Review — Round {{ round }}` in `{{ review_
 Emit exactly one line:
 
 ```
-SIGNAL_JSON: {"stage": "review", "status": "passed", "reviewer_statuses": {"tests": "approved"}, "changes_requested": []}
+SIGNAL_JSON: {"stage": "review", "status": "passed", "reviewer_statuses": {"tests": "approved"}, "changes_requested": [], "findings": []}
 ```
 
-If changes are required:
+If changes are required, populate `findings` with one short sentence per blocking issue (the issue only — no file paths, no fix instructions):
 
 ```
-SIGNAL_JSON: {"stage": "review", "status": "passed", "reviewer_statuses": {"tests": "changes-requested"}, "changes_requested": ["tests"]}
+SIGNAL_JSON: {"stage": "review", "status": "passed", "reviewer_statuses": {"tests": "changes-requested"}, "changes_requested": ["tests"], "findings": ["Async onDeadLetter await contract is completely untested", "withRetry has no direct unit tests"]}
 ```
 
-Required fields: `stage`, `status`, `reviewer_statuses`, `changes_requested`.
+Required fields: `stage`, `status`, `reviewer_statuses`, `changes_requested`, `findings`.
