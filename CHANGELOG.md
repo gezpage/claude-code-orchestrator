@@ -12,6 +12,7 @@ Format: [Unreleased] at the top, dated releases below, newest first.
 - CI workflow gains a `package` job: builds wheel and sdist via `uv build`, installs the wheel with `pip`, and runs `orchestrator --help` as a smoke test; covers issue #53 item 7.
 
 ### Changed
+- Replaced auto-tagging `version-tag.yml` with a manual-dispatch `release.yml`: releases are now cut from the Actions UI, scan all commits since the last tag for the bump signal, re-run the full quality gate (lint, format, type, test, build, install, smoke), then push the tag and create a GitHub Release with auto-generated notes; fails loudly if no release-bearing commits are present in the range; covers [issue #42](https://github.com/gezpage/claude-code-orchestrator/issues/42), see ADR-014.
 - `version-tag.yml` now only tags commits whose type is `feat:`, `feat!:`, or `fix:` (or carries a `BREAKING CHANGE` footer); `chore:`, `docs:`, `ci:`, `refactor:`, and `test:` commits no longer trigger a tag; covers issue #53 item 8.
 - `version-tag.yml`: removed the `uv lock` + `git push origin main` steps that committed the lockfile back to main from CI — lockfile updates must be committed by developers to avoid push-to-main conflicts with branch protection and CI-loop risks.
 

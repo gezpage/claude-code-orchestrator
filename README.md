@@ -259,6 +259,25 @@ Exits `0` on success, `1` on failure. Prints the stage signal JSON to stdout.
 
 See [CONTRIBUTING.md](CONTRIBUTING.md). Read `CLAUDE.md` before making code changes — it documents the architectural invariants every contributor must follow.
 
+## Releasing
+
+Releases are cut manually by a maintainer. Merges to `main` do not auto-tag; the act of releasing is a deliberate workflow dispatch. See [ADR-014](docs/adrs/ADR-014-explicit-release-workflow.md) for the rationale.
+
+To cut a release:
+
+1. Ensure `main` is in the state you want to ship and that its CI is green.
+2. Update the `CHANGELOG.md` `[Unreleased]` entries if needed and merge any final docs PRs.
+3. Open the **Actions** tab → **Release** workflow → **Run workflow** → choose `main` → **Run workflow**.
+
+The workflow:
+
+- scans every commit between the last `vX.Y.Z` tag and `HEAD` for conventional-commit prefixes;
+- computes the next version (`feat!:`/`BREAKING CHANGE` → major, `feat:` → minor, `fix:` → patch — strongest signal in the range wins);
+- re-runs lint, format check, type check, tests, builds the wheel and sdist with `uv build`, installs the wheel, and runs `orchestrator --help` as a smoke test;
+- pushes the new tag and creates a GitHub Release with auto-generated notes covering the released range.
+
+If the range contains no `feat:`/`fix:`/`feat!:`/`BREAKING CHANGE` commits, the workflow fails with a clear message — "nothing to release" is a real error worth surfacing rather than silently no-op'ing.
+
 ## Tests
 
 ```bash
