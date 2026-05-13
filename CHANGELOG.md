@@ -11,6 +11,7 @@ Format: [Unreleased] at the top, dated releases below, newest first.
 - Safety notice block at the top of `README.md`, new `SECURITY.md` (reporting, threat model summary, safe execution, credential handling, unsafe-mode warning, secret-scanning guidance), and new `docs/threat-model.md` (trust boundaries, filesystem/subprocess/network/credential assumptions, sandbox expectations, known unsafe modes, hardening roadmap) covering items 1–3 of issue #53.
 
 ### Changed
+- Repository hygiene (issue #53 items 4–6): removed ``.idea/.gitignore`` from the git index (`.gitignore` already ignores `.idea/`); removed eight machine-specific `.claude/skills/` symlinks that pointed to absolute local paths (unusable on other machines — `.claude/` is and remains fully gitignored); verified `.gitignore`, CI workflow YAMLs, and `pyproject.toml` are correctly formatted with no single-line array issues.
 - Reformatted `orchestrator/review_cycle.py` and `tests/test_review_cycle.py` with ruff to unblock the CI quality gate on PR #13.
 - CI workflow opts into Node.js 24 via `FORCE_JAVASCRIPT_ACTIONS_TO_NODE24` to silence GitHub Actions deprecation warnings
 - Added branch housekeeping step (step 5) to Change Workflow: prunes merged-PR branches via `gh pr list --state merged` before each new worktree, covering squash-merge repos where `git branch --merged` is unreliable.
