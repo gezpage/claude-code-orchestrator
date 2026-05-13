@@ -128,8 +128,7 @@ def run(run_folder, docs_root, project, branch, review_signal, project_log_path,
 
     # Seed findings from round-1 signals; resolved_cycle filled in when a later review approves.
     findings_map: _FindingsMap = {
-        r: [(f, None) for f in review_signal.get("reviewer_findings", {}).get(r, [])]
-        for r in changes_requested
+        r: [(f, None) for f in review_signal.get("reviewer_findings", {}).get(r, [])] for r in changes_requested
     }
 
     for cycle in range(1, _MAX_CYCLES + 1):
@@ -211,8 +210,7 @@ def run(run_folder, docs_root, project, branch, review_signal, project_log_path,
 
             if verdict == "approved":
                 findings_map[reviewer] = [
-                    (text, cycle if resolved is None else resolved)
-                    for text, resolved in findings_map.get(reviewer, [])
+                    (text, cycle if resolved is None else resolved) for text, resolved in findings_map.get(reviewer, [])
                 ]
 
         state_mod.update_stage_status(run_folder, f"review-cycle-{cycle}", "passed")

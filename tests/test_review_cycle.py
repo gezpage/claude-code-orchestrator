@@ -359,7 +359,13 @@ def test_fix_divider_injected_between_rounds(tmp_path):
 
     signal = _review_signal({"tests": "changes-requested"})
     stage_returns = [
-        {"stage": "fix-implementation", "status": "passed", "commit_hashes": ["abc123"], "commit_messages": ["fix: add async dlq test (abc123)"], "diff": ""},
+        {
+            "stage": "fix-implementation",
+            "status": "passed",
+            "commit_hashes": ["abc123"],
+            "commit_messages": ["fix: add async dlq test (abc123)"],
+            "diff": "",
+        },
         _reviewer_sig("tests", "approved"),
     ]
     ret_iter = iter(stage_returns)
