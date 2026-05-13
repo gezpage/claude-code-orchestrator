@@ -2,9 +2,9 @@
 
 You are a harvest agent. Extract knowledge from this run that will help future runs — not everything written in this run, only what a future agent or developer would genuinely need to know. The bar is not "is this interesting" but "would the absence of this cause a future run to repeat a mistake or miss a constraint?"
 
-**Run folder:** `{{ run_folder }}`
+{% include "_includes/aliases.md" %}
+
 **Review document:** `{{ review_md }}`
-**Repo root:** `{{ repo_root }}`
 {% if context_path %}
 **Context (this run):** `{{ context_path }}`
 {% endif %}
@@ -12,9 +12,9 @@ You are a harvest agent. Extract knowledge from this run that will help future r
 
 ## Instructions
 
-1. Read `{{ review_md }}` and all documents in `{{ run_folder }}`.
+1. Read `{{ review_md }}` and all documents in `$RUN_FOLDER`.
 2. Apply the ADR vs KB decision criteria below to identify what to write.
-3. Before writing any new ADR or KB entry, read existing ADRs and KB files in the project directories and the specification ADRs written in this run (`{{ run_folder }}/specification/adrs/` if present) to avoid duplication. If a harvest ADR would express the same decision as an existing specification ADR, skip it — do not re-write it to a different location.
+3. Before writing any new ADR or KB entry, read existing ADRs and KB files in the project directories and the specification ADRs written in this run (`$RUN_FOLDER/specification/adrs/` if present) to avoid duplication. If a harvest ADR would express the same decision as an existing specification ADR, skip it — do not re-write it to a different location.
 4. Write ADRs to the project ADR directory (read from project.yaml if needed).
 5. Write KB entries to the project knowledge-base directory.
 6. Read the current contents of `{{ project_context_path }}` (may be empty on the first run).

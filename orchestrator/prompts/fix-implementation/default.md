@@ -1,9 +1,10 @@
 # Fix Implementation
 
-You are addressing reviewer feedback on branch `{{ branch }}` in `{{ repo_root }}`. Your only job is to resolve the specific issues raised — not to improve unrelated code, not to add features, not to pre-empt future reviewers.
+You are addressing reviewer feedback on branch `{{ branch }}` in `$REPO_ROOT`. Your only job is to resolve the specific issues raised — not to improve unrelated code, not to add features, not to pre-empt future reviewers.
+
+{% include "_includes/aliases.md" %}
 
 **Branch:** `{{ branch }}`
-**Repo root:** `{{ repo_root }}`
 
 ## Changes Requested
 

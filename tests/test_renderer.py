@@ -113,3 +113,24 @@ def test_standards_no_block_when_no_skills_available(tmp_path):
     with patch("orchestrator.standards._SKILLS_DIR", empty_skills_dir):
         result = render_prompt("discovery", "default", VARS, str(tmp_path), "myproject", standards=[])
     assert "## Engineering Standards" not in result
+
+
+def test_path_aliases_section_included(tmp_path):
+    result = render_prompt("discovery", "default", VARS, str(tmp_path), "myproject")
+    assert "## Path aliases" in result
+    assert "`$REPO_ROOT` → `/tmp/repo`" in result
+    assert "`$RUN_FOLDER` → `/tmp/run`" in result
+    assert "`$DOCS_ROOT` → `/tmp/docs`" in result
+
+
+def test_path_aliases_used_in_body_prose(tmp_path):
+    result = render_prompt("discovery", "default", VARS, str(tmp_path), "myproject")
+    # Body prose references aliases rather than repeating absolute paths
+    assert "$REPO_ROOT" in result
+    assert "$RUN_FOLDER" in result
+
+
+def test_signal_json_keeps_absolute_paths(tmp_path):
+    # Agents emit absolute paths in SIGNAL_JSON, so those examples remain Jinja-expanded.
+    result = render_prompt("discovery", "default", VARS, str(tmp_path), "myproject")
+    assert '"findings_files": ["/tmp/run/discovery/findings.md"]' in result

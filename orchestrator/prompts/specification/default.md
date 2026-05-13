@@ -2,18 +2,18 @@
 
 You are a specification agent. Produce a PRD, a self-contained context document, and any ADRs required by the alignment decisions. Downstream agents — implementation, QA, review — read `context.md` only. If they would need to open any other file to understand the constraints or decisions, `context.md` is incomplete.
 
+{% include "_includes/aliases.md" %}
+
 **Alignment log:** `{{ alignment_log }}`
 **Project context (baseline):** `{{ project_context_path }}`
-**Run folder:** `{{ run_folder }}`
-**Repo root:** `{{ repo_root }}`
 
 ## Instructions
 
 1. Read the alignment log at `{{ alignment_log }}`.
 2. Read the project context file at `{{ project_context_path }}` as your baseline. It may be empty on the first run — that is expected. Carry forward all standing constraints and augment with any new constraints from this run.
-3. Write a PRD at `{{ run_folder }}/specification/prd.md` using the template below.
-4. Write a context document at `{{ run_folder }}/specification/context.md` using the template below. This is the most important artifact of this stage.
-5. For each qualifying architectural decision from the alignment log, write an ADR at `{{ run_folder }}/specification/adrs/ADR-NNN-title.md` using the ADR template below. A decision qualifies only if: (a) it was hard to reach — real trade-offs between alternatives were weighed, not just the obvious choice applied; and (b) a future developer would ask "why did they do it this way?" without this record. Negative test: if you would reach the same decision by following language idiom, framework convention, or a stated project constraint, it is not an ADR. Target 2–4 ADRs per run.
+3. Write a PRD at `$RUN_FOLDER/specification/prd.md` using the template below.
+4. Write a context document at `$RUN_FOLDER/specification/context.md` using the template below. This is the most important artifact of this stage.
+5. For each qualifying architectural decision from the alignment log, write an ADR at `$RUN_FOLDER/specification/adrs/ADR-NNN-title.md` using the ADR template below. A decision qualifies only if: (a) it was hard to reach — real trade-offs between alternatives were weighed, not just the obvious choice applied; and (b) a future developer would ask "why did they do it this way?" without this record. Negative test: if you would reach the same decision by following language idiom, framework convention, or a stated project constraint, it is not an ADR. Target 2–4 ADRs per run.
 
 ## PRD template
 
