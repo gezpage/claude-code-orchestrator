@@ -99,6 +99,15 @@ Explore only what is needed to confirm or rule out a concern identified from the
 - Are configuration values externalised, not hard-coded?
 - Would this change degrade gracefully under load or partial failure?
 
+## Triage and scope
+
+You are triaging, not exhaustively cataloguing.
+
+- Report **at most 5 blocking findings** (Critical or High). If more than 5 exist, keep the highest-leverage ones and drop the rest.
+- Block only on issues that materially threaten correctness, security, data integrity, or production stability. Style preferences, naming nits, and speculative refactors are **not** blocking.
+- Non-blocking findings: cap at 5. Skip anything that would be a one-line drive-by comment.
+- If nothing blocking is found, approve. Do not invent borderline issues to justify the review.
+
 ## Review format
 
 Write your findings under `## Implementation Review — Round {{ round }}` in `{{ review_md }}`. Structure:

@@ -83,6 +83,15 @@ Explore only what is needed to confirm or rule out a concern identified from the
 - Any test that could pass or fail depending on execution order, timing, or environment state is a flakiness risk.
 - Flag these explicitly; they erode trust in the whole suite.
 
+## Triage and scope
+
+You are triaging, not exhaustively cataloguing.
+
+- Report **at most 5 blocking findings** (Critical or High). If more than 5 exist, keep the highest-leverage gaps — uncovered acceptance criteria and untested error paths take priority over assertion-quality nits.
+- Block only on coverage gaps for acceptance criteria, untested error/edge paths that materially affect correctness, or tests so weak they would not catch a realistic regression. Naming preferences and stylistic test concerns are **not** blocking.
+- Non-blocking findings: cap at 5. Skip anything that would be a one-line drive-by comment.
+- If nothing blocking is found, approve. Do not invent borderline issues to justify the review.
+
 ## Review format
 
 Write your findings under `## Tests Review — Round {{ round }}` in `{{ review_md }}`. Structure:

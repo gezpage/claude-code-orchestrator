@@ -10,7 +10,13 @@ _GENERAL_ID = "general"
 
 
 def discover() -> dict[str, Path]:
-    """Return {identifier: SKILL.md path} for every harsh-*-engineering-standards dir found."""
+    """Return {identifier: path} for every harsh-*-engineering-standards dir found.
+
+    Prefers `COMPACT.md` over `SKILL.md` when present — full skill files are
+    written for human reading and bloat prompt context. Drop a `COMPACT.md`
+    next to `SKILL.md` containing only the hard-rule list, and prompts will
+    use that instead.
+    """
     result: dict[str, Path] = {}
     if not _SKILLS_DIR.is_dir():
         return result
@@ -18,8 +24,11 @@ def discover() -> dict[str, Path]:
         name = entry.name
         if name.startswith(_PREFIX) and name.endswith(_SUFFIX):
             identifier = name[len(_PREFIX) : -len(_SUFFIX)]
+            compact_file = entry / "COMPACT.md"
             skill_file = entry / "SKILL.md"
-            if skill_file.exists():
+            if compact_file.exists():
+                result[identifier] = compact_file
+            elif skill_file.exists():
                 result[identifier] = skill_file
     return result
 
