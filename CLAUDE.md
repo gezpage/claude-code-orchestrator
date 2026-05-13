@@ -98,12 +98,18 @@ After each discrete task, open a pull request — do not commit to main directly
 
 ## Versioning
 
-`.github/workflows/version-tag.yml` auto-tags pushes to main **only** when the commit message begins with a release-bearing type:
+Releases are cut manually via the `Release` workflow (`.github/workflows/release.yml`), triggered from the GitHub Actions UI with `workflow_dispatch`. Merges to `main` do **not** auto-tag. See [ADR-014](docs/adrs/ADR-014-explicit-release-workflow.md).
 
-- `feat!:` / `BREAKING CHANGE` footer → major bump
+The release workflow scans all commits between the last `vX.Y.Z` tag and `HEAD` and computes the bump from conventional-commit prefixes:
+
+- `feat!:` / `BREAKING CHANGE` footer (anywhere in the range) → major bump
 - `feat:` → minor bump
 - `fix:` → patch bump
-- `chore:`, `docs:`, `ci:`, `refactor:`, `test:` → no tag
+- `chore:`, `docs:`, `ci:`, `refactor:`, `test:` → no contribution to the bump
 
-No manual tagging needed. The lockfile (`uv.lock`) must be committed by developers — CI no longer commits it.
+If the range contains no `feat!:`/`feat:`/`fix:`/`BREAKING CHANGE` commits, the workflow fails with a clear message — a dispatch is an assertion that there is something to release.
+
+The workflow re-runs the full quality gate (lint, format, type, test, build wheel/sdist, install, `orchestrator --help` smoke) before tagging. On success it pushes the tag and creates a GitHub Release with auto-generated notes.
+
+The lockfile (`uv.lock`) must be committed by developers — CI does not commit it.
 
