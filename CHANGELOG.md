@@ -13,6 +13,7 @@ Format: [Unreleased] at the top, dated releases below, newest first.
 - Review prompts (architecture, implementation, tests): added a Triage and scope section capping each round at 5 blocking + 5 non-blocking findings, with explicit guidance against blocking on style/naming/speculative concerns; covers issue #57 item 7.
 
 ### Added
+- `standards.discover()` prefers `COMPACT.md` over `SKILL.md` when present in a `harsh-*-engineering-standards` skill dir, letting projects ship a hard-rule list for prompt injection while keeping the full skill for human reading; covers issue #57 item 5.
 - Safety notice block at the top of `README.md`, new `SECURITY.md` (reporting, threat model summary, safe execution, credential handling, unsafe-mode warning, secret-scanning guidance), and new `docs/threat-model.md` (trust boundaries, filesystem/subprocess/network/credential assumptions, sandbox expectations, known unsafe modes, hardening roadmap) covering items 1–3 of issue #53.
 - CI workflow gains a `package` job: builds wheel and sdist via `uv build`, installs the wheel with `pip`, and runs `orchestrator --help` as a smoke test; covers issue #53 item 7.
 
