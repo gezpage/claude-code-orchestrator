@@ -9,6 +9,11 @@ Format: [Unreleased] at the top, dated releases below, newest first.
 
 ### Added
 - Safety notice block at the top of `README.md`, new `SECURITY.md` (reporting, threat model summary, safe execution, credential handling, unsafe-mode warning, secret-scanning guidance), and new `docs/threat-model.md` (trust boundaries, filesystem/subprocess/network/credential assumptions, sandbox expectations, known unsafe modes, hardening roadmap) covering items 1–3 of issue #53.
+- CI workflow gains a `package` job: builds wheel and sdist via `uv build`, installs the wheel with `pip`, and runs `orchestrator --help` as a smoke test; covers issue #53 item 7.
+
+### Changed
+- `version-tag.yml` now only tags commits whose type is `feat:`, `feat!:`, or `fix:` (or carries a `BREAKING CHANGE` footer); `chore:`, `docs:`, `ci:`, `refactor:`, and `test:` commits no longer trigger a tag; covers issue #53 item 8.
+- `version-tag.yml`: removed the `uv lock` + `git push origin main` steps that committed the lockfile back to main from CI — lockfile updates must be committed by developers to avoid push-to-main conflicts with branch protection and CI-loop risks.
 
 ### Changed
 - Reformatted `orchestrator/review_cycle.py` and `tests/test_review_cycle.py` with ruff to unblock the CI quality gate on PR #13.

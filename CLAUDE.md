@@ -98,11 +98,12 @@ After each discrete task, open a pull request — do not commit to main directly
 
 ## Versioning
 
-`.github/workflows/version-tag.yml` auto-tags every push to main:
+`.github/workflows/version-tag.yml` auto-tags pushes to main **only** when the commit message begins with a release-bearing type:
 
 - `feat!:` / `BREAKING CHANGE` footer → major bump
 - `feat:` → minor bump
-- everything else → patch bump
+- `fix:` → patch bump
+- `chore:`, `docs:`, `ci:`, `refactor:`, `test:` → no tag
 
-No manual tagging needed.
+No manual tagging needed. The lockfile (`uv.lock`) must be committed by developers — CI no longer commits it.
 
