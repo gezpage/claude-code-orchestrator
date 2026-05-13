@@ -88,6 +88,23 @@ class TestDiscover:
             result = discover()
         assert result == {}
 
+    def test_prefers_compact_over_skill(self, tmp_path):
+        d = tmp_path / "harsh-python-engineering-standards"
+        d.mkdir()
+        (d / "SKILL.md").write_text("# Full skill")
+        (d / "COMPACT.md").write_text("# Compact rules")
+        with patch("orchestrator.standards._SKILLS_DIR", tmp_path):
+            result = discover()
+        assert result["python"].name == "COMPACT.md"
+
+    def test_falls_back_to_skill_when_no_compact(self, tmp_path):
+        d = tmp_path / "harsh-python-engineering-standards"
+        d.mkdir()
+        (d / "SKILL.md").write_text("# Full skill")
+        with patch("orchestrator.standards._SKILLS_DIR", tmp_path):
+            result = discover()
+        assert result["python"].name == "SKILL.md"
+
 
 class TestLoad:
     def test_h1_promoted_to_h3_subsection(self, tmp_path):

@@ -16,8 +16,10 @@ You are a decomposition agent. Your task is to break the PRD into implementation
 3. Apply the slice quality checklist before finalising each slice:
    - Does it deliver a thin end-to-end path, not a single layer?
    - Is it independently testable in isolation from other slices?
+   - Is it independently mergeable — can the resulting PR ship without depending on a sibling slice landing first?
    - Is it ≤ 1 day of work?
    - Can it be demonstrated or verified on its own?
+   - **Reviewability budget:** estimated diff ≤ 400 lines, ≤ 10 files changed, ≤ 1 primary concept. Slices that exceed any of these must be split — a reviewer should be able to hold the whole change in their head in one sitting.
    - If the PRD is ambiguous about what the slice should do, record the ambiguity explicitly in "What to build" rather than silently resolving it.
 
 4. Prefer many thin slices over few thick ones. Each slice must be independently committable and verifiable.
