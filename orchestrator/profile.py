@@ -32,6 +32,7 @@ class StageConfig:
 class Profile:
     name: str
     stages: tuple[StageConfig, ...]
+    skip_stages: frozenset[str] = frozenset()
 
 
 _BUNDLED_PROFILES_DIR = Path(__file__).parent / "profiles"
@@ -79,7 +80,12 @@ def load_profile(profile: str | Path, bundled_dir: Path | None = None) -> Profil
             raise FileNotFoundError(f"Unknown profile '{profile_str}'. Available: {available}")
         raw = yaml.safe_load(bundled.read_text())
 
+    skip_stages_raw = raw.get("skip_stages") or []
+    if not isinstance(skip_stages_raw, list) or not all(isinstance(s, str) for s in skip_stages_raw):
+        raise ValueError("Profile 'skip_stages' must be a list of stage-name strings")
+
     return Profile(
         name=raw.get("name", ""),
         stages=tuple(_parse_stage(s) for s in raw.get("stages", [])),
+        skip_stages=frozenset(skip_stages_raw),
     )

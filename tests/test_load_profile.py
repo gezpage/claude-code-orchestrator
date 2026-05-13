@@ -66,3 +66,37 @@ def test_unknown_expansion_kind_raises(tmp_path):
     p.write_text(yaml.dump({"name": "bad", "stages": [{"stage": "foo", "expansion": "invalid"}]}))
     with pytest.raises(ValueError, match="Unknown expansion kind"):
         load_profile(str(p))
+
+
+def test_skip_stages_defaults_to_empty():
+    profile = load_profile("full")
+    assert profile.skip_stages == frozenset()
+
+
+def test_skip_stages_parsed_from_yaml(tmp_path):
+    p = tmp_path / "custom.yaml"
+    p.write_text(
+        yaml.dump(
+            {
+                "name": "custom",
+                "skip_stages": ["harvest", "qa"],
+                "stages": [{"stage": "discovery"}],
+            }
+        )
+    )
+    profile = load_profile(str(p))
+    assert profile.skip_stages == frozenset({"harvest", "qa"})
+
+
+def test_skip_stages_invalid_type_raises(tmp_path):
+    p = tmp_path / "bad.yaml"
+    p.write_text(yaml.dump({"name": "bad", "skip_stages": "harvest", "stages": []}))
+    with pytest.raises(ValueError, match="skip_stages"):
+        load_profile(str(p))
+
+
+def test_skip_stages_invalid_element_raises(tmp_path):
+    p = tmp_path / "bad.yaml"
+    p.write_text(yaml.dump({"name": "bad", "skip_stages": [123], "stages": []}))
+    with pytest.raises(ValueError, match="skip_stages"):
+        load_profile(str(p))

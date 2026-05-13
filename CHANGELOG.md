@@ -8,6 +8,7 @@ Format: [Unreleased] at the top, dated releases below, newest first.
 ## [Unreleased]
 
 ### Added
+- 2026-05-13: Profile-level `skip_stages: [stage-name, ...]` flag; stages listed there are bypassed at runtime (logged, recorded as `skipped` in state and plan.md) without removing them from the profile's stages list. Lets lightweight runs disable expensive stages like `harvest` without authoring a separate profile; addresses [issue #57 item 3](https://github.com/gezpage/claude-code-orchestrator/issues/57).
 - Safety notice block at the top of `README.md`, new `SECURITY.md` (reporting, threat model summary, safe execution, credential handling, unsafe-mode warning, secret-scanning guidance), and new `docs/threat-model.md` (trust boundaries, filesystem/subprocess/network/credential assumptions, sandbox expectations, known unsafe modes, hardening roadmap) covering items 1–3 of issue #53.
 - CI workflow gains a `package` job: builds wheel and sdist via `uv build`, installs the wheel with `pip`, and runs `orchestrator --help` as a smoke test; covers issue #53 item 7.
 

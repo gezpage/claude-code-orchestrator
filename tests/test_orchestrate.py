@@ -10,12 +10,15 @@ from orchestrator.profile import ExpansionKind, StageConfig
 # ── helpers ──────────────────────────────────────────────────────────────────
 
 
-def _setup_docs(tmp_path, stages, profile_name="test", feature_path="feature"):
+def _setup_docs(tmp_path, stages, profile_name="test", feature_path="feature", skip_stages=None):
     project_dir = tmp_path / "projects" / "myproject"
     project_dir.mkdir(parents=True)
     (project_dir / "project.yaml").write_text("repo-root: /tmp\nlog_level: DEBUG\n")
     profile_path = tmp_path / f"{profile_name}.yaml"
-    profile_path.write_text(yaml.dump({"name": profile_name, "stages": stages}))
+    profile_doc = {"name": profile_name, "stages": stages}
+    if skip_stages is not None:
+        profile_doc["skip_stages"] = skip_stages
+    profile_path.write_text(yaml.dump(profile_doc))
     feature_dir = tmp_path / feature_path
     feature_dir.mkdir(parents=True, exist_ok=True)
     (feature_dir / "overview.md").write_text("# Feature Overview\n")
@@ -834,6 +837,42 @@ def test_project_context_file_created_when_absent(tmp_path):
 
     assert project_context.exists(), "project context.md should be created by run_pipeline when absent"
     assert project_context.read_text() == "", "newly created project context.md should be empty"
+
+
+# ── skip_stages profile flag ──────────────────────────────────────────────────
+
+
+def test_skip_stages_in_profile_skips_listed_stages(tmp_path):
+    stages = [
+        {"stage": "specification", "prompt": "prompts/specification/default.md"},
+        {"stage": "harvest", "prompt": "prompts/harvest/default.md"},
+    ]
+    docs_root = _setup_docs(tmp_path, stages, skip_stages=["harvest"])
+    run_folder_path = tmp_path / "projects" / "myproject" / "workflow" / "runs" / "feat" / "2026-01-01-run-1"
+    run_folder_path.mkdir(parents=True)
+
+    called_stages = []
+
+    def fake_run_stage(stage, *args, **kwargs):
+        called_stages.append(stage)
+        return SPEC_SIGNAL
+
+    with (
+        patch("orchestrator.orchestrate.run_stage", side_effect=fake_run_stage),
+        patch("orchestrator.orchestrate.update_plan_md") as mock_plan,
+        patch("orchestrator.orchestrate.subprocess.run", return_value=_git_ok()),
+        patch("orchestrator.orchestrate._resolve_run_folder", return_value=run_folder_path),
+    ):
+        orchestrate.run_pipeline(docs_root, "myproject", "feature", "feat/test", str(tmp_path / "test.yaml"))
+
+    assert "specification" in called_stages
+    assert "harvest" not in called_stages
+
+    state = yaml.safe_load((run_folder_path / "_state.yaml").read_text())
+    assert state["stages"].get("harvest") == "skipped"
+
+    plan_calls = [(c.args[1], c.args[2]) for c in mock_plan.call_args_list]
+    assert ("harvest", "skipped") in plan_calls
 
 
 # ── orchestrate.py source contains no open() calls ───────────────────────────

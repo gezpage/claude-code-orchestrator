@@ -722,6 +722,12 @@ def run_pipeline(
             logger.log(stage_name, "DEBUG", "already passed — skipping")
             continue
 
+        if stage_name in profile.skip_stages:
+            logger.log(stage_name, "INFO", f"stage '{stage_name}' disabled by profile skip_stages — skipping")
+            update_plan_md(run_folder, stage_name, "skipped")
+            state_mod.update_stage_status(run_folder, stage_name, "skipped")
+            continue
+
         variables = _build_variables(
             stage_name,
             signals,
