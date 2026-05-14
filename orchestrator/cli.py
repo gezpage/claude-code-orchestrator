@@ -26,7 +26,7 @@ def main():
 @click.option(
     "--profile",
     default=None,
-    help="Built-in profile name (full, spike) or path to a profile YAML file.",
+    help="Built-in profile name (full, minimal, minimal-codex, spike) or path to a profile YAML file.",
 )
 @click.option(
     "--base-branch",

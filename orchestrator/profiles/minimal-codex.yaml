@@ -1,0 +1,27 @@
+name: minimal-codex
+
+agent:
+  backend: codex_cli
+  model: gpt-5-codex
+  sterile_context: true
+  permission_mode: workspace-write
+
+stages:
+  - stage: specification
+    prompt: prompts/specification/minimal.md
+
+  - stage: decomposition
+    prompt: prompts/decomposition/minimal.md
+
+  - stage: implementation
+    prompt: prompts/implementation/minimal.md
+    standards: true
+    cwd_from_repo_root: true
+
+  - stage: verification
+    mode: deterministic
+
+  - stage: review
+    expansion: prompts
+    prompts:
+      implementation: prompts/review/implementation.md
