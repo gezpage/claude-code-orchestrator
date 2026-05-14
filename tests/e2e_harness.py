@@ -247,10 +247,21 @@ class FakeRunStage:
 
 @contextlib.contextmanager
 def patch_run_stage(overrides: Mapping[str, Any] | None = None) -> Iterator[FakeRunStage]:
-    """Patch `run_stage` at both binding sites (orchestrate and review_cycle)."""
+    """Patch `run_stage` at both binding sites (orchestrate and review_cycle).
+
+    Also stubs the orchestrator._git state validators with safe defaults so e2e
+    tests that don't initialise a real git repo can still exercise the slice
+    dispatcher.
+    """
     fake = FakeRunStage(overrides)
     with (
         patch("orchestrator.orchestrate.run_stage", side_effect=fake),
         patch("orchestrator.review_cycle.run_stage", side_effect=fake),
+        patch("orchestrator.orchestrate.git_state.is_clean", return_value=True),
+        patch("orchestrator.orchestrate.git_state.branch_exists", return_value=False),
+        patch("orchestrator.orchestrate.git_state.current_branch", return_value="main"),
+        patch("orchestrator.orchestrate.git_state.worktree_registered", return_value=False),
+        patch("orchestrator.orchestrate.git_state.has_merge_conflicts", return_value=False),
+        patch("orchestrator.orchestrate.git_state.abort_merge"),
     ):
         yield fake
