@@ -4,7 +4,7 @@ import sys
 
 import click
 
-from orchestrator import orchestrate, paths
+from orchestrator import _cli_tui, orchestrate, paths
 from orchestrator import state as state_mod
 from orchestrator.run_stage import run_stage
 
@@ -15,25 +15,68 @@ def main():
 
 
 @main.command()
-@click.option("--docs-root", required=True, help="Path to your docs root.")
-@click.option("--project", required=True, help="Project name under docs-root/projects/.")
+@click.option("--docs-root", default=None, help="Path to your docs root.")
+@click.option("--project", default=None, help="Project name under docs-root/projects/.")
 @click.option(
-    "--feature-path", required=True, help="Docs-relative path to the feature directory (must contain overview.md)."
+    "--feature-path",
+    default=None,
+    help="Docs-relative path to the feature directory (must contain overview.md).",
 )
-@click.option("--branch", required=True, help="Git branch name to create for implementation.")
+@click.option("--branch", default=None, help="Git branch name to create for implementation.")
 @click.option(
     "--profile",
-    default="full",
-    show_default=True,
+    default=None,
     help="Built-in profile name (full, spike) or path to a profile YAML file.",
 )
-def run(docs_root, project, feature_path, branch, profile):
+@click.option(
+    "--base-branch",
+    default=None,
+    help="Branch the implementation should fork from (default: main, or the value in project.yaml).",
+)
+@click.option(
+    "--create-pr/--no-create-pr",
+    "create_pr",
+    default=None,
+    help="Open a draft GitHub PR when the pipeline completes (default: prompt or use project.yaml).",
+)
+def run(docs_root, project, feature_path, branch, profile, base_branch, create_pr):
     """Run the full pipeline for a feature."""
     try:
-        paths.require_dir(docs_root)
+        resolved = _cli_tui.resolve_run_inputs(
+            _cli_tui.RunInputs(
+                docs_root=docs_root,
+                project=project,
+                feature_path=feature_path,
+                branch=branch,
+                profile=profile,
+                base_branch=base_branch,
+                create_pr=create_pr,
+            )
+        )
+    except _cli_tui.RunInputError as exc:
+        raise click.UsageError(str(exc)) from exc
+
+    # resolve_run_inputs guarantees these four are populated (or it raises).
+    # Re-bind to locally-typed strings so mypy doesn't see Optional past this point.
+    docs_root_resolved = resolved.docs_root or ""
+    project_resolved = resolved.project or ""
+    feature_path_resolved = resolved.feature_path or ""
+    branch_resolved = resolved.branch or ""
+
+    try:
+        paths.require_dir(docs_root_resolved)
     except FileNotFoundError as e:
         raise click.UsageError(str(e)) from e
-    orchestrate.run_pipeline(docs_root, project, feature_path, branch, profile)
+
+    orchestrate.run_pipeline(
+        docs_root_resolved,
+        project_resolved,
+        feature_path_resolved,
+        branch_resolved,
+        resolved.profile or "full",
+        base_branch=resolved.base_branch,
+        create_pr=resolved.create_pr,
+    )
 
 
 @main.command()

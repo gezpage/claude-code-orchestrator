@@ -5,8 +5,32 @@ import yaml
 
 from orchestrator import orchestrate
 from orchestrator._git import GitStateError
+from orchestrator._git_setup import GitPreflightResult, OriginInfo
 from orchestrator.orchestrate import _PipelineContext
 from orchestrator.profile import ExpansionKind, StageConfig
+
+
+@pytest.fixture(autouse=True)
+def _stub_preflight_and_sync():
+    """Stub the ADR-019 preflight and base-branch sync for every test in this file.
+
+    Tests that explicitly exercise the preflight paths re-patch within their own
+    `with` block; autouse means the rest of the suite is unaffected by the new
+    machinery.
+    """
+    with (
+        patch(
+            "orchestrator.orchestrate._git_setup.preflight",
+            return_value=GitPreflightResult(
+                base_branch="main",
+                create_pr=False,
+                origin=OriginInfo(url=None, is_github=False, gh_repo=None),
+            ),
+        ),
+        patch("orchestrator.orchestrate._sync_base_and_create_impl_branch"),
+    ):
+        yield
+
 
 # ── helpers ──────────────────────────────────────────────────────────────────
 
@@ -37,8 +61,13 @@ def _patch_safe_git_state():
     """Return a contextlib.ExitStack with patches that make _git validators report a
     clean repo on a fresh branch. Use in integration tests that exercise the slice
     dispatcher without explicitly testing git state validation.
+
+    Also stubs the new preflight and base-branch sync added in ADR-019 so tests
+    don't need to know about gh/origin discovery.
     """
     import contextlib
+
+    from orchestrator._git_setup import GitPreflightResult, OriginInfo
 
     stack = contextlib.ExitStack()
     stack.enter_context(patch("orchestrator.orchestrate.git_state.is_clean", return_value=True))
@@ -47,6 +76,17 @@ def _patch_safe_git_state():
     stack.enter_context(patch("orchestrator.orchestrate.git_state.worktree_registered", return_value=False))
     stack.enter_context(patch("orchestrator.orchestrate.git_state.has_merge_conflicts", return_value=False))
     stack.enter_context(patch("orchestrator.orchestrate.git_state.abort_merge"))
+    stack.enter_context(
+        patch(
+            "orchestrator.orchestrate._git_setup.preflight",
+            return_value=GitPreflightResult(
+                base_branch="main",
+                create_pr=False,
+                origin=OriginInfo(url=None, is_github=False, gh_repo=None),
+            ),
+        )
+    )
+    stack.enter_context(patch("orchestrator.orchestrate._sync_base_and_create_impl_branch"))
     return stack
 
 

@@ -74,3 +74,64 @@ def has_merge_conflicts(repo_root: str) -> bool:
 def abort_merge(repo_root: str) -> None:
     """Best-effort `git merge --abort`. Silent on failure — caller has already failed."""
     _run(repo_root, "merge", "--abort")
+
+
+def get_remote_url(repo_root: str, remote: str = "origin") -> str | None:
+    """Return the URL of the named remote, or None if it does not exist."""
+    r = _run(repo_root, "remote", "get-url", remote)
+    if r.returncode != 0:
+        return None
+    return r.stdout.strip() or None
+
+
+def remote_add(repo_root: str, remote: str, url: str) -> None:
+    r = _run(repo_root, "remote", "add", remote, url)
+    if r.returncode != 0:
+        raise GitStateError(f"git remote add {remote} failed: {r.stderr.strip()}")
+
+
+def remote_set_url(repo_root: str, remote: str, url: str) -> None:
+    r = _run(repo_root, "remote", "set-url", remote, url)
+    if r.returncode != 0:
+        raise GitStateError(f"git remote set-url {remote} failed: {r.stderr.strip()}")
+
+
+def fetch(repo_root: str, remote: str = "origin") -> None:
+    r = _run(repo_root, "fetch", remote)
+    if r.returncode != 0:
+        raise GitStateError(f"git fetch {remote} failed: {r.stderr.strip()}")
+
+
+def checkout(repo_root: str, branch: str) -> None:
+    r = _run(repo_root, "checkout", branch)
+    if r.returncode != 0:
+        raise GitStateError(f"git checkout {branch} failed: {r.stderr.strip()}")
+
+
+def pull_ff_only(repo_root: str, branch: str, remote: str = "origin") -> None:
+    """`git pull --ff-only <remote> <branch>`. Raises on conflict or non-FF.
+
+    Silently no-ops if the remote does not know the branch — a brand-new repo
+    with a single local branch is a valid state and should not block the pipeline.
+    """
+    r = _run(repo_root, "pull", "--ff-only", remote, branch)
+    if r.returncode != 0:
+        err = (r.stderr or r.stdout or "").lower()
+        if "couldn't find remote ref" in err or "no such ref" in err:
+            return
+        raise GitStateError(f"git pull --ff-only {remote} {branch} failed: {r.stderr.strip()}")
+
+
+def push_branch(
+    repo_root: str,
+    branch: str,
+    remote: str = "origin",
+    set_upstream: bool = True,
+) -> None:
+    args = ["push"]
+    if set_upstream:
+        args.append("-u")
+    args.extend([remote, branch])
+    r = _run(repo_root, *args)
+    if r.returncode != 0:
+        raise GitStateError(f"git push {remote} {branch} failed: {r.stderr.strip()}")
