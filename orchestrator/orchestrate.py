@@ -12,12 +12,12 @@ import yaml
 
 import orchestrator.review_cycle as review_cycle_mod
 from orchestrator import _git as git_state
-from orchestrator import paths
+from orchestrator import _git_setup, _github, paths
 from orchestrator import state as state_mod
 from orchestrator._git import GitStateError
 from orchestrator.agent_runner import AgentRunner, build_runner, resolve_agent_config
 from orchestrator.logger import OrchestratorLogger
-from orchestrator.plan import expand_nodes, init_plan_md, update_plan_md
+from orchestrator.plan import expand_nodes, init_plan_md, set_pr_notice, update_plan_md
 from orchestrator.profile import ExpansionKind, Profile, StageConfig, load_profile
 from orchestrator.run_stage import _fmt_elapsed, run_deterministic_stage, run_interactive_stage, run_stage
 
@@ -199,6 +199,40 @@ def _create_branch(branch: str, repo_root: str, logger, stage_name: str) -> None
     if result.returncode != 0:
         raise GitStateError(f"git checkout -b {branch} failed: {result.stderr.strip()}")
     logger.log(stage_name, "INFO", f"Created branch {branch}")
+
+
+def _sync_base_and_create_impl_branch(
+    repo_root: str,
+    base_branch: str,
+    impl_branch: str,
+    logger: OrchestratorLogger,
+) -> None:
+    """Fetch + checkout base + ff-pull, then create impl branch off it.
+
+    If the impl branch already exists (resume case), only the base sync runs.
+    Working-tree-clean check is enforced before any state mutation.
+    """
+    if not git_state.is_clean(repo_root):
+        raise GitStateError(f"working tree not clean in {repo_root} — refuse to sync base branch '{base_branch}'")
+    if git_state.branch_exists(repo_root, impl_branch):
+        logger.log("pipeline", "INFO", f"impl branch '{impl_branch}' exists — skipping base sync")
+        if git_state.current_branch(repo_root) != impl_branch:
+            git_state.checkout(repo_root, impl_branch)
+        return
+    # Only fetch if origin exists — brand-new repos with no remote are valid.
+    if git_state.get_remote_url(repo_root, "origin"):
+        git_state.fetch(repo_root, "origin")
+    git_state.checkout(repo_root, base_branch)
+    if git_state.get_remote_url(repo_root, "origin"):
+        git_state.pull_ff_only(repo_root, base_branch, "origin")
+    result = subprocess.run(
+        ["git", "-C", repo_root, "checkout", "-b", impl_branch],
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        raise GitStateError(f"git checkout -b {impl_branch} failed: {result.stderr.strip()}")
+    logger.log("pipeline", "INFO", f"Created branch '{impl_branch}' from '{base_branch}'")
 
 
 def _build_stage_runners(profile: Profile) -> tuple[dict[str, AgentRunner], dict[str, dict[str, str | None]]]:
@@ -758,23 +792,27 @@ def run_pipeline(
     branch: str,
     profile_name: str,
     resume: bool = False,
+    *,
+    base_branch: str | None = None,
+    create_pr: bool | None = None,
 ) -> None:
     project_config = _load_project_config(docs_root, project)
     if "repo-root" not in project_config:
         print("ERROR: project.yaml is missing required field 'repo-root'")  # noqa: T201
         sys.exit(1)
-    if not Path(project_config["repo-root"]).exists():
-        print(f"ERROR: project.yaml repo-root does not exist: {project_config['repo-root']}")  # noqa: T201
-        sys.exit(1)
-    result = subprocess.run(
-        ["git", "-C", project_config["repo-root"], "rev-parse", "--git-dir"],
-        capture_output=True,
-    )
-    if result.returncode != 0:
-        sys.exit(
-            f"[orchestrator] [ERROR] repo-root is not a git repository: {project_config['repo-root']}\n"
-            f"  Ensure the path in project.yaml 'repo-root' points to the root of a git repository."
+    try:
+        preflight = _git_setup.preflight(
+            docs_root=docs_root,
+            project=project,
+            repo_root=project_config["repo-root"],
+            project_config=project_config,
+            flag_base_branch=base_branch,
+            flag_create_pr=create_pr,
         )
+    except _git_setup.PreflightError as exc:
+        sys.exit(f"[orchestrator] [ERROR] {exc}")
+    # Re-read project config in case preflight persisted new defaults.
+    project_config = _load_project_config(docs_root, project)
 
     project_context = Path(docs_root) / "projects" / project / "context.md"
     if not project_context.exists():
@@ -813,7 +851,22 @@ def run_pipeline(
     )
     signals = state_mod.load_signals(run_folder)
 
-    init_plan_md(run_folder, profile)
+    pr_notice = None
+    if preflight.create_pr:
+        pr_notice = f"_will be created on completion (base: `{preflight.base_branch}`)_"
+    init_plan_md(run_folder, profile, pr_notice=pr_notice)
+
+    if not resume:
+        try:
+            _sync_base_and_create_impl_branch(
+                project_config["repo-root"],
+                preflight.base_branch,
+                branch,
+                logger,
+            )
+        except GitStateError as exc:
+            logger.log("pipeline", "ERROR", f"base-branch sync failed: {exc}")
+            sys.exit(f"[orchestrator] [ERROR] base-branch sync failed: {exc}")
 
     runners, agent_metadata = _build_stage_runners(profile)
     ctx = _PipelineContext(
@@ -925,3 +978,102 @@ def run_pipeline(
             )
 
     logger.log("pipeline", "INFO", "pipeline completed successfully")
+
+    if preflight.create_pr and preflight.origin.is_github and preflight.origin.gh_repo:
+        _finalize_pr(
+            run_folder=run_folder,
+            docs_root=docs_root,
+            project=project,
+            project_log_path=project_log_path,
+            feature_path=feature_path,
+            repo_root=project_config["repo-root"],
+            impl_branch=branch,
+            base_branch=preflight.base_branch,
+            gh_repo=preflight.origin.gh_repo,
+            logger=logger,
+            agent_metadata=agent_metadata,
+        )
+
+
+def _finalize_pr(
+    run_folder: Path,
+    docs_root: str,
+    project: str,
+    project_log_path: str,
+    feature_path: str,
+    repo_root: str,
+    impl_branch: str,
+    base_branch: str,
+    gh_repo: str,
+    logger: OrchestratorLogger,
+    agent_metadata: dict[str, dict[str, str | None]],
+) -> None:
+    """Push the implementation branch and open a draft PR.
+
+    Any failure here is logged as a warning and surfaced in plan.md, but does
+    not change the pipeline exit status. See ADR-019.
+    """
+    plan_path = run_folder / "plan.md"
+    fallback_cmd = f"gh pr create --draft --base {base_branch} --head {impl_branch} --repo {gh_repo}"
+
+    def _fail(reason: str) -> None:
+        logger.log("pipeline", "WARN", f"PR creation skipped: {reason}")
+        set_pr_notice(
+            run_folder,
+            f"_PR creation failed — run manually:_ `{fallback_cmd}`",
+        )
+
+    set_pr_notice(run_folder, "_drafting…_")
+
+    overview_path = Path(docs_root) / feature_path / "overview.md"
+    variables = {
+        "run_folder": str(run_folder),
+        "docs_root": docs_root,
+        "project": project,
+        "branch": impl_branch,
+        "base_branch": base_branch,
+        "feature_path": feature_path,
+        "plan_md_path": str(plan_path),
+        "overview_md_path": str(overview_path),
+        "repo_root": repo_root,
+    }
+    try:
+        sig = run_stage(
+            "pr_draft",
+            "default",
+            variables,
+            run_folder,
+            docs_root,
+            project,
+            project_log_path,
+        )
+    except Exception as exc:
+        _fail(f"pr_draft stage error: {exc}")
+        return
+
+    if sig.get("status") != "passed" or "title" not in sig or "body" not in sig:
+        _fail(f"pr_draft stage did not produce title/body: {sig.get('message', sig.get('status'))}")
+        return
+
+    title = str(sig["title"]).strip()
+    body = str(sig["body"]).strip()
+
+    # Record metadata for the post-pipeline stage so _state.yaml stays truthful.
+    meta = agent_metadata.get("pr_draft", {"backend": "claude_code_print", "model": None})
+    state_mod.save_stage_signal(run_folder, "pr_draft", sig)
+    state_mod.save_stage_agent(run_folder, "pr_draft", meta.get("backend", "claude_code_print"), meta.get("model"))
+
+    try:
+        git_state.push_branch(repo_root, impl_branch, "origin", set_upstream=True)
+    except GitStateError as exc:
+        _fail(f"git push failed: {exc}")
+        return
+
+    try:
+        url = _github.create_draft_pr(gh_repo, base_branch, impl_branch, title, body)
+    except _github.GhError as exc:
+        _fail(f"gh pr create failed: {exc}")
+        return
+
+    set_pr_notice(run_folder, url)
+    logger.log("pipeline", "INFO", f"draft PR opened: {url}")

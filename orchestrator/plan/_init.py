@@ -12,7 +12,7 @@ _INIT_DIRECTIVE = (
 )
 
 
-def init_plan_md(run_folder: Path, profile: Profile) -> None:
+def init_plan_md(run_folder: Path, profile: Profile, pr_notice: str | None = None) -> None:
     run_folder = Path(run_folder)
     plan_path = run_folder / "plan.md"
     if plan_path.exists():
@@ -20,7 +20,7 @@ def init_plan_md(run_folder: Path, profile: Profile) -> None:
 
     graph = build_initial_graph(profile)
     save_graph(run_folder, graph)
-    write_plan_md(plan_path, _run_header(run_folder), graph)
+    write_plan_md(plan_path, _run_header(run_folder, pr_notice=pr_notice), graph)
 
 
 def build_initial_graph(profile: Profile) -> Graph:

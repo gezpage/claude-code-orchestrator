@@ -7,6 +7,9 @@ Format: [Unreleased] at the top, dated releases below, newest first.
 
 ## [Unreleased]
 
+### Added
+- 2026-05-14: TTY-aware pre-flight that prompts for missing `run` inputs, asks for the base branch (default `main`), syncs the base branch before creating the implementation branch, and optionally opens a draft GitHub PR via `gh` once the pipeline completes. New `--base-branch` and `--create-pr/--no-create-pr` flags; existing flags become optional. PR creation failures are warnings, never pipeline failures. See ADR-019.
+
 ### Fixed
 - 2026-05-14: Default dispatcher now creates/checks out `ctx.branch` before running any stage with `cwd_from_repo_root: true`, matching the slice dispatcher's pre-amble. Without this, the `minimal` profile's single-agent implementation would run on whatever branch was already checked out and commit there instead of the requested `--branch`.
 

@@ -239,12 +239,16 @@ Overrides replace rather than merge — predictable beats clever. Bundled recipe
 
 ```bash
 orchestrator run \
-  --docs-root <path>       # required: path to your docs root
-  --project <name>         # required: project folder under docs-root/projects/
-  --feature-path <path>    # required: docs-relative path to feature directory
-  --branch <name>          # required: git branch to create for implementation
+  --docs-root <path>       # optional: path to your docs root (prompted if omitted)
+  --project <name>         # optional: project folder under docs-root/projects/
+  --feature-path <path>    # optional: docs-relative path to feature directory
+  --branch <name>          # optional: git branch to create for implementation
   --profile <name|path>    # optional: built-in name or .yaml file (default: full)
+  --base-branch <name>     # optional: branch to fork from (default: main, or project.yaml)
+  --create-pr/--no-create-pr   # optional: open a draft PR on completion
 ```
+
+Every flag is optional. If you run `orchestrator run` with no flags on a TTY, you'll be prompted for each missing value: project (picker), feature path (auto-detected from `overview.md`), branch (default suggested from the feature slug), profile (picker), base branch (default `main`), and whether to open a draft PR. In non-TTY contexts (CI, piped scripts), missing flags cause an immediate exit with a clear error rather than a hang.
 
 **Examples:**
 
@@ -274,6 +278,16 @@ orchestrator run \
 ```
 
 The pipeline pauses automatically at interactive stages (e.g. alignment) and prints a `resume` command to continue.
+
+#### GitHub integration
+
+When the repo's `origin` remote points at GitHub and `--create-pr` is enabled (or you opt in at the prompt), the orchestrator opens a draft PR after the last stage passes. This requires the [GitHub CLI](https://cli.github.com/) — `gh` must be on PATH and `gh auth login` must have completed. If `gh` is missing or unauthenticated, the run will offer to skip PR creation rather than hard-failing.
+
+If `origin` is missing or non-GitHub when you opt in, the orchestrator offers three options: link an existing GitHub URL, create a new GitHub repo via `gh repo create` (with prompts for name, visibility, and description), or continue without the PR feature.
+
+Resolved defaults are persisted to `project.yaml` as `base-branch` and `create-pr`. Subsequent runs pre-fill these; CLI flags still win.
+
+The PR appears as a draft and is never marked ready for review automatically — the human is always the one to flip that switch.
 
 ---
 

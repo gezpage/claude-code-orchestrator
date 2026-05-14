@@ -41,18 +41,22 @@ def _track_node_id(stage_name: str, track_name: str) -> str:
     return f"{stage_name}_{track_name.replace('-', '_')}"
 
 
-def _run_header(run_folder: Path) -> str:
+_PR_NOTICE_MARKER = "**Draft PR:**"
+
+
+def _run_header(run_folder: Path, pr_notice: str | None = None) -> str:
     run_name = run_folder.name
     feature = run_folder.parent.name
     project = run_folder.parent.parent.parent.parent.name
     started = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    return "\n".join(
-        [
-            f"# {project} · {feature}",
-            "",
-            f"**Run:** {run_name} &nbsp;·&nbsp; **Started:** {started}",
-        ]
-    )
+    lines = [
+        f"# {project} · {feature}",
+        "",
+        f"**Run:** {run_name} &nbsp;·&nbsp; **Started:** {started}",
+    ]
+    if pr_notice:
+        lines.extend(["", f"{_PR_NOTICE_MARKER} {pr_notice}"])
+    return "\n".join(lines)
 
 
 def _read_slice_title(path: str | Path) -> str | None:
