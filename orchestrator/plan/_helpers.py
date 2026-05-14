@@ -43,7 +43,15 @@ def _node_label(
     if elapsed_secs is not None:
         parts.append(f"⏱ {_format_elapsed(elapsed_secs)}")
     if file_links:
-        parts.append(" · ".join(f"<a href='{url}'>{name}</a>" for name, url in file_links))
+        # color:inherit keeps the link text in the node's white (or grey) class colour
+        # rather than the browser's default link blue, which is invisible on the green
+        # / orange status backgrounds.
+        parts.append(
+            " · ".join(
+                f"<a href='{url}' style='color:inherit;text-decoration:underline'>{name}</a>"
+                for name, url in file_links
+            )
+        )
     # output_summary appears in the markdown section, not the diagram node
     return "<br/>".join(parts)
 

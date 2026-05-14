@@ -539,12 +539,13 @@ def test_render_inlines_file_links_per_node(tmp_path):
     # Trigger a re-render through the public API.
     update_plan_md(run_folder, "specification", "passed", elapsed_secs=10)
     content = (run_folder / "plan.md").read_text()
-    assert "<a href='specification/specification-prompt.md'>Prompt</a>" in content
-    assert "<a href='specification/specification-output.md'>Output</a>" in content
-    assert "<a href='specification/prd.md'>prd</a>" in content
+    style = "color:inherit;text-decoration:underline"
+    assert f"<a href='specification/specification-prompt.md' style='{style}'>Prompt</a>" in content
+    assert f"<a href='specification/specification-output.md' style='{style}'>Output</a>" in content
+    assert f"<a href='specification/prd.md' style='{style}'>prd</a>" in content
 
 
-def test_render_legend_box_for_unattached_files(tmp_path):
+def test_render_legend_floats_after_main_flow(tmp_path):
     run_folder = _make_run_folder(tmp_path)
     profile = _simple_profile("specification")
     init_plan_md(run_folder, profile)
@@ -552,12 +553,17 @@ def test_render_legend_box_for_unattached_files(tmp_path):
     (run_folder / "stray.txt").write_text("stray")
     update_plan_md(run_folder, "specification", "passed", elapsed_secs=10)
     content = (run_folder / "plan.md").read_text()
-    assert 'subgraph sg_legend["Legend"]' in content
+    # No more "Legend" subgraph wrapper — the bare node sits in the diagram body.
+    assert 'subgraph sg_legend["Legend"]' not in content
+    assert "Other files<br/>" in content
     # Extensions are stripped from the link display.
-    assert "<a href='run.log'>run</a>" in content
-    assert "<a href='stray.txt'>stray</a>" in content
-    # Legend is anchored near Start with an invisible link.
-    assert "legend_files ~~~ Start" in content
+    assert "<a href='run.log'" in content
+    assert ">run</a>" in content
+    assert "<a href='stray.txt'" in content
+    assert ">stray</a>" in content
+    # Legend hangs off Done's predecessor so mermaid lays it out as a sibling of Done
+    # rather than floating it above the flow.
+    assert "specification ~~~ legend_files" in content
 
 
 def test_render_reviewer_subnode_links_to_per_reviewer_files(tmp_path):
@@ -569,8 +575,9 @@ def test_render_reviewer_subnode_links_to_per_reviewer_files(tmp_path):
     (review_dir / "review-tests-output.md").write_text("o")
     update_plan_md(run_folder, "review_tests", "passed", elapsed_secs=5)
     content = (run_folder / "plan.md").read_text()
-    assert "<a href='review/review-tests-prompt.md'>Prompt</a>" in content
-    assert "<a href='review/review-tests-output.md'>Output</a>" in content
+    style = "color:inherit;text-decoration:underline"
+    assert f"<a href='review/review-tests-prompt.md' style='{style}'>Prompt</a>" in content
+    assert f"<a href='review/review-tests-output.md' style='{style}'>Output</a>" in content
 
 
 def test_render_slice_node_links_to_implementation_files(tmp_path):
@@ -584,5 +591,24 @@ def test_render_slice_node_links_to_implementation_files(tmp_path):
     (impl_dir / "implementation-impl_1-output.md").write_text("o")
     update_plan_md(run_folder, "impl_1", "passed", elapsed_secs=5)
     content = (run_folder / "plan.md").read_text()
-    assert "<a href='implementation/implementation-impl_1-prompt.md'>Prompt</a>" in content
-    assert "<a href='implementation/implementation-impl_1-output.md'>Output</a>" in content
+    style = "color:inherit;text-decoration:underline"
+    assert f"<a href='implementation/implementation-impl_1-prompt.md' style='{style}'>Prompt</a>" in content
+    assert f"<a href='implementation/implementation-impl_1-output.md' style='{style}'>Output</a>" in content
+
+
+def test_render_link_hrefs_use_docs_root_prefix(tmp_path):
+    # When the run folder lives under a ``projects/`` segment, link hrefs should be
+    # prefixed with the full path from that anchor so mermaid SVG anchors resolve
+    # correctly regardless of the page URL.
+    docs_root = tmp_path / "team-hub"
+    run_folder = docs_root / "projects" / "demo-project" / "workflow" / "runs" / "feature-x" / "2026-05-14-run-1"
+    run_folder.mkdir(parents=True)
+    profile = _simple_profile("specification")
+    init_plan_md(run_folder, profile)
+    spec = run_folder / "specification"
+    spec.mkdir()
+    (spec / "specification-prompt.md").write_text("p")
+    update_plan_md(run_folder, "specification", "passed", elapsed_secs=5)
+    content = (run_folder / "plan.md").read_text()
+    expected_prefix = "projects/demo-project/workflow/runs/feature-x/2026-05-14-run-1/"
+    assert f"<a href='{expected_prefix}specification/specification-prompt.md'" in content

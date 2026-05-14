@@ -8,7 +8,7 @@ Format: [Unreleased] at the top, dated releases below, newest first.
 ## [Unreleased]
 
 ### Added
-- 2026-05-14: Plan mermaid diagram now embeds clickable file links inside each node (`Prompt` / `Output` / artefact stems) and surfaces unattached run-folder files in a "Legend" subgraph anchored near `Start` via an invisible link. Each node also carries a `Mode: <mode>` line below its existing impl identifier. `Node` gained `mode`, `stage_dir`, and `file_suffix` fields so the renderer can map each file in the run folder to its owning node without scanning conventions inline.
+- 2026-05-14: Plan mermaid diagram now embeds clickable file links inside each node (`Prompt` / `Output` / artefact stems) and surfaces unattached run-folder files in an "Other files" node anchored as a sibling of `Done` so it lays out alongside the end of the flow. Link hrefs are full paths from the docs-root (derived via the `projects/` segment) so mermaid SVG anchors resolve correctly regardless of the rendering URL, and the anchors carry an inline `color:inherit` style so the text stays readable on the coloured status backgrounds instead of fading into default-blue. Each node also carries a `Mode: <mode>` line below its existing impl identifier. `Node` gained `mode`, `stage_dir`, and `file_suffix` fields so the renderer can map each file in the run folder to its owning node without scanning conventions inline.
 
 ### Fixed
 - 2026-05-14: Default dispatcher now creates/checks out `ctx.branch` before running any stage with `cwd_from_repo_root: true`, matching the slice dispatcher's pre-amble. Without this, the `minimal` profile's single-agent implementation would run on whatever branch was already checked out and commit there instead of the requested `--branch`.

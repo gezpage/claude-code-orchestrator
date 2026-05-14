@@ -9,9 +9,12 @@ from orchestrator.plan._graph import Edge, Graph, Node
 from orchestrator.plan._helpers import _node_label
 
 _LEGEND_NODE_ID = "legend_files"
-_LEGEND_SUBGRAPH_ID = "sg_legend"
 # Files that should never appear in the diagram (plan.md is the diagram's host).
 _LEGEND_SKIP = {"plan.md"}
+# `color: inherit` on the anchor keeps link text in the node's white class colour
+# instead of the browser's default link blue, which is unreadable on the green/orange
+# status backgrounds.
+_LINK_STYLE = "color:inherit;text-decoration:underline"
 
 
 def render_block(graph: Graph, run_folder: Path | None = None) -> str:
@@ -20,9 +23,10 @@ def render_block(graph: Graph, run_folder: Path | None = None) -> str:
     When ``run_folder`` is provided, files in the run folder are matched to nodes
     via ``Node.stage_dir`` / ``Node.file_suffix`` and embedded as clickable links
     inside each node's label. Files that don't match any node are surfaced in a
-    "Legend" subgraph as a single multi-link node.
+    separate "Other files" node placed near the bottom of the diagram.
     """
     node_files, legend_files = _scan_files(graph, run_folder) if run_folder else ({}, [])
+    href_prefix = _href_prefix(run_folder) if run_folder else ""
 
     lines: list[str] = ["```mermaid"]
     if graph.init_directive:
@@ -32,7 +36,7 @@ def render_block(graph: Graph, run_folder: Path | None = None) -> str:
     # Nodes outside any subgraph come first (Start, Done, etc.)
     for node in graph.nodes.values():
         if node.subgraph is None:
-            lines.append(f"    {_node_decl(node, node_files.get(node.id, []))}")
+            lines.append(f"    {_node_decl(node, node_files.get(node.id, []), href_prefix)}")
 
     # Then each subgraph with its member nodes.
     for sg in graph.subgraphs.values():
@@ -41,17 +45,15 @@ def render_block(graph: Graph, run_folder: Path | None = None) -> str:
             continue
         lines.append(f'    subgraph {sg.id}["{sg.display}"]')
         for node in members:
-            lines.append(f"    {_node_decl(node, node_files.get(node.id, []))}")
+            lines.append(f"    {_node_decl(node, node_files.get(node.id, []), href_prefix)}")
         lines.append("    end")
 
-    # Legend subgraph (run-folder files unattached to any node). Rendered after
-    # other subgraphs but linked to Start via an invisible edge so mermaid lays
-    # it out near the top instead of trailing.
+    # "Other files" floats as a bare node (no subgraph wrapper) at the bottom of the
+    # diagram. Anchoring it to Done's predecessor below makes it a sibling of Done so
+    # mermaid lays it out alongside, not above.
     if legend_files:
-        legend_label = _legend_label(legend_files)
-        lines.append(f'    subgraph {_LEGEND_SUBGRAPH_ID}["Legend"]')
+        legend_label = _legend_label(legend_files, href_prefix)
         lines.append(f'    {_LEGEND_NODE_ID}["{legend_label}"]')
-        lines.append("    end")
 
     # Edges.
     for edge in graph.edges:
@@ -59,9 +61,13 @@ def render_block(graph: Graph, run_folder: Path | None = None) -> str:
         if rendered:
             lines.append(f"    {rendered}")
 
-    # Anchor the Legend near the top with an invisible link to Start.
-    if legend_files and "Start" in graph.nodes:
-        lines.append(f"    {_LEGEND_NODE_ID} ~~~ Start")
+    # Sibling-of-Done placement: connect Done's predecessor to legend with an
+    # invisible link. Falls back to anchoring against Done itself if no predecessor
+    # is wired yet (init render, fresh graphs).
+    if legend_files:
+        anchor = _legend_anchor(graph)
+        if anchor:
+            lines.append(f"    {anchor} ~~~ {_LEGEND_NODE_ID}")
 
     # Class definitions and assignments.
     lines.extend(_CLASSDEFS)
@@ -74,8 +80,8 @@ def render_block(graph: Graph, run_folder: Path | None = None) -> str:
     return "\n".join(lines) + "\n"
 
 
-def _node_decl(node: Node, files: list[Path]) -> str:
-    label = _label_for(node, files)
+def _node_decl(node: Node, files: list[Path], href_prefix: str) -> str:
+    label = _label_for(node, files, href_prefix)
     if node.shape == "stadium":
         return f'{node.id}(["{label}"])'
     if node.shape == "hex":
@@ -86,8 +92,8 @@ def _node_decl(node: Node, files: list[Path]) -> str:
     return f'{node.id}["{label}"]'
 
 
-def _label_for(node: Node, files: list[Path]) -> str:
-    file_links = _file_links_for(node, files)
+def _label_for(node: Node, files: list[Path], href_prefix: str) -> str:
+    file_links = _file_links_for(files, href_prefix)
     if node.raw_label is not None:
         # raw_label nodes (Start/Done/interactive gates) carry a hand-crafted top
         # line; append Mode and any file links below using the same HTML format.
@@ -95,7 +101,7 @@ def _label_for(node: Node, files: list[Path]) -> str:
         if node.mode:
             extras.append(f"Mode: {node.mode}")
         if file_links:
-            extras.append(" · ".join(f"<a href='{url}'>{name}</a>" for name, url in file_links))
+            extras.append(_join_links(file_links))
         if not extras:
             return node.raw_label
         return "<br/>".join([node.raw_label, *extras])
@@ -109,18 +115,25 @@ def _label_for(node: Node, files: list[Path]) -> str:
     )
 
 
-def _file_links_for(node: Node, files: list[Path]) -> list[tuple[str, str]]:
-    """Return (display, relative_url) pairs for each file associated with the node."""
+def _file_links_for(files: list[Path], href_prefix: str) -> list[tuple[str, str]]:
+    """Return (display, url) pairs for each file. URLs are prefixed with the
+    run-folder's path from docs-root so mermaid SVG anchors resolve correctly
+    regardless of the page URL the diagram is rendered on."""
     links: list[tuple[str, str]] = []
     seen_urls: set[str] = set()
     for f in files:
-        # The url is computed by the caller (relative to run_folder).
-        url = f.as_posix() if isinstance(f, Path) else str(f)
+        rel = f.as_posix() if isinstance(f, Path) else str(f)
+        url = f"{href_prefix}{rel}" if href_prefix else rel
         if url in seen_urls:
             continue
         seen_urls.add(url)
-        links.append((_link_display(f.name if isinstance(f, Path) else url), url))
+        name = f.name if isinstance(f, Path) else rel
+        links.append((_link_display(name), url))
     return links
+
+
+def _join_links(file_links: list[tuple[str, str]]) -> str:
+    return " · ".join(f"<a href='{url}' style='{_LINK_STYLE}'>{name}</a>" for name, url in file_links)
 
 
 def _link_display(name: str) -> str:
@@ -131,6 +144,37 @@ def _link_display(name: str) -> str:
     if stem.endswith("-output"):
         return "Output"
     return stem
+
+
+def _href_prefix(run_folder: Path) -> str:
+    """Return the path-from-docs-root for the run folder, with a trailing slash.
+
+    The orchestrator's path layout is ``{docs-root}/projects/{project}/workflow/runs/
+    {feature-slug}/{run-name}/`` (see CLAUDE.md). We anchor on "projects" — everything
+    from that segment onward is the docs-root-relative path. Returns an empty string
+    when the layout doesn't match (e.g. tests using bare tmp paths), so the caller
+    falls back to plain relative URLs.
+    """
+    parts = Path(run_folder).resolve().parts
+    try:
+        idx = parts.index("projects")
+    except ValueError:
+        return ""
+    return "/".join(parts[idx:]) + "/"
+
+
+def _legend_anchor(graph: Graph) -> str | None:
+    """Pick the node to invisibly chain the legend off so it lands as a sibling of Done."""
+    if "Done" not in graph.nodes:
+        return None
+    for edge in graph.edges:
+        steps = edge.steps
+        for i in range(1, len(steps)):
+            if "Done" in steps[i] and steps[i - 1]:
+                return steps[i - 1][0]
+    # No predecessor wired yet — fall back to Done itself so the legend at least
+    # ends up downstream of the flow instead of floating at the top.
+    return "Done"
 
 
 def _scan_files(
@@ -227,9 +271,9 @@ def _file_sort_key(rel: Path) -> tuple[int, str]:
     return (2, name)
 
 
-def _legend_label(legend_files: list[Path]) -> str:
-    links = " · ".join(f"<a href='{rel.as_posix()}'>{_link_display(rel.name)}</a>" for rel in legend_files)
-    return f"Other files<br/>{links}"
+def _legend_label(legend_files: list[Path], href_prefix: str) -> str:
+    file_links = _file_links_for(legend_files, href_prefix)
+    return f"Other files<br/>{_join_links(file_links)}"
 
 
 def _edge_str(edge: Edge) -> str:
