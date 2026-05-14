@@ -29,7 +29,7 @@ class RunInputs:
     create_pr: bool | None = None
 
 
-_BUNDLED_PROFILES = ("full", "minimal", "spike")
+_BUNDLED_PROFILES = ("full", "minimal", "minimal-codex", "spike")
 
 
 def _missing(value: str | None) -> bool:

@@ -103,6 +103,25 @@ def test_full_profile_has_deterministic_verification():
     assert verification.mode == "deterministic"
 
 
+def test_minimal_codex_profile_uses_codex_backend():
+    profile = load_profile("minimal-codex")
+    assert profile.name == "minimal-codex"
+    assert profile.agent == {
+        "backend": "codex_cli",
+        "model": "gpt-5-codex",
+        "sterile_context": True,
+        "permission_mode": "workspace-write",
+    }
+
+
+def test_minimal_codex_profile_matches_minimal_stage_shape():
+    codex = load_profile("minimal-codex")
+    minimal = load_profile("minimal")
+    assert [s.name for s in codex.stages] == [s.name for s in minimal.stages]
+    codex_verification = next(s for s in codex.stages if s.name == "verification")
+    assert codex_verification.mode == "deterministic"
+
+
 def test_profile_level_agent_parsed(tmp_path):
     p = tmp_path / "p.yaml"
     p.write_text(

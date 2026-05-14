@@ -108,6 +108,7 @@ Built-in profiles ship with the package:
 |------|--------|
 | `full` *(default)* | discovery → alignment → specification → decomposition → implementation → QA → verification → review → harvest |
 | `minimal` | specification → decomposition → implementation → verification → review (single reviewer) — no discovery, alignment, QA, or harvest |
+| `minimal-codex` | Same stages as `minimal`, but dispatches autonomous stages through the `codex_cli` backend (`gpt-5-codex`, `--sandbox workspace-write`). Intended for fast local runs when Claude Code print-mode is unavailable. |
 | `spike` | discovery only — research and findings, no implementation |
 
 To use a custom profile, pass a path to any YAML file:
