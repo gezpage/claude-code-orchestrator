@@ -44,6 +44,17 @@ In addition to slice acceptance criteria, verify the normal project surface in `
 
 Deterministic findings (missing script targets, fake quality scripts) are blocking. Judgement findings (dependency justification, documented commands that weren't safely runnable) should be reported with confidence "medium" and a clear note, not silently dropped.
 
+{% if manifest_findings_path %}
+### Manifest pre-pass findings
+
+A deterministic manifest checker has already run against `package.json`. Its findings are at `{{ manifest_findings_path }}` (JSON; sibling `manifest-findings.md` is the human rendering).
+
+- Read this file before drafting your QA report.
+- **Blocking** findings would have aborted this stage before you ran — if you see this prompt the manifest has no deterministic blockers, so do not re-report them.
+- **Advisory** findings (e.g. likely-unused production dependencies) are heuristic — confirm or refute each with evidence before deciding whether to flag in your report. Heuristic false positives are common; do not echo an advisory finding as fact without verifying it.
+- If your own investigation surfaces a manifest issue the deterministic check missed, treat it on its own merits — the pre-pass is a floor, not a ceiling.
+{% endif %}
+
 ## Stream and pipeline abort paths
 
 For stream/pipeline code (anything with backpressure, max-rows, max-bytes, source/sink chaining), explicitly exercise abort/error paths:

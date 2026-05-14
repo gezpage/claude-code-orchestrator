@@ -1580,3 +1580,82 @@ def test_prompts_blocks_when_diff_file_is_prose_summary(tmp_path):
     assert result["status"] == "blocked"
     assert "no valid git diff" in result["message"]
     mock_rs.assert_not_called()
+
+
+# ── manifest pre-pass (ADR-017) ───────────────────────────────────────────────
+
+
+def test_manifest_prepass_skipped_when_no_package_json(tmp_path):
+    """Pre-pass on a repo with no package.json is a no-op — signal records an empty path
+    and pipeline proceeds. Most Python/Go projects fall here."""
+    from orchestrator.orchestrate import _ensure_manifest_prepass
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    run_folder = _make_run_folder(tmp_path)
+    logger = MagicMock()
+
+    signals: dict = {}
+    sig = _ensure_manifest_prepass(signals, run_folder, str(repo), logger)
+
+    assert sig["status"] == "passed"
+    assert sig["manifest_findings_path"] == ""
+    assert sig["has_blocking"] is False
+    assert "manifest_check" in signals
+
+
+def test_manifest_prepass_emits_advisory_only_when_clean_scripts(tmp_path):
+    """Advisory findings (likely-unused deps) don't block the pipeline."""
+    from orchestrator.orchestrate import _ensure_manifest_prepass
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "package.json").write_text('{"scripts":{"lint":"eslint ."},"dependencies":{"express":"^5"}}')
+    (repo / "src.ts").write_text("console.log('no express here')")
+    run_folder = _make_run_folder(tmp_path)
+    logger = MagicMock()
+
+    sig = _ensure_manifest_prepass({}, run_folder, str(repo), logger)
+
+    assert sig["status"] == "passed"
+    assert sig["has_blocking"] is False
+    findings_json = (run_folder / "verify" / "manifest-findings.json").read_text()
+    assert "express" in findings_json
+
+
+def test_manifest_prepass_blocks_pipeline_on_fake_quality_script(tmp_path):
+    """A fake `lint` script must abort the QA/review stage before any LLM dispatch."""
+    from orchestrator.orchestrate import _ensure_manifest_prepass
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "package.json").write_text('{"scripts":{"lint":"echo add eslint"}}')
+    run_folder = _make_run_folder(tmp_path)
+    logger = MagicMock()
+
+    sig = _ensure_manifest_prepass({}, run_folder, str(repo), logger)
+
+    assert sig["status"] == "blocked"
+    assert sig["has_blocking"] is True
+    assert "lint" in sig["message"]
+
+
+def test_manifest_prepass_is_idempotent(tmp_path):
+    """Running the pre-pass twice in the same pipeline reuses the cached signal —
+    the disk artefact is not rewritten unnecessarily and the same path is returned."""
+    from orchestrator.orchestrate import _ensure_manifest_prepass
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "package.json").write_text('{"scripts":{"lint":"eslint ."}}')
+    run_folder = _make_run_folder(tmp_path)
+    logger = MagicMock()
+    signals: dict = {}
+
+    first = _ensure_manifest_prepass(signals, run_folder, str(repo), logger)
+    # Sentinel — second call must short-circuit without recomputing.
+    (run_folder / "verify" / "manifest-findings.json").write_text("MARKER")
+    second = _ensure_manifest_prepass(signals, run_folder, str(repo), logger)
+
+    assert first is second
+    assert (run_folder / "verify" / "manifest-findings.json").read_text() == "MARKER"

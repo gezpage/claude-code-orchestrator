@@ -88,6 +88,10 @@ Block on:
 - unused production dependencies introduced or left by the change
 - dependency ranges that unintentionally allow major-version drift
 
+{% if manifest_findings_path %}
+A deterministic manifest checker has already run against `package.json` and persisted findings at `{{ manifest_findings_path }}` (JSON; sibling `manifest-findings.md` is the human rendering). Read it before drafting your review. Blocking findings would have aborted this stage before you ran, so do not re-report them. Advisory findings (e.g. likely-unused dependencies) are heuristic — verify each before echoing as a review finding.
+{% endif %}
+
 **Architecture**
 - Separation of concerns: is logic spread across the right layers?
 - Are controller/service/repository (or equivalent) boundaries respected?

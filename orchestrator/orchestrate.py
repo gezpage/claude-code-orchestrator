@@ -11,12 +11,17 @@ from pathlib import Path
 import yaml
 
 import orchestrator.review_cycle as review_cycle_mod
-from orchestrator import paths
+from orchestrator import manifest_check, paths
 from orchestrator import state as state_mod
 from orchestrator.logger import OrchestratorLogger
 from orchestrator.plan import expand_nodes, init_plan_md, update_plan_md
 from orchestrator.profile import ExpansionKind, StageConfig, load_profile
 from orchestrator.run_stage import _fmt_elapsed, run_interactive_stage, run_stage
+
+# Stages that read manifest_findings_path. The pre-pass runs lazily before whichever
+# of these executes first in a given profile (full has qa, minimal goes straight to review).
+_MANIFEST_CONSUMER_STAGES = ("qa", "review")
+_MANIFEST_PREPASS_KEY = "manifest_check"
 
 _SLICE_RE = re.compile(r"S-\d+-")
 
@@ -659,6 +664,60 @@ def _dispatch_prompts(
     return review_signal
 
 
+def _run_manifest_prepass(
+    run_folder: Path,
+    repo_root: str,
+    logger: OrchestratorLogger,
+) -> dict:
+    """Run the deterministic manifest checker once per pipeline before QA/review.
+
+    Returns a signal-shaped dict suitable for stashing in ``signals`` under
+    ``_MANIFEST_PREPASS_KEY`` and persisting via ``save_stage_signal``. The path
+    is then flattened into downstream stage variables as ``manifest_findings_path``."""
+    report = manifest_check.check_manifest(repo_root)
+    if report is None:
+        logger.log(_MANIFEST_PREPASS_KEY, "DEBUG", "no package.json — skipping manifest pre-pass")
+        return {"status": "passed", "manifest_findings_path": "", "has_blocking": False}
+
+    json_path, _md_path = manifest_check.write_report(report, run_folder / "verify")
+    blocking_count = sum(1 for f in report.findings if f.blocking)
+    advisory_count = len(report.findings) - blocking_count
+    logger.log(
+        _MANIFEST_PREPASS_KEY,
+        "INFO",
+        f"manifest checked: {blocking_count} blocking, {advisory_count} advisory finding(s)",
+    )
+
+    if report.has_blocking:
+        return {
+            "status": "blocked",
+            "manifest_findings_path": str(json_path),
+            "has_blocking": True,
+            "message": f"manifest blocking findings: {report.blocking_summary()}",
+        }
+
+    return {
+        "status": "passed",
+        "manifest_findings_path": str(json_path),
+        "has_blocking": False,
+    }
+
+
+def _ensure_manifest_prepass(
+    signals: dict,
+    run_folder: Path,
+    repo_root: str,
+    logger: OrchestratorLogger,
+) -> dict:
+    """Run the manifest pre-pass exactly once per pipeline (idempotent on resume)."""
+    if _MANIFEST_PREPASS_KEY in signals:
+        return signals[_MANIFEST_PREPASS_KEY]  # type: ignore[no-any-return]
+    sig = _run_manifest_prepass(run_folder, repo_root, logger)
+    signals[_MANIFEST_PREPASS_KEY] = sig
+    state_mod.save_stage_signal(run_folder, _MANIFEST_PREPASS_KEY, sig)
+    return sig
+
+
 _DISPATCHERS: dict[ExpansionKind, Callable] = {
     ExpansionKind.NONE: _dispatch_default,
     ExpansionKind.TRACKS: _dispatch_tracks,
@@ -747,6 +806,23 @@ def run_pipeline(
         if stage_name in completed:
             logger.log(stage_name, "DEBUG", "already passed — skipping")
             continue
+
+        # Deterministic manifest pre-pass before QA/review (ADR-017). Runs once per pipeline;
+        # blocking findings fail the consumer stage before any LLM dispatch so the gate
+        # cannot be reasoned around by a prompt.
+        if stage_name in _MANIFEST_CONSUMER_STAGES:
+            prepass_sig = _ensure_manifest_prepass(signals, run_folder, project_config["repo-root"], logger)
+            if prepass_sig.get("status") != "passed":
+                st = state_mod.load_state(run_folder)
+                st["blocked_at"] = stage_name
+                state_mod.save_state(run_folder, st)
+                update_plan_md(run_folder, stage_name, "blocked")
+                logger.log(
+                    stage_name,
+                    "ERROR",
+                    f"pipeline stopped: manifest pre-pass blocked stage {stage_name}: {prepass_sig.get('message', '')}",
+                )
+                sys.exit(1)
 
         variables = _build_variables(
             stage_name,
