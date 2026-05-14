@@ -214,6 +214,45 @@ def test_exit_code_none_is_treated_as_success(tmp_path):
     assert result["status"] == "passed"
 
 
+def test_prompt_example_signal_does_not_override_final_signal(tmp_path):
+    run_folder, log_path = _setup_run_folder(tmp_path)
+    runner = FakeRunner(
+        "\n".join(
+            [
+                'SIGNAL_JSON: {"stage": "discovery", "status": "passed", "findings_files": []}',
+                'SIGNAL_JSON: {"stage": "discovery", "status": "blocked", "message": "real failure"}',
+            ]
+        )
+    )
+    result = run_stage(
+        "discovery", "default", VARS, run_folder, str(tmp_path), "myproject", str(log_path), runner=runner
+    )
+    assert result["status"] == "blocked"
+    assert result["message"] == "real failure"
+
+
+def test_passed_signal_blocks_when_declared_artifact_missing(tmp_path):
+    run_folder, log_path = _setup_run_folder(tmp_path)
+    missing = tmp_path / "missing.md"
+    prompt_file = tmp_path / "prompt.md"
+    prompt_file.write_text("prompt")
+    signal = f'{{"stage": "decomposition", "status": "passed", "plan_file": "{missing}"}}'
+    runner = FakeRunner(f"SIGNAL_JSON: {signal}")
+    result = run_stage(
+        "decomposition",
+        "default",
+        VARS,
+        run_folder,
+        str(tmp_path),
+        "myproject",
+        str(log_path),
+        prompt_file=str(prompt_file),
+        runner=runner,
+    )
+    assert result["status"] == "blocked"
+    assert str(missing) in result["message"]
+
+
 def test_grace_retry_blocks_on_runner_failure(tmp_path):
     """If the initial call returned no SIGNAL_JSON and the grace retry then fails
     (non-zero exit), the stage must block on the retry failure rather than report

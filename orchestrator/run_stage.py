@@ -56,6 +56,50 @@ def _format_stage_output(stdout: str, sig: dict) -> str:
     return "".join(result)
 
 
+def _declared_artifact_paths(sig: dict) -> list[Path]:
+    """Return output artifact paths declared by a passed signal that should exist now.
+
+    This relies on the stage-schema convention that ``*_path``/``*_file`` fields in
+    passed signals name outputs, not input references.
+    """
+    paths: list[Path] = []
+
+    def visit(key: str, value) -> None:
+        if key.endswith(("_path", "_file", "_md")) and isinstance(value, str):
+            paths.append(Path(value))
+            return
+        if key.endswith(("_paths", "_files")) and isinstance(value, list):
+            paths.extend(Path(item) for item in value if isinstance(item, str))
+            return
+        if isinstance(value, dict):
+            for child_key, child_value in value.items():
+                visit(child_key, child_value)
+        elif isinstance(value, list):
+            for item in value:
+                if isinstance(item, dict):
+                    for child_key, child_value in item.items():
+                        visit(child_key, child_value)
+
+    for key, value in sig.items():
+        visit(key, value)
+    return paths
+
+
+def _missing_declared_artifacts(sig: dict) -> list[Path]:
+    if sig.get("status") != "passed":
+        return []
+    return [path for path in _declared_artifact_paths(sig) if not path.exists()]
+
+
+def _agent_writable_roots(docs_root: str, run_folder: Path, variables: dict) -> tuple[str, ...]:
+    roots = [
+        Path(docs_root),
+        run_folder,
+        Path(str(variables["repo_root"])) if "repo_root" in variables else None,
+    ]
+    return tuple(str(path) for path in dict.fromkeys(roots) if path is not None)
+
+
 def _default_runner() -> AgentRunner:
     """Default runner when callers haven't injected one. Matches the legacy command shape
     (claude -p ... --bare --dangerously-skip-permissions) with sterile context enabled."""
@@ -124,6 +168,8 @@ def run_stage(
             prompt=prompt,
             stage_name=stage,
             cwd=cwd,
+            workspace_root=cwd or docs_root,
+            writable_roots=_agent_writable_roots(docs_root, run_folder, variables),
             transcript_path=transcript_path,
         )
     )
@@ -154,6 +200,8 @@ def run_stage(
                 prompt=grace_prompt,
                 stage_name=stage,
                 cwd=cwd,
+                workspace_root=cwd or docs_root,
+                writable_roots=_agent_writable_roots(docs_root, run_folder, variables),
                 transcript_path=output_dir / f"{stage}{tag}-grace-transcript.md",
             )
         )
@@ -169,6 +217,11 @@ def run_stage(
     output_file.write_text(_format_stage_output(stdout, sig))
 
     validator.validate_output(schema_name if schema_name else stage, sig)
+    missing_artifacts = _missing_declared_artifacts(sig)
+    if missing_artifacts:
+        missing = ", ".join(str(path) for path in missing_artifacts)
+        logger.log(stage, "ERROR", f"passed signal declared missing artifact(s): {missing}")
+        return {"stage": stage, "status": "blocked", "message": f"Declared artifact(s) missing: {missing}"}
     elapsed_str = _fmt_elapsed(elapsed)
     summary = _signal_summary(sig)
     tag_label = output_suffix or stage

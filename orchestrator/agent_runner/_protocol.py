@@ -11,6 +11,8 @@ class AgentRunRequest:
     prompt: str
     stage_name: str = ""
     cwd: str | None = None
+    workspace_root: str | None = None
+    writable_roots: tuple[str, ...] = ()
     env: Mapping[str, str] | None = None
     timeout_seconds: int | None = None
     model: str | None = None
