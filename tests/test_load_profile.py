@@ -108,7 +108,6 @@ def test_minimal_codex_profile_uses_codex_backend():
     assert profile.name == "minimal-codex"
     assert profile.agent == {
         "backend": "codex_cli",
-        "model": "gpt-5-codex",
         "sterile_context": True,
         "permission_mode": "workspace-write",
     }
