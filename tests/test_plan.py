@@ -612,3 +612,23 @@ def test_render_link_hrefs_use_docs_root_prefix(tmp_path):
     content = (run_folder / "plan.md").read_text()
     expected_prefix = "projects/demo-project/workflow/runs/feature-x/2026-05-14-run-1/"
     assert f"<a href='{expected_prefix}specification/specification-prompt.md'" in content
+
+
+def test_render_link_hrefs_when_docs_root_lives_under_projects_dir(tmp_path):
+    # Regression: a docs root that itself sits under a directory called ``projects``
+    # (e.g. ``~/Dev/projects/docs``) used to produce hrefs anchored on the leftmost
+    # ``projects`` segment, leaking the host path into the URL. The renderer must
+    # anchor on the structural tail instead.
+    host = tmp_path / "projects" / "docs-root"
+    run_folder = host / "projects" / "demo-project" / "workflow" / "runs" / "feature-x" / "2026-05-14-run-1"
+    run_folder.mkdir(parents=True)
+    profile = _simple_profile("specification")
+    init_plan_md(run_folder, profile)
+    spec = run_folder / "specification"
+    spec.mkdir()
+    (spec / "specification-prompt.md").write_text("p")
+    update_plan_md(run_folder, "specification", "passed", elapsed_secs=5)
+    content = (run_folder / "plan.md").read_text()
+    expected_prefix = "projects/demo-project/workflow/runs/feature-x/2026-05-14-run-1/"
+    assert f"<a href='{expected_prefix}specification/specification-prompt.md'" in content
+    assert "projects/docs-root/" not in content

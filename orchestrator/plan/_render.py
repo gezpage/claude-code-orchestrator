@@ -150,17 +150,20 @@ def _href_prefix(run_folder: Path) -> str:
     """Return the path-from-docs-root for the run folder, with a trailing slash.
 
     The orchestrator's path layout is ``{docs-root}/projects/{project}/workflow/runs/
-    {feature-slug}/{run-name}/`` (see CLAUDE.md). We anchor on "projects" — everything
-    from that segment onward is the docs-root-relative path. Returns an empty string
-    when the layout doesn't match (e.g. tests using bare tmp paths), so the caller
-    falls back to plain relative URLs.
+    {feature-slug}/{run-name}/`` (see CLAUDE.md). We anchor on the trailing six
+    segments — ``projects/{project}/workflow/runs/{feature}/{run}`` — rather than
+    the first ``projects`` from the left, so docs roots that themselves live under
+    a directory called ``projects`` (e.g. ``~/Dev/projects/docs``) don't produce a
+    prefix that includes the host path. Returns an empty string when the layout
+    doesn't match, so the caller falls back to plain relative URLs.
     """
     parts = Path(run_folder).resolve().parts
-    try:
-        idx = parts.index("projects")
-    except ValueError:
+    if len(parts) < 6:
         return ""
-    return "/".join(parts[idx:]) + "/"
+    tail = parts[-6:]
+    if tail[0] != "projects" or tail[2] != "workflow" or tail[3] != "runs":
+        return ""
+    return "/".join(tail) + "/"
 
 
 def _legend_anchor(graph: Graph) -> str | None:
