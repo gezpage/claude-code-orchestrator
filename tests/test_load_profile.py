@@ -121,6 +121,17 @@ def test_minimal_codex_profile_matches_minimal_stage_shape():
     assert codex_verification.mode == "deterministic"
 
 
+def test_minimal_codex_implementation_overrides_permission_mode():
+    """Implementation must commit, which needs `.git` writes — workspace-write blocks that."""
+    codex = load_profile("minimal-codex")
+    impl = next(s for s in codex.stages if s.name == "implementation")
+    assert impl.agent == {"permission_mode": "danger-full-access"}
+    # Non-committing stages stay on the profile-level workspace-write default.
+    for non_committing in ("specification", "decomposition", "review"):
+        stage = next(s for s in codex.stages if s.name == non_committing)
+        assert stage.agent is None
+
+
 def test_profile_level_agent_parsed(tmp_path):
     p = tmp_path / "p.yaml"
     p.write_text(

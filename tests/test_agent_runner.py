@@ -173,8 +173,22 @@ def test_codex_runner_full_auto_opt_in(monkeypatch):
     runner = CodexCliRunner()
     runner.run(AgentRunRequest(prompt="x", permission_mode="full-auto"))
     cmd = captured["cmd"]
-    assert "--full-auto" in cmd
+    # Codex CLI replaced --full-auto with --dangerously-bypass-approvals-and-sandbox.
+    assert "--dangerously-bypass-approvals-and-sandbox" in cmd
+    assert "--full-auto" not in cmd
     assert "--sandbox" not in cmd
+
+
+def test_codex_runner_danger_full_access_uses_sandbox_flag(monkeypatch):
+    from orchestrator.agent_runner import _codex as codex_mod
+
+    captured = _stub_popen(monkeypatch, codex_mod)
+    runner = CodexCliRunner()
+    runner.run(AgentRunRequest(prompt="x", permission_mode="danger-full-access"))
+    cmd = captured["cmd"]
+    assert "--sandbox" in cmd
+    assert "danger-full-access" in cmd
+    assert "--dangerously-bypass-approvals-and-sandbox" not in cmd
 
 
 def test_codex_runner_model_flag(monkeypatch):
@@ -236,6 +250,59 @@ def test_codex_runner_workspace_roots_and_last_message(monkeypatch, tmp_path):
     assert "--add-dir" in cmd
     assert str(tmp_path / "docs") in cmd
     assert result.stdout == 'SIGNAL_JSON: {"stage":"x","status":"passed"}'
+
+
+def test_codex_runner_transcript_holds_clean_last_message(monkeypatch, tmp_path):
+    from orchestrator.agent_runner import _codex as codex_mod
+
+    class _FakePopen:
+        def __init__(self, cmd, **kwargs):
+            output_path = cmd[cmd.index("--output-last-message") + 1]
+            from pathlib import Path
+
+            Path(output_path).write_text("clean final message\nSIGNAL_JSON: {}")
+            # Full terminal stream is noisy — banner, command logs, diffs, etc.
+            self.stdout = iter(["codex banner\n", "workdir: /tmp\n", "model: gpt-5\n", "(noisy stream)\n"])
+
+        def wait(self, timeout=None):
+            return 0
+
+        def kill(self):
+            pass
+
+    monkeypatch.setattr(codex_mod.subprocess, "Popen", _FakePopen)
+    transcript = tmp_path / "stage" / "stage-transcript.md"
+    runner = CodexCliRunner()
+    result = runner.run(AgentRunRequest(prompt="x", transcript_path=transcript))
+    written = transcript.read_text()
+    assert written == "clean final message\nSIGNAL_JSON: {}"
+    assert "codex banner" not in written
+    assert "workdir:" not in written
+    assert result.stdout == written
+
+
+def test_codex_runner_transcript_falls_back_to_stream_when_no_last_message(monkeypatch, tmp_path):
+    from orchestrator.agent_runner import _codex as codex_mod
+
+    class _FakePopen:
+        def __init__(self, cmd, **kwargs):
+            # Simulate a Codex run that did not produce --output-last-message content
+            # (e.g. the binary crashed before writing). The transcript should still
+            # capture the raw stream so the failure is debuggable.
+            self.stdout = iter(["partial stream output\n"])
+
+        def wait(self, timeout=None):
+            return 0
+
+        def kill(self):
+            pass
+
+    monkeypatch.setattr(codex_mod.subprocess, "Popen", _FakePopen)
+    transcript = tmp_path / "stage" / "stage-transcript.md"
+    runner = CodexCliRunner()
+    result = runner.run(AgentRunRequest(prompt="x", transcript_path=transcript))
+    assert transcript.read_text() == "partial stream output\n"
+    assert result.stdout == "partial stream output\n"
 
 
 # ── Selection / config merge ──────────────────────────────────────────────────

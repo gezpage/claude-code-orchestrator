@@ -16,6 +16,9 @@ stages:
     prompt: prompts/implementation/minimal.md
     standards: true
     cwd_from_repo_root: true
+    agent:
+      # Implementation must `git add` / `git commit`; workspace-write blocks .git writes.
+      permission_mode: danger-full-access
 
   - stage: verification
     mode: deterministic
