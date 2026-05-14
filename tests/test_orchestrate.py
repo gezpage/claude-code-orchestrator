@@ -936,11 +936,82 @@ def test_default_dispatcher_passes_repo_root_as_cwd_when_configured(tmp_path):
     run_folder = _make_run_folder(tmp_path)
     variables = {"repo_root": "/my/repo"}
 
-    with patch("orchestrator.orchestrate.run_stage", return_value={"status": "passed"}) as mock_rs:
+    with (
+        _patch_safe_git_state(),
+        patch("orchestrator.orchestrate.subprocess.run", return_value=_git_ok()),
+        patch("orchestrator.orchestrate.run_stage", return_value={"status": "passed"}) as mock_rs,
+    ):
         _dispatch_default(stage, variables, run_folder, ctx)
 
     _, kwargs = mock_rs.call_args
     assert kwargs.get("cwd") == "/my/repo"
+
+
+def test_default_dispatcher_creates_branch_when_cwd_from_repo_root(tmp_path):
+    """Stages with cwd_from_repo_root=True must enter the ctx.branch before run_stage.
+
+    Mirrors the slice dispatcher's invariant: the slice path calls _create_branch
+    before fan-out. Single-agent stages running in the repo root rely on the
+    default dispatch path, so it must perform the same branch preparation.
+    """
+    from orchestrator.orchestrate import _dispatch_default
+
+    stage = StageConfig(name="implementation", prompt="prompts/implementation/minimal.md", cwd_from_repo_root=True)
+    ctx = _make_ctx(tmp_path)
+    run_folder = _make_run_folder(tmp_path)
+
+    with (
+        _patch_safe_git_state(),
+        patch("orchestrator.orchestrate.subprocess.run", return_value=_git_ok()) as mock_sp,
+        patch("orchestrator.orchestrate.run_stage", return_value={"status": "passed"}) as mock_rs,
+    ):
+        _dispatch_default(stage, {"repo_root": "/my/repo"}, run_folder, ctx)
+
+    checkout_calls = [
+        call.args[0]
+        for call in mock_sp.call_args_list
+        if call.args and isinstance(call.args[0], list) and "checkout" in call.args[0] and "-b" in call.args[0]
+    ]
+    assert any("feat/test" in args for args in checkout_calls), (
+        f"expected `git checkout -b feat/test`, got {mock_sp.call_args_list!r}"
+    )
+    mock_rs.assert_called_once()
+
+
+def test_default_dispatcher_skips_branch_creation_when_not_cwd_from_repo_root(tmp_path):
+    """Stages that don't run in the repo root (specification, decomposition) do not touch git."""
+    from orchestrator.orchestrate import _dispatch_default
+
+    stage = StageConfig(name="specification", prompt="prompts/specification/minimal.md", cwd_from_repo_root=False)
+    ctx = _make_ctx(tmp_path)
+    run_folder = _make_run_folder(tmp_path)
+
+    with (
+        patch("orchestrator.orchestrate.subprocess.run", return_value=_git_ok()) as mock_sp,
+        patch("orchestrator.orchestrate.run_stage", return_value={"status": "passed"}),
+    ):
+        _dispatch_default(stage, {"repo_root": "/my/repo"}, run_folder, ctx)
+
+    assert mock_sp.call_args_list == [], f"specification must not invoke git subprocess, got {mock_sp.call_args_list!r}"
+
+
+def test_default_dispatcher_blocks_on_git_state_error(tmp_path):
+    """A dirty working tree blocks the stage rather than letting it commit to the wrong branch."""
+    from orchestrator.orchestrate import _dispatch_default
+
+    stage = StageConfig(name="implementation", prompt="prompts/implementation/minimal.md", cwd_from_repo_root=True)
+    ctx = _make_ctx(tmp_path)
+    run_folder = _make_run_folder(tmp_path)
+
+    with (
+        patch("orchestrator.orchestrate.git_state.is_clean", return_value=False),
+        patch("orchestrator.orchestrate.run_stage") as mock_rs,
+    ):
+        result = _dispatch_default(stage, {"repo_root": "/my/repo"}, run_folder, ctx)
+
+    assert result["status"] == "blocked"
+    assert "working tree not clean" in result["message"]
+    mock_rs.assert_not_called()
 
 
 def test_default_dispatcher_omits_cwd_when_stage_does_not_request_it(tmp_path):

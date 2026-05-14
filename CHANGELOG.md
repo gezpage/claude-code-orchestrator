@@ -7,6 +7,9 @@ Format: [Unreleased] at the top, dated releases below, newest first.
 
 ## [Unreleased]
 
+### Fixed
+- 2026-05-14: Default dispatcher now creates/checks out `ctx.branch` before running any stage with `cwd_from_repo_root: true`, matching the slice dispatcher's pre-amble. Without this, the `minimal` profile's single-agent implementation would run on whatever branch was already checked out and commit there instead of the requested `--branch`.
+
 ### Changed
 - 2026-05-14: `minimal` profile now runs a single-agent decomposition + implementation flow. Decomposition writes one `implementation-plan.md` and emits a `plan_file` signal; implementation runs once with `expansion: none` and consumes the plan alongside the PRD and context. The slice fan-out machinery (worktrees, waves, S-NN artefacts) only runs under the `full` profile now.
 

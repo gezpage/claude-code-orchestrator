@@ -255,6 +255,16 @@ def _dispatch_default(
     impl = _impl_from_prompt(stage.prompt or f"prompts/{stage.name}/default.md")
     stage_cwd = variables.get("repo_root") if stage.cwd_from_repo_root else None
     stage_standards = ctx.project_standards if stage.standards else None
+    # Stages that run in the repo root and may commit must do so on ctx.branch.
+    # The slice dispatcher already enforces this before fan-out; mirror it here
+    # so single-agent flows (e.g. the minimal profile's implementation stage)
+    # do not commit to whatever branch happened to be checked out.
+    if stage.cwd_from_repo_root:
+        try:
+            _create_branch(ctx.branch, variables["repo_root"], ctx.logger, stage.name)
+        except GitStateError as exc:
+            ctx.logger.log(stage.name, "ERROR", f"git state error before {stage.name} dispatch: {exc}")
+            return {"stage": stage.name, "status": "blocked", "message": str(exc)}
     return run_stage(
         stage.name,
         impl,

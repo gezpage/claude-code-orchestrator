@@ -140,3 +140,19 @@ def test_minimal_profile_e2e_happy_path(tmp_path):
         assert not (isinstance(args, list) and "worktree" in args and "add" in args), (
             f"unexpected `git worktree add` invocation: {args}"
         )
+
+    # The implementation stage must run on `ctx.branch` — the harness's git
+    # state patches make `branch_exists` return False, so `_dispatch_default`
+    # is expected to call `git ... checkout -b feat/test`. Without branch
+    # preparation, the implementation agent would commit to whatever branch
+    # was checked out at orchestrator launch.
+    checkout_calls = [
+        call.args[0]
+        for call in subprocess_mock.call_args_list
+        if call.args
+        and isinstance(call.args[0], list)
+        and "checkout" in call.args[0]
+        and "-b" in call.args[0]
+        and "feat/test" in call.args[0]
+    ]
+    assert checkout_calls, "expected `git ... checkout -b feat/test` before implementation dispatch"
