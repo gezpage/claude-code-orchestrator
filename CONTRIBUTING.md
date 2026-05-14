@@ -33,3 +33,15 @@ uv run pytest tests/
 ```
 
 All PRs must keep tests green.
+
+## Claude configuration policy
+
+The orchestrator ships no Claude-specific project assets. Everything under `.claude/` — settings, sessions, MCP configs, worktree scratch space, custom skills — is treated as **local user state** and is ignored by `.gitignore`. The same applies to `.vscode/`, `.idea/`, and `.env*`.
+
+If a future change needs a Claude asset tracked in the repo (for example, a project-specific MCP config or a skill that ships with the orchestrator), the asset must:
+
+- Be added to `.gitignore` as a negation (e.g. `!.claude/<path>`) so only the intended file is tracked
+- Be documented here, with the rationale for tracking it
+- Pass review against the safety boundary in `SECURITY.md` — tracked assets become part of the supply chain
+
+The default is **not tracked**. Do not commit machine-specific paths, symlinks, or session state.
