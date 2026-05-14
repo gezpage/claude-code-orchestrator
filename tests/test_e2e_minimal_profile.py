@@ -1,10 +1,7 @@
 """End-to-end happy-path test for the bundled `minimal` profile.
 
-Mocks only `orchestrator.run_stage._run_claude` and lets every other layer —
-prompt rendering, schema validation, signal extraction, state persistence,
-plan.md rendering, fan-out dispatchers — run for real. Set
-`ORCH_E2E_OUTPUT_DIR` to pin run artefacts to a stable path for inspection.
-See `tests/e2e_harness.py` for the shared scaffolding.
+Patches `run_stage()` itself; signals are synthesised from each stage's JSON
+schema. See `tests/e2e_harness.py` for the harness contract.
 """
 
 from unittest.mock import patch
@@ -21,15 +18,8 @@ def test_minimal_profile_e2e_happy_path(tmp_path):
 
     run_folder = out_dir / "projects" / "myproject" / "workflow" / "runs" / "demo" / "2026-05-14-run-1"
 
-    # Minimal profile has no discovery and no alignment — no track prompt or
-    # alignment log needs pre-creating. The default-signals map still includes
-    # entries for stages this profile never invokes; they're unused.
-    track_prompt = h.write_track_prompt(out_dir)  # unused, but default_signals expects a path
-
-    fake = h.make_fake_run_claude(h.default_signals(out_dir, track_prompt))
-
     with (
-        patch("orchestrator.run_stage._run_claude", side_effect=fake) as mock_claude,
+        h.patch_run_stage() as fake,
         patch("orchestrator.orchestrate.subprocess.run", return_value=h.git_ok()),
         patch("orchestrator.orchestrate._resolve_run_folder", return_value=run_folder),
     ):
@@ -62,7 +52,7 @@ def test_minimal_profile_e2e_happy_path(tmp_path):
     assert signals["review"]["changes_requested"] == []
 
     # spec + decomp + 2 impl slices + 1 reviewer = 5
-    assert mock_claude.call_count == 5
+    assert fake.call_count == 5
 
     assert (run_folder / "plan.md").exists()
     plan_md = (run_folder / "plan.md").read_text().lower()

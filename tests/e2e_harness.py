@@ -1,54 +1,51 @@
 """Reusable harness for end-to-end orchestrator tests.
 
-Mocks only `orchestrator.run_stage._run_claude` and routes each call to a
-test-supplied response based on which stage (and for reviews, which reviewer
-and round) the rendered prompt represents. Everything else — prompt rendering,
-schema validation, signal extraction, state persistence, plan.md rendering,
-fan-out dispatchers, review-cycle loop — runs for real.
+The harness patches `run_stage()` itself — not `_run_claude` — so e2e tests
+contain no per-stage signal dicts and no prompt-heading parsing. Each call to
+the fake run-stage:
 
-# Stage keys
+  - Loads the stage's JSON schema from `orchestrator/schemas/`.
+  - Synthesises a minimum passing signal: every `*_path`/`*_file` string is
+    materialised as a real stub file under `{run_folder}/{stage}/`, enums
+    default to their first allowed value, and a small convention table fills
+    structured fields the schema can't describe (tracks, slice_files,
+    commit_hashes, reviewer_statuses, branch).
+  - Writes the same `{stage}{tag}-prompt.md` and `{stage}{tag}-output.md` the
+    real `run_stage()` writes, so glob-based assertions keep working.
+  - Returns the signal dict.
 
-`stage_key()` returns one of:
-  - "discovery-planning"
-  - "discovery-track"
-  - "specification"
-  - "decomposition"
-  - "implementation"            (called once per slice)
-  - "qa"
-  - "fix-implementation"        (called once per review cycle)
-  - "review:<reviewer>:r<N>"    (e.g. "review:architecture:r1")
-  - "harvest"
+Tests express divergences from happy-path via `overrides`, keyed by stage call:
 
-Provide a signal dict for every key the scenario will hit. The harness merges
-test-supplied `overrides` over `default_signals()` so most scenarios only need
-to specify the keys that diverge from the happy path.
+    "discovery-planning" | "discovery-track" | "specification" |
+    "decomposition" | "implementation" | "qa" | "harvest" |
+    "fix-implementation" | "review:<reviewer>:r<N>"
 
-# Signal values
+Each override is either a partial signal dict (shallow-merged onto the
+synthesised default) or a callable `(default_sig, ctx) -> dict`. If the
+override changes `reviewer_statuses` but not `changes_requested`, the latter
+is recomputed automatically.
 
-Each `signals` value may be:
-  - a dict  — returned every time the key is hit
-  - a list[dict] — returned in order; raises if exhausted
-  - a callable(prompt, call_idx) -> dict — full control
-
-# Output dir override
-
-Set `ORCH_E2E_OUTPUT_DIR=/path` before pytest to pin run artefacts to a stable
-location for inspection. The directory is wiped on each invocation.
+Set `ORCH_E2E_OUTPUT_DIR=/path` before pytest to pin run artefacts to a
+stable location for inspection. The directory is wiped on each invocation.
 """
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
-import re
 import shutil
 import sys
-from collections.abc import Callable, Mapping
+from collections import defaultdict
+from collections.abc import Iterator, Mapping
 from pathlib import Path
 from typing import Any
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
+
+import orchestrator
 
 _OUTPUT_DIR_ENV = "ORCH_E2E_OUTPUT_DIR"
+_SCHEMA_DIR = Path(orchestrator.__file__).parent / "schemas"
 
 
 def resolve_output_dir(tmp_path: Path) -> Path:
@@ -81,154 +78,172 @@ def setup_docs(out_dir: Path, feature_path: str = "projects/myproject/features/d
     return str(out_dir), feature_path
 
 
-def write_track_prompt(out_dir: Path, name: str = "track-a") -> Path:
-    """Discovery tracks are dispatched via prompt_file=<path>, which run_stage
-    reads from disk — so a real file with a recognisable heading is needed.
-    """
-    p = out_dir / f"{name}-prompt.md"
-    p.write_text(f"# Discovery Track — {name}\n\nGather context.\n")
-    return p
-
-
 def pre_create_alignment(run_folder: Path) -> None:
     """Make the interactive alignment stage auto-pass via _dispatch_interactive."""
     (run_folder / "alignment").mkdir(parents=True, exist_ok=True)
     (run_folder / "alignment" / "alignment-log.md").write_text("# Alignment\n")
 
 
-def stage_key(prompt: str) -> str:
-    first = prompt.lstrip().splitlines()[0] if prompt.strip() else ""
+def _load_schema(name: str) -> dict[str, Any]:
+    return json.loads((_SCHEMA_DIR / f"{name}.json").read_text())
 
-    if "Discovery Planning" in first:
+
+def _route_key(stage: str, implementation: str, schema_name: str | None, variables: Mapping[str, Any]) -> str:
+    """Compute the override key for a run_stage call.
+
+    The mapping mirrors the orchestrator's dispatch decisions, not the prompt
+    text, so renaming a prompt heading has zero impact on tests.
+    """
+    if schema_name == "discovery_planning":
         return "discovery-planning"
-    if first.startswith("# Discovery Track"):
+    if schema_name == "discovery_track":
         return "discovery-track"
-    if "Specification Stage" in first:
-        return "specification"
-    if "Decomposition Stage" in first:
-        return "decomposition"
-    if "Implementation Stage" in first:
-        return "implementation"
-    if "QA Stage" in first:
-        return "qa"
-    if "Fix Implementation" in first:
-        return "fix-implementation"
-    if "Harvest Stage" in first:
-        return "harvest"
-    if "Review Stage" in first:
-        m = re.search(r"Review Stage\s+[—-]+\s+(\w+)\s+Reviewer", first)
-        reviewer = m.group(1).lower() if m else "unknown"
-        rm = re.search(r"\*\*Round:\*\*\s+(\d+)", prompt)
-        round_n = rm.group(1) if rm else "1"
-        return f"review:{reviewer}:r{round_n}"
-
-    raise AssertionError(f"unrecognised prompt heading: {first!r}")
+    if stage == "review":
+        rnd = variables.get("round", "1")
+        return f"review:{implementation}:r{rnd}"
+    return stage
 
 
-def reviewer_signal(reviewer: str, verdict: str, findings: list[str] | None = None) -> dict:
-    sig: dict[str, Any] = {
-        "stage": "review",
-        "status": "passed",
-        "reviewer_statuses": {reviewer: verdict},
-        "changes_requested": [reviewer] if verdict == "changes-requested" else [],
-    }
-    if findings:
-        sig["findings"] = findings
+def _synthesise(
+    schema: dict[str, Any],
+    *,
+    stage_name: str,
+    implementation: str,
+    output_dir: Path,
+    tag: str,
+    variables: Mapping[str, Any],
+    call_idx: int,
+) -> dict[str, Any]:
+    """Build a minimum passing signal for `schema`. Writes any path-shaped files."""
+    sig: dict[str, Any] = {"stage": stage_name, "status": "passed"}
+    props = schema.get("properties", {})
+
+    for name, spec in props.items():
+        if name in sig or name == "message":
+            continue
+        typ = spec.get("type")
+        if typ == "string":
+            if name.endswith(("_path", "_file")):
+                p = output_dir / f"{name}{tag}.md"
+                p.parent.mkdir(parents=True, exist_ok=True)
+                p.write_text(f"# {name}{tag}\n")
+                sig[name] = str(p)
+            elif "enum" in spec:
+                sig[name] = spec["enum"][0]
+        elif typ == "array":
+            sig[name] = []
+        elif typ == "object":
+            sig[name] = {}
+
+    # Schema can describe field types but not stage semantics. The blocks below
+    # are convention-driven: keyed on field name, not stage name, so they kick
+    # in for any future stage whose schema declares the same field.
+    if "tracks" in props:
+        track_name = "track-a"
+        prompt_file = output_dir / f"{track_name}-prompt{tag}.md"
+        prompt_file.write_text(f"# Discovery Track — {track_name}\n\nGather context.\n")
+        sig["tracks"] = [{"name": track_name, "prompt_file": str(prompt_file), "focus": "auto"}]
+
+    if "slice_files" in props:
+        sf_paths = []
+        for i in (1, 2):
+            p = output_dir / f"S-{i:02d}-auto.md"
+            p.write_text(f"# S-{i:02d} auto slice\n")
+            sf_paths.append(str(p))
+        sig["slice_files"] = sf_paths
+
+    if "commit_hashes" in props:
+        sig["commit_hashes"] = [f"c0mm{call_idx + 1:04d}"]
+
+    if "branch" in props:
+        sig["branch"] = str(variables.get("branch", "feat/test"))
+
+    if "reviewer_statuses" in props:
+        sig["reviewer_statuses"] = {implementation: "approved"}
+        sig["changes_requested"] = []
+
     return sig
 
 
-def default_signals(out_dir: Path, track_prompt: Path) -> dict[str, Any]:
-    """Happy-path signal map. Reviewer keys here cover round 1 only; tests that
-    drive the review fix cycle must supply `review:<r>:r2` (and any further
-    cycles) explicitly.
-    """
-    return {
-        "discovery-planning": {
-            "stage": "discovery-planning",
-            "status": "passed",
-            "tracks": [
-                {"name": "track-a", "prompt_file": str(track_prompt), "focus": "primary modules"},
-            ],
-        },
-        "discovery-track": {
-            "stage": "discovery",
-            "status": "passed",
-            "findings_file": str(out_dir / "findings-track-a.md"),
-            "summary": "found three entry points",
-        },
-        "specification": {
-            "stage": "specification",
-            "status": "passed",
-            "prd_path": str(out_dir / "prd.md"),
-            "context_path": str(out_dir / "context.md"),
-            "adr_paths": [],
-        },
-        "decomposition": {
-            "stage": "decomposition",
-            "status": "passed",
-            "slice_files": ["S-01-foo.md", "S-02-bar.md"],
-        },
-        # Each implementation call gets a unique commit hash via the callable.
-        "implementation": lambda prompt, idx: {
-            "stage": "implementation",
-            "status": "passed",
-            "commit_hashes": [f"c0mmit{idx + 1:02d}"],
-            "branch": "feat/test",
-        },
-        "qa": {
-            "stage": "qa",
-            "status": "passed",
-            "outcome": "pass",
-            "confidence": "high",
-            "regression_risk": "low",
-        },
-        "review:architecture:r1": reviewer_signal("architecture", "approved"),
-        "review:implementation:r1": reviewer_signal("implementation", "approved"),
-        "review:tests:r1": reviewer_signal("tests", "approved"),
-        "fix-implementation": {
-            "stage": "fix-implementation",
-            "status": "passed",
-            "commit_hashes": ["f1xc0mm1t"],
-            "diff": "",
-        },
-        "harvest": {
-            "stage": "harvest",
-            "status": "passed",
-            "kb_files": [],
-            "adr_files": [],
-        },
-    }
+def _apply_override(default: dict[str, Any], override: Any, ctx: dict[str, Any]) -> dict[str, Any]:
+    if callable(override):
+        return override(default, ctx)
+    out = dict(default)
+    out.update(override)
+    # If a test overrode reviewer_statuses without spelling out changes_requested,
+    # recompute it so the orchestrator's fix-cycle trigger sees a consistent signal.
+    if "reviewer_statuses" in override and "changes_requested" not in override:
+        out["changes_requested"] = [r for r, v in out["reviewer_statuses"].items() if v == "changes-requested"]
+    return out
 
 
-def make_fake_run_claude(signals: Mapping[str, Any]) -> Callable[[str, str | None], str]:
-    """Build a fake _run_claude that routes by stage_key."""
-    call_counts: dict[str, int] = {}
+class FakeRunStage:
+    """Callable that replaces `orchestrator.run_stage.run_stage` in e2e tests."""
 
-    def fake(prompt: str, cwd: str | None = None) -> str:
-        key = stage_key(prompt)
-        spec = signals.get(key)
-        if spec is None:
-            raise AssertionError(f"no signal configured for stage key {key!r}")
-        idx = call_counts.get(key, 0)
-        call_counts[key] = idx + 1
+    def __init__(self, overrides: Mapping[str, Any] | None = None) -> None:
+        self.overrides: dict[str, Any] = dict(overrides or {})
+        self.call_counts: dict[str, int] = defaultdict(int)
+        self.call_count: int = 0
 
-        if callable(spec):
-            sig = spec(prompt, idx)
-        elif isinstance(spec, list):
-            if idx >= len(spec):
-                raise AssertionError(f"stage key {key!r} called {idx + 1} times but only {len(spec)} signals provided")
-            sig = dict(spec[idx])
-        else:
-            sig = dict(spec)
+    def __call__(
+        self,
+        stage: str,
+        implementation: str,
+        variables: dict,
+        run_folder: Any,
+        docs_root: str,
+        project: str,
+        project_log_path: str,
+        output_suffix: str = "",
+        cwd: str | None = None,
+        prompt_file: str | None = None,
+        schema_name: str | None = None,
+        standards: list[str] | None = None,
+    ) -> dict[str, Any]:
+        run_folder = Path(run_folder)
+        output_dir = run_folder / stage
+        output_dir.mkdir(parents=True, exist_ok=True)
+        tag = f"-{output_suffix}" if output_suffix else ""
 
-        return f"SIGNAL_JSON: {json.dumps(sig)}\n"
+        key = _route_key(stage, implementation, schema_name, variables)
+        idx = self.call_counts[key]
+        self.call_counts[key] += 1
+        self.call_count += 1
 
-    fake.call_counts = call_counts  # type: ignore[attr-defined]
-    return fake
+        schema = _load_schema(schema_name or stage)
+        sig = _synthesise(
+            schema,
+            stage_name=stage,
+            implementation=implementation,
+            output_dir=output_dir,
+            tag=tag,
+            variables=variables,
+            call_idx=idx,
+        )
+
+        if key in self.overrides:
+            ctx = {
+                "stage": stage,
+                "implementation": implementation,
+                "variables": variables,
+                "run_folder": run_folder,
+                "call_idx": idx,
+            }
+            sig = _apply_override(sig, self.overrides[key], ctx)
+
+        (output_dir / f"{stage}{tag}-prompt.md").write_text(f"# {stage}{tag} (synthesised)\n")
+        body = f"# {stage}{tag} (synthesised)\n\n```json\n{json.dumps(sig, indent=2)}\n```\n"
+        (output_dir / f"{stage}{tag}-output.md").write_text(body)
+
+        return sig
 
 
-def merge_signals(base: dict[str, Any], overrides: Mapping[str, Any] | None) -> dict[str, Any]:
-    merged = dict(base)
-    if overrides:
-        merged.update(overrides)
-    return merged
+@contextlib.contextmanager
+def patch_run_stage(overrides: Mapping[str, Any] | None = None) -> Iterator[FakeRunStage]:
+    """Patch `run_stage` at both binding sites (orchestrate and review_cycle)."""
+    fake = FakeRunStage(overrides)
+    with (
+        patch("orchestrator.orchestrate.run_stage", side_effect=fake),
+        patch("orchestrator.review_cycle.run_stage", side_effect=fake),
+    ):
+        yield fake
