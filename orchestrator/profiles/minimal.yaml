@@ -4,13 +4,11 @@ stages:
     prompt: prompts/specification/minimal.md
 
   - stage: decomposition
-    prompt: prompts/decomposition/default.md
+    prompt: prompts/decomposition/minimal.md
 
   - stage: implementation
-    prompt: prompts/implementation/default.md
+    prompt: prompts/implementation/minimal.md
     standards: true
-    expansion: slices
-    slices_from_stage: decomposition
     cwd_from_repo_root: true
 
   - stage: verification

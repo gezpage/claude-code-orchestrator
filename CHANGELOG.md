@@ -7,6 +7,12 @@ Format: [Unreleased] at the top, dated releases below, newest first.
 
 ## [Unreleased]
 
+### Fixed
+- 2026-05-14: Default dispatcher now creates/checks out `ctx.branch` before running any stage with `cwd_from_repo_root: true`, matching the slice dispatcher's pre-amble. Without this, the `minimal` profile's single-agent implementation would run on whatever branch was already checked out and commit there instead of the requested `--branch`.
+
+### Changed
+- 2026-05-14: `minimal` profile now runs a single-agent decomposition + implementation flow. Decomposition writes one `implementation-plan.md` and emits a `plan_file` signal; implementation runs once with `expansion: none` and consumes the plan alongside the PRD and context. The slice fan-out machinery (worktrees, waves, S-NN artefacts) only runs under the `full` profile now.
+
 ### Added
 - 2026-05-14: Agent runner abstraction (`orchestrator/agent_runner/`) introducing `AgentRunner` Protocol, `AgentRunRequest`/`AgentRunResult` dataclasses, `ClaudeCodePrintRunner`, `CodexCliRunner`, and `FakeRunner`. Backend selection is config-driven via an optional `agent:` block at profile and stage levels (stage overrides shallow-merge over profile defaults). The effective backend and model are recorded in `_state.yaml` under `agent:`. Sterile context (`CLAUDE_CODE_DISABLE_AUTO_MEMORY=1`) is now the default for the Claude Code backend — existing pipelines no longer inherit ambient auto-memory unless they opt out with `agent.sterile_context: false`. `run_stage()` blocks the stage on `timed_out=true` or a non-zero `exit_code` from the runner (and from the grace-retry call) before any signal extraction, so a failed agent process can never have its partial stdout parsed as a valid SIGNAL_JSON. The Codex backend defaults to `--sandbox workspace-write`; `--full-auto` is opt-in via `permission_mode: full-auto`. ADR-003 and ADR-012 are superseded by [ADR-018](docs/adrs/ADR-018-agent-runner-abstraction.md). See issue #75.
 - 2026-05-14: README documents the `verification` stage, the `minimal` built-in profile, `mode: deterministic`, and the `.cco.yaml` verification override schema. Trimmed the `project.yaml` example to fields the orchestrator actually reads (`repo-root`, `log_level`, `standards`) and removed five never-read keys (`name`, `description`, `default-profile`, `merge-target`, `agent-rules`).
