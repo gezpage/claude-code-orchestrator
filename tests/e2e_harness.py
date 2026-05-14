@@ -59,7 +59,7 @@ def resolve_output_dir(tmp_path: Path) -> Path:
     if out.exists():
         shutil.rmtree(out)
     out.mkdir(parents=True)
-    print(f"\n[e2e] writing run artefacts under {out}", file=sys.stderr)
+    print(f"\n[e2e] writing run artefacts under {out}", file=sys.stderr)  # noqa: T201
     return out
 
 
