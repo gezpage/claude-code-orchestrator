@@ -142,6 +142,7 @@ def run(run_folder, docs_root, project, branch, review_signal, project_log_path,
 
         fix_vars = {
             "run_folder": str(run_folder),
+            "docs_root": docs_root,
             "branch": branch,
             "changes_brief": changes_brief,
             "repo_root": repo_root,
@@ -177,6 +178,7 @@ def run(run_folder, docs_root, project, branch, review_signal, project_log_path,
         for reviewer in list(changes_requested):
             review_vars = {
                 "run_folder": str(run_folder),
+                "docs_root": docs_root,
                 "review_md": str(review_md_path),
                 "diff": fix_sig.get("diff", ""),
                 "round": str(round_num),
