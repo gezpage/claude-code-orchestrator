@@ -1,13 +1,18 @@
 ---
-status: accepted
+status: superseded
+superseded_by: ADR-018
 date: 2026-05-09
 affects: [run_stage.py]
 ---
 
 # ADR-012: `--bare` Flag on All Stage Subprocess Invocations
 
-**Status:** Accepted
+**Status:** Superseded by [ADR-018](ADR-018-agent-runner-abstraction.md)
 **Date:** 2026-05-09
+
+> **Note.** The invariant from this ADR now lives inside `ClaudeCodePrintRunner`
+> (see ADR-018). `--bare` is still mandatory for the Claude Code print backend,
+> but it is enforced by the runner rather than by every `run_stage()` call site.
 
 ## Context
 

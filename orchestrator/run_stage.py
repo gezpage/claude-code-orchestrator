@@ -1,4 +1,4 @@
-# Stage executor; invokes Claude via CLI, extracts the SIGNAL_JSON sentinel, and validates stage output.
+# Stage executor; dispatches via an AgentRunner, extracts SIGNAL_JSON, validates output.
 import json
 import subprocess
 import sys
@@ -7,6 +7,11 @@ from pathlib import Path
 
 from orchestrator import renderer, validator
 from orchestrator import signal as signal_mod
+from orchestrator.agent_runner import (
+    AgentRunner,
+    AgentRunRequest,
+    ClaudeCodePrintRunner,
+)
 from orchestrator.logger import OrchestratorLogger
 
 
@@ -51,22 +56,28 @@ def _format_stage_output(stdout: str, sig: dict) -> str:
     return "".join(result)
 
 
-def _run_claude(prompt: str, cwd: str | None = None) -> str:
-    proc = subprocess.Popen(
-        ["claude", "-p", prompt, "--dangerously-skip-permissions", "--bare"],
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        text=True,
-        cwd=cwd,
-    )
-    if proc.stdout is None:
-        raise RuntimeError("Popen stdout is None — subprocess was not opened with PIPE")
-    lines = []
-    for line in proc.stdout:
-        print(line, end="", flush=True)  # noqa: T201
-        lines.append(line)
-    proc.wait()
-    return "".join(lines)
+def _default_runner() -> AgentRunner:
+    """Default runner when callers haven't injected one. Matches the legacy command shape
+    (claude -p ... --bare --dangerously-skip-permissions) with sterile context enabled."""
+    return ClaudeCodePrintRunner(sterile_context=True)
+
+
+def _runner_failure_signal(stage: str, result) -> dict | None:
+    """If the runner reported timeout or a non-zero exit, return a blocked signal.
+
+    Must be checked before signal extraction — otherwise stdout from a failed or
+    partial run could be parsed as a valid SIGNAL_JSON and accepted, which defeats
+    the purpose of capturing exit_code / timed_out at the runner layer.
+    """
+    if result.timed_out:
+        return {"stage": stage, "status": "blocked", "message": "Agent runner timed out"}
+    if result.exit_code not in (0, None):
+        return {
+            "stage": stage,
+            "status": "blocked",
+            "message": f"Agent runner failed with exit code {result.exit_code}",
+        }
+    return None
 
 
 def run_stage(
@@ -82,9 +93,11 @@ def run_stage(
     prompt_file: str | None = None,
     schema_name: str | None = None,
     standards: list[str] | None = None,
+    runner: AgentRunner | None = None,
 ) -> dict:
     run_folder = Path(run_folder)
     logger = OrchestratorLogger(run_folder, project_log_path)
+    runner = runner if runner is not None else _default_runner()
 
     label = output_suffix or implementation
     logger.log(stage, "INFO", f"dispatching {label}")
@@ -103,12 +116,25 @@ def run_stage(
     output_dir.mkdir(parents=True, exist_ok=True)
     tag = f"-{output_suffix}" if output_suffix else ""
     (output_dir / f"{stage}{tag}-prompt.md").write_text(prompt)
+    transcript_path = output_dir / f"{stage}{tag}-transcript.md"
 
     t0 = time.monotonic()
-    stdout = _run_claude(prompt, cwd=cwd)
+    result = runner.run(
+        AgentRunRequest(
+            prompt=prompt,
+            stage_name=stage,
+            cwd=cwd,
+            transcript_path=transcript_path,
+        )
+    )
+    stdout = result.stdout
     elapsed = time.monotonic() - t0
     output_file = output_dir / f"{stage}{tag}-output.md"
     output_file.write_text(stdout)
+
+    if failure := _runner_failure_signal(stage, result):
+        logger.log(stage, "ERROR", failure["message"])
+        return failure
 
     sig = signal_mod.extract_signal(stdout)
 
@@ -123,8 +149,18 @@ def run_stage(
             f'SIGNAL_JSON: {{"stage": "{stage}", "status": "blocked", "message": "<reason>"}}\n'
             f"Emit the SIGNAL_JSON line now, with no other output."
         )
-        retry_stdout = _run_claude(grace_prompt, cwd=cwd)
-        sig = signal_mod.extract_signal(retry_stdout)
+        retry_result = runner.run(
+            AgentRunRequest(
+                prompt=grace_prompt,
+                stage_name=stage,
+                cwd=cwd,
+                transcript_path=output_dir / f"{stage}{tag}-grace-transcript.md",
+            )
+        )
+        if failure := _runner_failure_signal(stage, retry_result):
+            logger.log(stage, "ERROR", f"grace retry: {failure['message']}")
+            return failure
+        sig = signal_mod.extract_signal(retry_result.stdout)
 
     if sig is None:
         logger.log(stage, "ERROR", "signal missing after grace retry — treating as blocked")
@@ -143,7 +179,7 @@ def run_stage(
     for key, value in sig.items():
         if key == "stage":
             continue
-        v = json.dumps(value) if isinstance(value, (dict, list)) else str(value)
+        v = json.dumps(value) if isinstance(value, dict | list) else str(value)
         logger.log(stage, "DEBUG", f"signal.{key}={v}")
     return sig
 
@@ -187,7 +223,7 @@ def run_deterministic_stage(
     for key, value in sig.items():
         if key == "stage":
             continue
-        v = json.dumps(value) if isinstance(value, (dict, list)) else str(value)
+        v = json.dumps(value) if isinstance(value, dict | list) else str(value)
         logger.log(stage, "DEBUG", f"signal.{key}={v}")
     return sig
 

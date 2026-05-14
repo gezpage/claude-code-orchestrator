@@ -6,9 +6,11 @@ Developer-facing reference. Read before touching any orchestrator code.
 
 ## Invariants
 
-- **`--dangerously-skip-permissions` is mandatory in every `run_stage()` call.** Not a shortcut — it is the documented use case for unattended, trusted pipeline execution. Removing it breaks all unattended stage dispatch. See ADR-003.
+- **All autonomous stage dispatch goes through an `AgentRunner`.** `run_stage()` calls `runner.run(AgentRunRequest(...))` — it does not invoke `claude` or any CLI directly. New backends are added by implementing the Protocol in `orchestrator/agent_runner/`, not by editing call sites. See ADR-018.
 
-- **`--bare` is mandatory in every `run_stage()` call.** Skips MCP server loading and hook execution at stage startup. Stage agents have no access to MCP tools by design. See ADR-012.
+- **`ClaudeCodePrintRunner` always passes `--bare` and `--dangerously-skip-permissions`.** These were the ADR-003 and ADR-012 invariants; they are now invariants of the runner. Removing either flag from the runner breaks unattended stage dispatch and re-enables MCP/hook side effects. See ADR-018.
+
+- **Sterile context is the default for stage runners.** `ClaudeCodePrintRunner` sets `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1` unless a profile opts out with `agent.sterile_context: false`. Ambient auto-memory is not allowed to leak into pipeline runs by default. See ADR-018.
 
 - **The main orchestration session never reads stage output file contents.** `orchestrate.py` receives file paths and status values via signal JSON only. It must not `open()` or `Read` any stage output file. Adding a file read to `orchestrate.py` violates the token-minimisation invariant and will cause unbounded context growth across long pipelines. See ADR-004.
 
@@ -16,7 +18,7 @@ Developer-facing reference. Read before touching any orchestrator code.
 
 - **`workflow/` paths are fixed convention — do not add config for them.** Python derives all orchestrator paths from `{docs-root}/projects/{project}/workflow/`. Do not introduce a `project.yaml.folders` key or any path override mechanism. See ADR-006.
 
-- **Interactive stages (`mode: interactive`) are dispatched through `run_interactive_stage()` in `run_stage.py` — not `run_stage()`.** Python launches an interactive `claude` session (no `--bare`, no `--dangerously-skip-permissions`), waits for it to exit, then checks for the declared `artifact` file. The `--bare`/`--dangerously-skip-permissions` invariants apply only to `run_stage()`. See ADR-007.
+- **Interactive stages (`mode: interactive`) are dispatched through `run_interactive_stage()` in `run_stage.py` — not `run_stage()`.** Python launches an interactive `claude` session (no `--bare`, no `--dangerously-skip-permissions`), waits for it to exit, then checks for the declared `artifact` file. Interactive stages do not go through the `AgentRunner` seam; the ADR-018 runner invariants apply only to `run_stage()`. See ADR-007.
 
 - **Stage output schemas are the interface contract — they belong to the stage, not the implementation.** All implementations of a stage must satisfy the same schema. See ADR-008.
 
