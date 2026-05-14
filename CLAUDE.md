@@ -24,6 +24,8 @@ Developer-facing reference. Read before touching any orchestrator code.
 
 - **The fix cycle limit is 2 and is enforced in `review_cycle.py` via `_MAX_CYCLES`.** Not configurable via `project.yaml`. See ADR-011.
 
+- **The mermaid block in `plan.md` is a projection of the `Graph` in `orchestrator/plan/_graph.py`** — persisted as `_plan_graph.yaml`. All mutations go: load graph → mutate typed objects → save → re-render via `render_block`. Do not parse or rewrite mermaid text with regex; the renderer is the only code that knows mermaid syntax. See ADR-016.
+
 ---
 
 ## Path Resolution Rules

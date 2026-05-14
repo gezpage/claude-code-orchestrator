@@ -4,10 +4,11 @@ Thread safety: expand_nodes acquires _plan_lock before calling private helpers.
 Private _expand_* functions must NOT be called without holding the lock.
 """
 
-import re
 from pathlib import Path
 
-from orchestrator.plan._helpers import _node_label, _read_slice_title, _track_node_id
+from orchestrator.plan._graph import Edge, Node, Subgraph, load_graph, save_graph
+from orchestrator.plan._helpers import _read_slice_title, _track_node_id
+from orchestrator.plan._render import replace_mermaid_block
 from orchestrator.plan._update import _plan_lock
 from orchestrator.profile import ExpansionKind, StageConfig
 
@@ -49,87 +50,67 @@ def _expand_tracks(
     plan_path = run_folder / "plan.md"
     if not plan_path.exists() or not tracks:
         return {}
+    graph = load_graph(run_folder)
+    if graph is None or stage_name not in graph.nodes:
+        return {}
 
-    track_node_ids = {t["name"]: _track_node_id(stage_name, t["name"]) for t in tracks}
-    content = plan_path.read_text()
+    sg_id = f"sg_{stage_name}"
     display_name = stage_name.replace("_", " ").title()
+    graph.subgraphs.setdefault(sg_id, Subgraph(id=sg_id, display=display_name))
 
-    planning_label = _node_label(
-        f"{display_name} Planning", "planning", status="passed", elapsed_secs=planning_elapsed_secs
-    )
     planning_node = f"{stage_name}_planning"
     fanout_node = f"{stage_name}_fanout"
     fanin_node = f"{stage_name}_fanin"
+    track_node_ids = {t["name"]: _track_node_id(stage_name, t["name"]) for t in tracks}
+    parallel = len(tracks) > 1
 
-    new_subgraph_lines = [f'    subgraph sg_{stage_name}["{display_name}"]']
-    new_subgraph_lines.append(f'    {planning_node}["{planning_label}"]')
-    if len(tracks) > 1:
-        new_subgraph_lines.append(f'    {fanout_node}((" "))')
+    graph.remove_node(stage_name)
+    graph.add_node(
+        Node(
+            id=planning_node,
+            display=f"{display_name} Planning",
+            impl="planning",
+            status="passed",
+            elapsed_secs=planning_elapsed_secs,
+            css_class="complete",
+            subgraph=sg_id,
+        )
+    )
+    if parallel:
+        graph.add_node(Node(id=fanout_node, shape="circle", css_class="fannode", subgraph=sg_id))
     for track in tracks:
         tid = track_node_ids[track["name"]]
-        display = track["name"].replace("-", " ").title()
-        new_subgraph_lines.append(f'    {tid}["{_node_label(display, track["name"])}"]')
-    if len(tracks) > 1:
-        new_subgraph_lines.append(f'    {fanin_node}((" "))')
-    new_subgraph_lines.append("    end")
+        graph.add_node(
+            Node(
+                id=tid,
+                display=track["name"].replace("-", " ").title(),
+                impl=track["name"],
+                css_class="pending",
+                subgraph=sg_id,
+            )
+        )
+    if parallel:
+        graph.add_node(Node(id=fanin_node, shape="circle", css_class="fannode", subgraph=sg_id))
 
-    new_subgraph = "\n".join(new_subgraph_lines)
-    sg_pattern = rf'    subgraph sg_{re.escape(stage_name)}\["[^"]*"\]\n.*?    end'
-    if re.search(sg_pattern, content, flags=re.DOTALL):
-        content = re.sub(sg_pattern, new_subgraph, content, flags=re.DOTALL)
+    # Splice the stage node out of the edge graph, capturing the downstream target.
+    incoming, downstream, kept = _splice_node(graph.edges, stage_name, planning_node)
+    graph.edges = kept + incoming
+    if parallel:
+        track_ids = list(track_node_ids.values())
+        graph.edges.append(Edge(steps=[[planning_node], [fanout_node]]))
+        graph.edges.append(Edge(steps=[[fanout_node], track_ids]))
+        graph.edges.append(Edge(steps=[track_ids, [fanin_node]]))
+        if downstream:
+            graph.edges.append(Edge(steps=[[fanin_node], downstream]))
     else:
-        old_def = re.search(rf'    {re.escape(stage_name)}\["[^"]*"\]', content)
-        if old_def:
-            content = content[: old_def.start()] + new_subgraph + content[old_def.end() :]
+        track_id = next(iter(track_node_ids.values()))
+        chain: list[list[str]] = [[planning_node], [track_id]]
+        if downstream:
+            chain.append(downstream)
+        graph.edges.append(Edge(steps=chain))
 
-    # Rewrite outgoing chain edge: {stage_name} --> next
-    if len(tracks) > 1:
-        fan_ids = " & ".join(track_node_ids[t["name"]] for t in tracks)
-
-        def _multi_chain(m: re.Match) -> str:
-            next_stage = m.group(1)
-            parts = [
-                f"    {planning_node} --> {fanout_node}",
-                f"    {fanout_node} --> {fan_ids}",
-                f"    {fan_ids} --> {fanin_node}",
-            ]
-            if next_stage:
-                parts.append(f"    {fanin_node} --> {next_stage}")
-            return "\n".join(parts)
-
-        content = re.sub(rf"    {re.escape(stage_name)} --> (\w+)", _multi_chain, content)
-    else:
-        tid = track_node_ids[tracks[0]["name"]]
-
-        def _single_chain(m: re.Match) -> str:
-            next_stage = m.group(1)
-            line = f"    {planning_node} --> {tid}"
-            if next_stage:
-                line += f" --> {next_stage}"
-            return line
-
-        content = re.sub(rf"    {re.escape(stage_name)} --> (\w+)", _single_chain, content)
-
-    # Rewrite any incoming edge to this stage → point to planning node
-    content = re.sub(
-        rf"    (\w+) --> {re.escape(stage_name)}\n",
-        rf"    \1 --> {planning_node}\n",
-        content,
-    )
-
-    # Replace class assignment
-    old_class = re.search(rf"    class {re.escape(stage_name)} \w+", content)
-    if old_class:
-        new_classes = [f"    class {planning_node} complete"]
-        if len(tracks) > 1:
-            new_classes.append(f"    class {fanout_node} fannode")
-        for track in tracks:
-            new_classes.append(f"    class {track_node_ids[track['name']]} pending")
-        if len(tracks) > 1:
-            new_classes.append(f"    class {fanin_node} fannode")
-        content = content[: old_class.start()] + "\n".join(new_classes) + content[old_class.end() :]
-
-    plan_path.write_text(content)
+    save_graph(run_folder, graph)
+    replace_mermaid_block(plan_path, graph)
     return track_node_ids
 
 
@@ -144,6 +125,9 @@ def _expand_slices(
     plan_path = run_folder / "plan.md"
     if not plan_path.exists() or not slice_files:
         return
+    graph = load_graph(run_folder)
+    if graph is None or stage_name not in graph.nodes:
+        return
 
     if not slice_groups:
         slice_groups = [[sf] for sf in slice_files]
@@ -151,87 +135,96 @@ def _expand_slices(
     all_slices = [sf for group in slice_groups for sf in group]
     slice_to_id = {sf: f"impl_{i + 1}" for i, sf in enumerate(all_slices)}
     has_parallel = any(len(g) > 1 for g in slice_groups)
+    sg_id = f"sg_{stage_name}"
     display_name = stage_name.replace("_", " ").title()
-    content = plan_path.read_text()
+    graph.subgraphs.setdefault(sg_id, Subgraph(id=sg_id, display=display_name))
 
-    new_subgraph_lines = [f'    subgraph sg_{stage_name}["{display_name}"]']
+    graph.remove_node(stage_name)
     for g_idx, group in enumerate(slice_groups):
         if len(group) > 1:
-            new_subgraph_lines.append(f'    fanout_{g_idx + 1}((" "))')
+            graph.add_node(Node(id=f"fanout_{g_idx + 1}", shape="circle", css_class="fannode", subgraph=sg_id))
         for sf in group:
             nid = slice_to_id[sf]
             i = all_slices.index(sf)
             title = _read_slice_title(sf) or f"{display_name} Slice {i + 1}"
-            new_subgraph_lines.append(f'    {nid}["{display_name} Slice {i + 1} -\\n{title}"]')
+            graph.add_node(
+                Node(
+                    id=nid,
+                    display=f"{display_name} Slice {i + 1}",
+                    impl=title,
+                    css_class="pending",
+                    subgraph=sg_id,
+                )
+            )
         if len(group) > 1:
-            new_subgraph_lines.append(f'    fanin_{g_idx + 1}((" "))')
-    new_subgraph_lines.append("    end")
-    new_subgraph = "\n".join(new_subgraph_lines)
+            graph.add_node(Node(id=f"fanin_{g_idx + 1}", shape="circle", css_class="fannode", subgraph=sg_id))
 
-    sg_pattern = rf'    subgraph sg_{re.escape(stage_name)}\["[^"]*"\]\n.*?    end'
-    if re.search(sg_pattern, content, flags=re.DOTALL):
-        content = re.sub(sg_pattern, new_subgraph, content, flags=re.DOTALL)
-    else:
-        old_def = re.search(rf'    {re.escape(stage_name)}\["[^"]*"\]', content)
-        if old_def:
-            content = content[: old_def.start()] + new_subgraph + content[old_def.end() :]
+    # Drop both prior→stage and stage→next; we replace them with a chain/fan structure.
+    _, downstream, kept = _splice_node(graph.edges, stage_name, planning_node=None)
+    graph.edges = kept
 
     if has_parallel:
-
-        def _parallel_chain(next_stage: str | None) -> str:
-            parts: list[str] = []
-            prev = prior_stage_name
-            for g_idx, group in enumerate(slice_groups):
-                if len(group) == 1:
-                    nid = slice_to_id[group[0]]
-                    parts.append(f"    {prev} --> {nid}" if parts else f"{prev} --> {nid}")
-                    prev = nid
-                else:
-                    fanout_id = f"fanout_{g_idx + 1}"
-                    fanin_id = f"fanin_{g_idx + 1}"
-                    fan_ids = " & ".join(slice_to_id[sf] for sf in group)
-                    parts.append(f"    {prev} --> {fanout_id}" if parts else f"{prev} --> {fanout_id}")
-                    parts.append(f"    {fanout_id} --> {fan_ids}")
-                    parts.append(f"    {fan_ids} --> {fanin_id}")
-                    prev = fanin_id
-            if next_stage:
-                parts.append(f"    {prev} --> {next_stage}")
-            return "\n".join(parts)
-
-        content = re.sub(
-            rf"{re.escape(prior_stage_name)} --> {re.escape(stage_name)}(?: --> (\w+))?",
-            lambda m: _parallel_chain(m.group(1)),
-            content,
-        )
-    else:
-        sub_ids = [slice_to_id[sf] for sf in all_slices]
-        chain = " --> ".join(sub_ids)
-        content = re.sub(
-            rf"{re.escape(prior_stage_name)} --> {re.escape(stage_name)}(?: --> (\w+))?",
-            lambda m: f"{prior_stage_name} --> {chain}" + (f" --> {m.group(1)}" if m.group(1) else ""),
-            content,
-        )
-
-    # Rewrite any stale "{stage_name} --> X" edge left from init_plan_md
-    last_group = slice_groups[-1]
-    if has_parallel and len(last_group) > 1:
-        last_chain_node = f"fanin_{len(slice_groups)}"
-    else:
-        last_chain_node = slice_to_id[last_group[-1]]
-
-    content = re.sub(
-        rf"    {re.escape(stage_name)} --> (\w+)",
-        lambda m: f"    {last_chain_node} --> {m.group(1)}",
-        content,
-    )
-
-    old_class = re.search(rf"    class {re.escape(stage_name)} \w+", content)
-    if old_class:
-        new_classes = [f"    class {slice_to_id[sf]} pending" for sf in all_slices]
+        prev: list[str] = [prior_stage_name] if prior_stage_name else []
         for g_idx, group in enumerate(slice_groups):
-            if len(group) > 1:
-                new_classes.append(f"    class fanout_{g_idx + 1} fannode")
-                new_classes.append(f"    class fanin_{g_idx + 1} fannode")
-        content = content[: old_class.start()] + "\n".join(new_classes) + content[old_class.end() :]
+            if len(group) == 1:
+                nid = slice_to_id[group[0]]
+                if prev:
+                    graph.edges.append(Edge(steps=[prev, [nid]]))
+                prev = [nid]
+            else:
+                fanout_id = f"fanout_{g_idx + 1}"
+                fanin_id = f"fanin_{g_idx + 1}"
+                fan_ids = [slice_to_id[sf] for sf in group]
+                if prev:
+                    graph.edges.append(Edge(steps=[prev, [fanout_id]]))
+                graph.edges.append(Edge(steps=[[fanout_id], fan_ids]))
+                graph.edges.append(Edge(steps=[fan_ids, [fanin_id]]))
+                prev = [fanin_id]
+        if downstream and prev:
+            graph.edges.append(Edge(steps=[prev, downstream]))
+    else:
+        # Build the single chain: prior --> impl_1 --> ... --> next
+        steps: list[list[str]] = []
+        if prior_stage_name:
+            steps.append([prior_stage_name])
+        for sf in all_slices:
+            steps.append([slice_to_id[sf]])
+        if downstream:
+            steps.append(downstream)
+        if len(steps) >= 2:
+            graph.edges.append(Edge(steps=steps))
 
-    plan_path.write_text(content)
+    save_graph(run_folder, graph)
+    replace_mermaid_block(plan_path, graph)
+
+
+def _splice_node(
+    edges: list[Edge], node_id: str, planning_node: str | None
+) -> tuple[list[Edge], list[str] | None, list[Edge]]:
+    """Remove every edge that references ``node_id``.
+
+    Incoming edges (those whose last step contains ``node_id``) are rewritten to
+    point at ``planning_node`` if provided, and returned in ``incoming``.
+    Outgoing edges (those whose first step contains ``node_id``) are dropped;
+    the immediate next step is returned as ``downstream`` so the caller can
+    re-attach the new structure.
+
+    Returns ``(incoming, downstream, kept)`` — the caller decides how to merge.
+    """
+    incoming: list[Edge] = []
+    downstream: list[str] | None = None
+    kept: list[Edge] = []
+    for edge in edges:
+        if not edge.steps:
+            continue
+        if node_id in edge.steps[0]:
+            if downstream is None and len(edge.steps) > 1:
+                downstream = [n for n in edge.steps[1] if n != node_id]
+            continue
+        if node_id in edge.steps[-1]:
+            new_last = [planning_node if n == node_id else n for n in edge.steps[-1]] if planning_node else None
+            if new_last:
+                incoming.append(Edge(steps=[*edge.steps[:-1], new_last]))
+            continue
+        kept.append(edge)
+    return incoming, downstream, kept
