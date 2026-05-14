@@ -66,6 +66,9 @@ check_untyped_defs = true
 warn_return_any = true
 warn_unused_ignores = true
 strict_equality = true
+# Stale wheel-build artefacts at ./build/lib/orchestrator collide with the source package
+# and produce "Duplicate module named 'orchestrator'" when running `mypy .`.
+exclude = ["^build/", "^dist/"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
