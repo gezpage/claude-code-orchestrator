@@ -2,7 +2,6 @@ name: minimal-codex
 
 agent:
   backend: codex_cli
-  model: gpt-5-codex
   sterile_context: true
   permission_mode: workspace-write
 

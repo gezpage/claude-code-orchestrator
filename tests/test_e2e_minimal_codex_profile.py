@@ -65,7 +65,7 @@ def test_minimal_codex_profile_e2e_records_codex_backend(tmp_path):
         assert agent.get(autonomous, {}).get("backend") == "codex_cli", (
             f"{autonomous} did not record codex_cli backend (got {agent.get(autonomous)!r})"
         )
-        assert agent.get(autonomous, {}).get("model") == "gpt-5-codex"
+        assert agent.get(autonomous, {}).get("model") is None
     assert agent.get("verification", {}).get("backend") == "deterministic"
 
     # spec + decomp + 1 impl + 1 reviewer = 4 — same single-agent shape as `minimal`.
