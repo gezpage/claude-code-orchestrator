@@ -28,11 +28,12 @@ def expand_nodes(
     """
     with _plan_lock:
         if stage.expansion == ExpansionKind.TRACKS:
-            return _expand_tracks(run_folder, stage.name, tracks or [], planning_elapsed_secs)
+            return _expand_tracks(run_folder, stage.name, stage.mode, tracks or [], planning_elapsed_secs)
         if stage.expansion == ExpansionKind.SLICES:
             _expand_slices(
                 run_folder,
                 stage.name,
+                stage.mode,
                 stage.slices_from_stage or "",
                 slice_files or [],
                 slice_groups or [],
@@ -43,6 +44,7 @@ def expand_nodes(
 def _expand_tracks(
     run_folder: Path,
     stage_name: str,
+    stage_mode: str,
     tracks: list[dict],
     planning_elapsed_secs: float | None,
 ) -> dict[str, str]:
@@ -74,6 +76,9 @@ def _expand_tracks(
             elapsed_secs=planning_elapsed_secs,
             css_class="complete",
             subgraph=sg_id,
+            mode=stage_mode,
+            stage_dir=stage_name,
+            file_suffix="planning",
         )
     )
     if parallel:
@@ -87,6 +92,9 @@ def _expand_tracks(
                 impl=track["name"],
                 css_class="pending",
                 subgraph=sg_id,
+                mode=stage_mode,
+                stage_dir=stage_name,
+                file_suffix=track["name"],
             )
         )
     if parallel:
@@ -117,6 +125,7 @@ def _expand_tracks(
 def _expand_slices(
     run_folder: Path,
     stage_name: str,
+    stage_mode: str,
     prior_stage_name: str,
     slice_files: list[str],
     slice_groups: list[list[str]],
@@ -154,6 +163,9 @@ def _expand_slices(
                     impl=title,
                     css_class="pending",
                     subgraph=sg_id,
+                    mode=stage_mode,
+                    stage_dir=stage_name,
+                    file_suffix=nid,
                 )
             )
         if len(group) > 1:

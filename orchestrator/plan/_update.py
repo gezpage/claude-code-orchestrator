@@ -108,11 +108,12 @@ def _update_plan_md(
                     status=status,
                     elapsed_secs=elapsed_secs,
                     css_class=css_class,
+                    stage_dir=stage,
                 )
             )
         save_graph(run_folder, graph)
         plan_path.parent.mkdir(parents=True, exist_ok=True)
-        plan_path.write_text(render_block(graph))
+        plan_path.write_text(render_block(graph, run_folder))
         return
 
     node = graph.nodes.get(stage)
