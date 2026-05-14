@@ -8,6 +8,7 @@ Format: [Unreleased] at the top, dated releases below, newest first.
 ## [Unreleased]
 
 ### Added
+- 2026-05-14: Hardened git/worktree state handling at slice dispatch. A new `orchestrator/_git.py` provides explicit validators (`is_clean`, `branch_exists`, `current_branch`, `worktree_registered`, `has_merge_conflicts`, `abort_merge`) used to refuse destructive operations on dirty repos, switch onto an existing branch instead of silently continuing on a stale one, detect merge conflicts and `git merge --abort` them, and treat unexpected git states as structured `blocked` signals. Covers issue #79.
 - 2026-05-14: Deterministic verification stage (`mode: deterministic`) and recipe-driven verifier framework under `orchestrator/verifiers/`. Bundled Node and Go recipes with `node_manifest_sanity` and `go_module_sanity` probes; project-level overrides via `.cco.yaml` at the repo root; `VERIFY.md` and `verify.json` artefacts consumed by review prompts. Inserted into the minimal and full profiles between implementation/QA and review. Not a hard gate — verification surfaces evidence to reviewers; repos without recognised toolchain markers produce a benign `skipped` report. See ADR-017 and issue #22.
 
 ### Changed

@@ -11,8 +11,10 @@ from pathlib import Path
 import yaml
 
 import orchestrator.review_cycle as review_cycle_mod
+from orchestrator import _git as git_state
 from orchestrator import paths
 from orchestrator import state as state_mod
+from orchestrator._git import GitStateError
 from orchestrator.logger import OrchestratorLogger
 from orchestrator.plan import expand_nodes, init_plan_md, update_plan_md
 from orchestrator.profile import ExpansionKind, StageConfig, load_profile
@@ -124,6 +126,10 @@ def _build_variables(
 def _create_worktree(repo_root: str, temp_branch: str, base_branch: str, logger, stage_name: str) -> str:
     import tempfile
 
+    if git_state.branch_exists(repo_root, temp_branch):
+        raise GitStateError(
+            f"cannot create worktree on '{temp_branch}': branch already exists in {repo_root}"
+        )
     wt_path = tempfile.mkdtemp(prefix=f"orch-wt-{temp_branch}-")
     result = subprocess.run(
         ["git", "-C", repo_root, "worktree", "add", wt_path, "-b", temp_branch, base_branch],
@@ -131,20 +137,24 @@ def _create_worktree(repo_root: str, temp_branch: str, base_branch: str, logger,
         text=True,
     )
     if result.returncode != 0:
-        raise RuntimeError(f"git worktree add failed: {result.stderr}")
+        raise GitStateError(f"git worktree add failed: {result.stderr.strip()}")
     logger.log(stage_name, "INFO", f"Created worktree {wt_path} on branch {temp_branch}")
     return wt_path
 
 
 def _remove_worktree(repo_root: str, wt_path: str, temp_branch: str, logger, stage_name: str) -> None:
-    r1 = subprocess.run(
-        ["git", "-C", repo_root, "worktree", "remove", "--force", wt_path], capture_output=True, text=True
-    )
-    if r1.returncode != 0:
-        logger.log(stage_name, "WARN", f"git worktree remove failed for {wt_path}: {r1.stderr.strip()}")
-    r2 = subprocess.run(["git", "-C", repo_root, "branch", "-D", temp_branch], capture_output=True, text=True)
-    if r2.returncode != 0:
-        logger.log(stage_name, "WARN", f"git branch -D {temp_branch} failed: {r2.stderr.strip()}")
+    if git_state.worktree_registered(repo_root, wt_path):
+        r1 = subprocess.run(
+            ["git", "-C", repo_root, "worktree", "remove", "--force", wt_path], capture_output=True, text=True
+        )
+        if r1.returncode != 0:
+            logger.log(stage_name, "WARN", f"git worktree remove failed for {wt_path}: {r1.stderr.strip()}")
+    else:
+        logger.log(stage_name, "INFO", f"worktree {wt_path} not registered — skipping remove")
+    if git_state.branch_exists(repo_root, temp_branch):
+        r2 = subprocess.run(["git", "-C", repo_root, "branch", "-D", temp_branch], capture_output=True, text=True)
+        if r2.returncode != 0:
+            logger.log(stage_name, "WARN", f"git branch -D {temp_branch} failed: {r2.stderr.strip()}")
     logger.log(stage_name, "INFO", f"Removed worktree {wt_path}")
 
 
@@ -155,22 +165,38 @@ def _merge_worktree_branch(repo_root: str, temp_branch: str, logger, stage_name:
         text=True,
     )
     if result.returncode != 0:
-        raise RuntimeError(f"git merge {temp_branch} failed: {result.stderr}")
+        if git_state.has_merge_conflicts(repo_root):
+            git_state.abort_merge(repo_root)
+            raise GitStateError(
+                f"merge conflict on '{temp_branch}' — aborted; manual resolution required"
+            )
+        raise GitStateError(f"git merge {temp_branch} failed: {result.stderr.strip()}")
     logger.log(stage_name, "INFO", f"Merged {temp_branch} into HEAD")
 
 
 def _create_branch(branch: str, repo_root: str, logger, stage_name: str) -> None:
+    if not git_state.is_clean(repo_root):
+        raise GitStateError(
+            f"working tree not clean in {repo_root} — refuse to create or switch to '{branch}'"
+        )
+    if git_state.branch_exists(repo_root, branch):
+        if git_state.current_branch(repo_root) == branch:
+            logger.log(stage_name, "INFO", f"already on branch '{branch}' — continuing")
+            return
+        result = subprocess.run(
+            ["git", "-C", repo_root, "checkout", branch], capture_output=True, text=True
+        )
+        if result.returncode != 0:
+            raise GitStateError(f"git checkout {branch} failed: {result.stderr.strip()}")
+        logger.log(stage_name, "INFO", f"checked out existing branch '{branch}'")
+        return
     result = subprocess.run(
         ["git", "-C", repo_root, "checkout", "-b", branch],
         capture_output=True,
         text=True,
     )
     if result.returncode != 0:
-        if "already exists" in result.stderr:
-            logger.log(stage_name, "WARN", f"branch '{branch}' already exists — continuing on existing branch")
-            return
-        logger.log(stage_name, "ERROR", f"git checkout -b {branch} failed: {result.stderr}")
-        raise RuntimeError(f"Failed to create branch {branch}: {result.stderr}")
+        raise GitStateError(f"git checkout -b {branch} failed: {result.stderr.strip()}")
     logger.log(stage_name, "INFO", f"Created branch {branch}")
 
 
@@ -397,7 +423,11 @@ def _dispatch_slices(
 ) -> dict:
     signals = signals or {}
     stage_standards = ctx.project_standards if stage.standards else None
-    _create_branch(ctx.branch, variables["repo_root"], ctx.logger, stage.name)
+    try:
+        _create_branch(ctx.branch, variables["repo_root"], ctx.logger, stage.name)
+    except GitStateError as exc:
+        ctx.logger.log(stage.name, "ERROR", f"git state error before slice dispatch: {exc}")
+        return {"stage": stage.name, "status": "blocked", "message": str(exc)}
 
     prior_sig = signals.get(stage.slices_from_stage or "", {}) if stage.slices_from_stage else {}
     slice_files: list[str] = prior_sig.get("slice_files", [])
@@ -466,32 +496,37 @@ def _dispatch_slices(
             worktrees: dict[str, tuple[str, str]] = {}
             failed_sig: dict | None = None
             try:
-                for sf in group:
-                    sub_id = slice_to_id[sf]
-                    temp_branch = f"{ctx.branch}-{sub_id}"
-                    wt_path = _create_worktree(repo_root, temp_branch, ctx.branch, ctx.logger, stage.name)
-                    worktrees[sub_id] = (wt_path, temp_branch)
-                    update_plan_md(run_folder, sub_id, "in_progress")
+                try:
+                    for sf in group:
+                        sub_id = slice_to_id[sf]
+                        temp_branch = f"{ctx.branch}-{sub_id}"
+                        wt_path = _create_worktree(repo_root, temp_branch, ctx.branch, ctx.logger, stage.name)
+                        worktrees[sub_id] = (wt_path, temp_branch)
+                        update_plan_md(run_folder, sub_id, "in_progress")
+                except GitStateError as exc:
+                    ctx.logger.log(stage.name, "ERROR", f"worktree setup failed: {exc}")
+                    failed_sig = {"status": "blocked", "message": str(exc)}
 
                 futures2: dict[concurrent.futures.Future, tuple[str, str]] = {}
-                with concurrent.futures.ThreadPoolExecutor(max_workers=len(group)) as executor:
-                    for slice_file in group:
-                        sub_id = slice_to_id[slice_file]
-                        wt_path, _ = worktrees[sub_id]
-                        vars_copy = dict(variables)
-                        vars_copy["slice_file"] = slice_file
-                        fut = executor.submit(
-                            _run_slice,
-                            stage.name,
-                            impl,
-                            vars_copy,
-                            run_folder,
-                            ctx,
-                            sub_id,
-                            wt_path,
-                            stage_standards,
-                        )
-                        futures2[fut] = (sub_id, slice_file)
+                if failed_sig is None:
+                    with concurrent.futures.ThreadPoolExecutor(max_workers=len(group)) as executor:
+                        for slice_file in group:
+                            sub_id = slice_to_id[slice_file]
+                            wt_path, _ = worktrees[sub_id]
+                            vars_copy = dict(variables)
+                            vars_copy["slice_file"] = slice_file
+                            fut = executor.submit(
+                                _run_slice,
+                                stage.name,
+                                impl,
+                                vars_copy,
+                                run_folder,
+                                ctx,
+                                sub_id,
+                                wt_path,
+                                stage_standards,
+                            )
+                            futures2[fut] = (sub_id, slice_file)
 
                 for fut, (sub_id, slice_file) in futures2.items():
                     try:
@@ -510,7 +545,18 @@ def _dispatch_slices(
                             failed_sig = sig
                     else:
                         _, temp_branch = worktrees[sub_id]
-                        _merge_worktree_branch(repo_root, temp_branch, ctx.logger, stage.name)
+                        try:
+                            _merge_worktree_branch(repo_root, temp_branch, ctx.logger, stage.name)
+                        except GitStateError as exc:
+                            ctx.logger.log(
+                                stage.name,
+                                "ERROR",
+                                f"pipeline stopped: merge failed for slice {slice_file}: {exc}",
+                            )
+                            update_plan_md(run_folder, sub_id, "blocked")
+                            if failed_sig is None:
+                                failed_sig = {"status": "blocked", "message": str(exc)}
+                            continue
                         commits = sig.get("commit_hashes", [])
                         all_commits.extend(commits)
                         update_plan_md(

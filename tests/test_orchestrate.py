@@ -4,6 +4,7 @@ import pytest
 import yaml
 
 from orchestrator import orchestrate
+from orchestrator._git import GitStateError
 from orchestrator.orchestrate import _PipelineContext
 from orchestrator.profile import ExpansionKind, StageConfig
 
@@ -30,6 +31,23 @@ def _git_ok():
     # the synthesised pipeline. Harmless for non-diff subprocess calls (they ignore stdout).
     r.stdout = "diff --git a/f b/f\nindex 1..2 100644\n--- a/f\n+++ b/f\n@@ -1 +1 @@\n-a\n+b\n"
     return r
+
+
+def _patch_safe_git_state():
+    """Return a contextlib.ExitStack with patches that make _git validators report a
+    clean repo on a fresh branch. Use in integration tests that exercise the slice
+    dispatcher without explicitly testing git state validation.
+    """
+    import contextlib
+
+    stack = contextlib.ExitStack()
+    stack.enter_context(patch("orchestrator.orchestrate.git_state.is_clean", return_value=True))
+    stack.enter_context(patch("orchestrator.orchestrate.git_state.branch_exists", return_value=False))
+    stack.enter_context(patch("orchestrator.orchestrate.git_state.current_branch", return_value="main"))
+    stack.enter_context(patch("orchestrator.orchestrate.git_state.worktree_registered", return_value=False))
+    stack.enter_context(patch("orchestrator.orchestrate.git_state.has_merge_conflicts", return_value=False))
+    stack.enter_context(patch("orchestrator.orchestrate.git_state.abort_merge"))
+    return stack
 
 
 DISCOVERY_PLANNING_SIGNAL = {
@@ -188,6 +206,7 @@ def test_full_happy_path(tmp_path):
         patch("orchestrator.orchestrate.run_interactive_stage") as mock_ris,
         patch("orchestrator.orchestrate.update_plan_md") as mock_plan,
         patch("orchestrator.orchestrate.subprocess.run", return_value=_git_ok()),
+        _patch_safe_git_state(),
     ):
         # alignment-log.md must exist inside the actual run folder; patch resolve to a known path
         run_folder_path = runs_base / "feature-xyz" / "2026-01-01-run-1"
@@ -385,6 +404,7 @@ def test_branch_created_at_implementation_start(tmp_path):
         patch("orchestrator.orchestrate.update_plan_md"),
         patch("orchestrator.orchestrate.subprocess.run", side_effect=fake_git),
         patch("orchestrator.orchestrate._resolve_run_folder", return_value=run_folder_path),
+        _patch_safe_git_state(),
     ):
         orchestrate.run_pipeline(docs_root, "myproject", "feature", "feat/test", str(tmp_path / "test.yaml"))
 
@@ -683,6 +703,7 @@ def test_implementation_filters_non_slice_files(tmp_path):
         patch("orchestrator.orchestrate.update_plan_md"),
         patch("orchestrator.orchestrate.subprocess.run", return_value=_git_ok()),
         patch("orchestrator.orchestrate._resolve_run_folder", return_value=run_folder_path),
+        _patch_safe_git_state(),
     ):
         orchestrate.run_pipeline(docs_root, "myproject", "feature", "feat/test", str(tmp_path / "test.yaml"))
 
@@ -1579,4 +1600,201 @@ def test_prompts_blocks_when_diff_file_is_prose_summary(tmp_path):
 
     assert result["status"] == "blocked"
     assert "no valid git diff" in result["message"]
+    mock_rs.assert_not_called()
+
+
+# ── git state hardening (issue #79) ───────────────────────────────────────────
+
+
+def test_create_branch_refuses_when_working_tree_dirty(tmp_path):
+    """A dirty repo blocks branch creation/switching with a clear GitStateError."""
+    from orchestrator.orchestrate import _create_branch
+
+    with patch("orchestrator.orchestrate.git_state.is_clean", return_value=False):
+        with pytest.raises(GitStateError, match="working tree not clean"):
+            _create_branch("feat/x", "/repo", MagicMock(), "implementation")
+
+
+def test_create_branch_switches_to_existing_branch_when_not_on_it(tmp_path):
+    """If the branch already exists and we're elsewhere, checkout (no -b)."""
+    from orchestrator.orchestrate import _create_branch
+
+    ok = MagicMock(returncode=0, stdout="", stderr="")
+    with (
+        patch("orchestrator.orchestrate.git_state.is_clean", return_value=True),
+        patch("orchestrator.orchestrate.git_state.branch_exists", return_value=True),
+        patch("orchestrator.orchestrate.git_state.current_branch", return_value="main"),
+        patch("orchestrator.orchestrate.subprocess.run", return_value=ok) as mock_run,
+    ):
+        _create_branch("feat/x", "/repo", MagicMock(), "implementation")
+    cmd = mock_run.call_args[0][0]
+    assert "checkout" in cmd and "-b" not in cmd
+    assert "feat/x" in cmd
+
+
+def test_create_branch_noop_when_already_on_target(tmp_path):
+    """Resume case: already on the feature branch with clean tree → just log and return."""
+    from orchestrator.orchestrate import _create_branch
+
+    with (
+        patch("orchestrator.orchestrate.git_state.is_clean", return_value=True),
+        patch("orchestrator.orchestrate.git_state.branch_exists", return_value=True),
+        patch("orchestrator.orchestrate.git_state.current_branch", return_value="feat/x"),
+        patch("orchestrator.orchestrate.subprocess.run") as mock_run,
+    ):
+        _create_branch("feat/x", "/repo", MagicMock(), "implementation")
+    mock_run.assert_not_called()
+
+
+def test_create_worktree_refuses_when_temp_branch_already_exists(tmp_path):
+    """A pre-existing temp branch is unexpected — refuse to clobber it."""
+    from orchestrator.orchestrate import _create_worktree
+
+    with patch("orchestrator.orchestrate.git_state.branch_exists", return_value=True):
+        with pytest.raises(GitStateError, match="branch already exists"):
+            _create_worktree("/repo", "feat/x-impl_1", "feat/x", MagicMock(), "implementation")
+
+
+def test_remove_worktree_silent_when_not_registered(tmp_path):
+    """Missing worktree → log INFO, no WARN, no subprocess call for `worktree remove`."""
+    from orchestrator.orchestrate import _remove_worktree
+
+    logger = MagicMock()
+    with (
+        patch("orchestrator.orchestrate.git_state.worktree_registered", return_value=False),
+        patch("orchestrator.orchestrate.git_state.branch_exists", return_value=False),
+        patch("orchestrator.orchestrate.subprocess.run") as mock_run,
+    ):
+        _remove_worktree("/repo", "/tmp/missing", "feat/x-impl_1", logger, "implementation")
+    mock_run.assert_not_called()
+    levels = [call.args[1] for call in logger.log.call_args_list]
+    assert "WARN" not in levels
+
+
+def test_merge_worktree_branch_aborts_on_conflict(tmp_path):
+    """Merge conflict → call abort_merge, raise GitStateError with conflict message."""
+    from orchestrator.orchestrate import _merge_worktree_branch
+
+    failed = MagicMock(returncode=1, stdout="", stderr="CONFLICT (content): ...")
+    with (
+        patch("orchestrator.orchestrate.subprocess.run", return_value=failed),
+        patch("orchestrator.orchestrate.git_state.has_merge_conflicts", return_value=True),
+        patch("orchestrator.orchestrate.git_state.abort_merge") as mock_abort,
+    ):
+        with pytest.raises(GitStateError, match="merge conflict"):
+            _merge_worktree_branch("/repo", "feat/x-impl_1", MagicMock(), "implementation")
+    mock_abort.assert_called_once_with("/repo")
+
+
+def test_slices_dispatcher_returns_blocked_on_dirty_tree(tmp_path):
+    """Dirty repo at slice dispatch → structured 'blocked' signal, no slice runs."""
+    from orchestrator.orchestrate import _dispatch_slices
+
+    stage = StageConfig(
+        name="implementation",
+        prompt="prompts/implementation/default.md",
+        expansion=ExpansionKind.SLICES,
+        slices_from_stage="decomposition",
+    )
+    ctx = _make_ctx(tmp_path)
+    run_folder = _make_run_folder(tmp_path)
+    signals = {"decomposition": {"slice_files": ["S-01-a.md"], "slice_groups": [["S-01-a.md"]]}}
+
+    with (
+        patch("orchestrator.orchestrate.git_state.is_clean", return_value=False),
+        patch("orchestrator.orchestrate.run_stage") as mock_rs,
+        patch("orchestrator.orchestrate.update_plan_md"),
+        patch("orchestrator.orchestrate.expand_nodes"),
+    ):
+        result = _dispatch_slices(stage, {"repo_root": "/repo"}, run_folder, ctx, signals)
+
+    assert result["status"] == "blocked"
+    assert "working tree not clean" in result["message"]
+    mock_rs.assert_not_called()
+
+
+def test_slices_dispatcher_converts_merge_conflict_to_blocked_signal(tmp_path):
+    """A merge conflict in a parallel group → structured blocked signal; worktrees still cleaned up."""
+    from orchestrator.orchestrate import _dispatch_slices
+
+    stage = StageConfig(
+        name="implementation",
+        prompt="prompts/implementation/default.md",
+        expansion=ExpansionKind.SLICES,
+        slices_from_stage="decomposition",
+    )
+    ctx = _make_ctx(tmp_path)
+    run_folder = _make_run_folder(tmp_path)
+    signals = {
+        "decomposition": {
+            "slice_files": ["S-01-a.md", "S-02-b.md"],
+            "slice_groups": [["S-01-a.md", "S-02-b.md"]],
+        }
+    }
+    impl_sig = {"status": "passed", "commit_hashes": ["c1"]}
+
+    mock_future = MagicMock()
+    mock_future.result.return_value = (impl_sig, 1.0)
+
+    with (
+        _patch_safe_git_state(),
+        patch("orchestrator.orchestrate._create_branch"),
+        patch("orchestrator.orchestrate._create_worktree", return_value="/tmp/wt"),
+        patch("orchestrator.orchestrate._remove_worktree") as mock_rm,
+        patch(
+            "orchestrator.orchestrate._merge_worktree_branch",
+            side_effect=GitStateError("merge conflict on 'feat/test-impl_1' — aborted"),
+        ),
+        patch("orchestrator.orchestrate.update_plan_md"),
+        patch("orchestrator.orchestrate.expand_nodes"),
+        patch("concurrent.futures.ThreadPoolExecutor") as mock_exec_cls,
+    ):
+        mock_exec = MagicMock()
+        mock_exec.__enter__ = MagicMock(return_value=mock_exec)
+        mock_exec.__exit__ = MagicMock(return_value=False)
+        mock_exec.submit.return_value = mock_future
+        mock_exec_cls.return_value = mock_exec
+
+        result = _dispatch_slices(stage, {"repo_root": "/repo"}, run_folder, ctx, signals)
+
+    assert result["status"] == "blocked"
+    assert "merge conflict" in result["message"]
+    assert mock_rm.call_count == 2
+
+
+def test_slices_dispatcher_blocks_when_worktree_creation_fails(tmp_path):
+    """Pre-existing temp branch → worktree creation refuses, slice dispatch is skipped."""
+    from orchestrator.orchestrate import _dispatch_slices
+
+    stage = StageConfig(
+        name="implementation",
+        prompt="prompts/implementation/default.md",
+        expansion=ExpansionKind.SLICES,
+        slices_from_stage="decomposition",
+    )
+    ctx = _make_ctx(tmp_path)
+    run_folder = _make_run_folder(tmp_path)
+    signals = {
+        "decomposition": {
+            "slice_files": ["S-01-a.md", "S-02-b.md"],
+            "slice_groups": [["S-01-a.md", "S-02-b.md"]],
+        }
+    }
+
+    with (
+        _patch_safe_git_state(),
+        patch("orchestrator.orchestrate._create_branch"),
+        patch(
+            "orchestrator.orchestrate._create_worktree",
+            side_effect=GitStateError("branch already exists"),
+        ),
+        patch("orchestrator.orchestrate._remove_worktree"),
+        patch("orchestrator.orchestrate.update_plan_md"),
+        patch("orchestrator.orchestrate.expand_nodes"),
+        patch("orchestrator.orchestrate.run_stage") as mock_rs,
+    ):
+        result = _dispatch_slices(stage, {"repo_root": "/repo"}, run_folder, ctx, signals)
+
+    assert result["status"] == "blocked"
+    assert "branch already exists" in result["message"]
     mock_rs.assert_not_called()
