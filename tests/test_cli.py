@@ -35,10 +35,12 @@ def test_resume_help():
     assert "--run-folder" in result.output
 
 
-# ── run: missing --docs-root exits non-zero with clear error ─────────────────
+# ── run: missing flag in non-TTY context exits non-zero with clear error ─────
 
 
-def test_run_missing_docs_root():
+def test_run_missing_docs_root_non_tty():
+    # CliRunner stdin/stdout are not TTYs, so missing flags trigger the structured
+    # non-TTY error path rather than an interactive prompt.
     result = CliRunner().invoke(
         main,
         [
@@ -53,7 +55,6 @@ def test_run_missing_docs_root():
     )
     assert result.exit_code != 0
     assert "docs-root" in result.output.lower() or "docs_root" in result.output.lower()
-    # Must not be a Python traceback
     assert "Traceback" not in result.output
 
 
@@ -95,9 +96,50 @@ def test_run_dispatches(tmp_path):
                 "feat/x",
                 "--profile",
                 "full",
+                "--no-create-pr",
             ],
         )
-    mock_pipe.assert_called_once_with(str(tmp_path), "myproject", "features/x.md", "feat/x", "full")
+    mock_pipe.assert_called_once_with(
+        str(tmp_path),
+        "myproject",
+        "features/x.md",
+        "feat/x",
+        "full",
+        base_branch=None,
+        create_pr=False,
+    )
+
+
+def test_run_passes_base_branch_and_create_pr(tmp_path):
+    with patch("orchestrator.cli.orchestrate.run_pipeline") as mock_pipe, patch("orchestrator.cli.paths.require_dir"):
+        result = CliRunner().invoke(
+            main,
+            [
+                "run",
+                "--docs-root",
+                str(tmp_path),
+                "--project",
+                "myproject",
+                "--feature-path",
+                "features/x.md",
+                "--branch",
+                "feat/x",
+                "--profile",
+                "full",
+                "--base-branch",
+                "develop",
+                "--create-pr",
+            ],
+        )
+    mock_pipe.assert_called_once_with(
+        str(tmp_path),
+        "myproject",
+        "features/x.md",
+        "feat/x",
+        "full",
+        base_branch="develop",
+        create_pr=True,
+    )
 
 
 # ── stage: dispatches run_stage and prints signal JSON ───────────────────────

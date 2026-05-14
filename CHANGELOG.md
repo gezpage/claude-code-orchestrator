@@ -12,6 +12,10 @@ Format: [Unreleased] at the top, dated releases below, newest first.
 
 ### Fixed
 - 2026-05-14: Plan mermaid link hrefs now anchor on the trailing `projects/{project}/workflow/runs/{feature}/{run}` segments instead of the first `projects` segment from the left, so docs roots that themselves live under a directory called `projects` (e.g. `~/Dev/projects/docs`) no longer leak the host path into the URL.
+- 2026-05-14: TTY-aware pre-flight that prompts for missing `run` inputs, asks for the base branch (default `main`), syncs the base branch before creating the implementation branch, and optionally opens a draft GitHub PR via `gh` once the pipeline completes. New `--base-branch` and `--create-pr/--no-create-pr` flags; existing flags become optional. PR creation failures are warnings, never pipeline failures. See ADR-019.
+
+### Fixed
+- 2026-05-14: PR finalisation (`pr_draft` stage) now honours the profile-level agent backend instead of silently falling back to `ClaudeCodePrintRunner`. A Codex-backed profile previously could finish the pipeline successfully and then attempt to invoke Claude during finalisation; the resolved runner is now passed into `run_stage`, and the recorded `_state.yaml` agent metadata reflects the effective backend/model. See ADR-019.
 - 2026-05-14: Default dispatcher now creates/checks out `ctx.branch` before running any stage with `cwd_from_repo_root: true`, matching the slice dispatcher's pre-amble. Without this, the `minimal` profile's single-agent implementation would run on whatever branch was already checked out and commit there instead of the requested `--branch`.
 
 ### Changed

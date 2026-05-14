@@ -12,12 +12,60 @@ from pathlib import Path
 from orchestrator import state as state_mod
 from orchestrator.plan._constants import _STATUS_CLASS
 from orchestrator.plan._graph import Graph, Node, load_graph, save_graph
-from orchestrator.plan._helpers import _fetch_commit_messages, _format_elapsed, _stage_files
+from orchestrator.plan._helpers import (
+    _PR_NOTICE_MARKER,
+    _fetch_commit_messages,
+    _format_elapsed,
+    _stage_files,
+)
 from orchestrator.plan._manifest import _update_run_files_table
 from orchestrator.plan._render import render_block, replace_mermaid_block
 from orchestrator.plan._summary import _update_run_summary
 
 _plan_lock = threading.Lock()
+
+
+def set_pr_notice(run_folder: Path, message: str) -> None:
+    """Insert or replace the 'Draft PR' notice line in plan.md.
+
+    The notice lives outside the mermaid block (between the run header and the
+    '## Orchestration Flow' heading) so it survives every render_block / append
+    cycle. Thread-safe via _plan_lock.
+    """
+    run_folder = Path(run_folder)
+    plan_path = run_folder / "plan.md"
+    if not plan_path.exists():
+        return
+    with _plan_lock:
+        content = plan_path.read_text()
+        new_line = f"{_PR_NOTICE_MARKER} {message}"
+        lines = content.split("\n")
+        existing_idx = next(
+            (i for i, line in enumerate(lines) if line.startswith(_PR_NOTICE_MARKER)),
+            None,
+        )
+        if existing_idx is not None:
+            lines[existing_idx] = new_line
+            plan_path.write_text("\n".join(lines))
+            return
+        # Insert just before the Orchestration Flow heading (or before the mermaid block).
+        anchor_idx = next(
+            (i for i, line in enumerate(lines) if line.startswith("## Orchestration Flow")),
+            None,
+        )
+        if anchor_idx is None:
+            anchor_idx = next(
+                (i for i, line in enumerate(lines) if line.startswith("```mermaid")),
+                None,
+            )
+        if anchor_idx is None:
+            plan_path.write_text(content.rstrip("\n") + f"\n\n{new_line}\n")
+            return
+        insertion = [new_line, ""]
+        if anchor_idx > 0 and lines[anchor_idx - 1] != "":
+            insertion = ["", *insertion]
+        lines[anchor_idx:anchor_idx] = insertion
+        plan_path.write_text("\n".join(lines))
 
 
 def update_plan_md(

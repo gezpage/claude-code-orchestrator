@@ -32,6 +32,8 @@ Developer-facing reference. Read before touching any orchestrator code.
 
 - **Toolchain-specific verification logic lives in `orchestrator/verifiers/recipes/` (data) and `orchestrator/verifiers/probes/` (Python).** Orchestration code (`orchestrate.py`, `run_stage.py`, profile parsing) must contain no `if node` / `if go` / `if python` branches. Adding a new ecosystem means adding a recipe and any probes it needs — nothing else. See ADR-017.
 
+- **PR creation is a post-pipeline finalisation step, not a profile stage.** It runs only when `create-pr` is true and origin is a recognised GitHub repo. The `pr_draft` Claude stage that produces title/body, plus the `gh pr create` call, execute after the stage loop completes. Failures in this phase log warnings and write a manual-command fallback into `plan.md`; they do not change the pipeline exit status. See ADR-019.
+
 ---
 
 ## Path Resolution Rules
