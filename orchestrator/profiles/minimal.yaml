@@ -13,6 +13,9 @@ stages:
     slices_from_stage: decomposition
     cwd_from_repo_root: true
 
+  - stage: verification
+    mode: deterministic
+
   - stage: review
     expansion: prompts
     prompts:

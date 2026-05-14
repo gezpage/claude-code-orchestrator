@@ -43,6 +43,16 @@ If the diff path is missing, unreadable, or not a full git diff file:
 - emit a blocking finding that the review input is invalid
 - do not continue with speculative review
 
+{% if verify_md_path %}
+## Deterministic verification context
+
+Read `{{ verify_md_path }}` before you start. It is the output of an automated verification stage that ran the project's build, tests, lint, typecheck, and toolchain-specific probes against the diff under review.
+
+- Treat its findings as authoritative evidence — failed required commands and failed probes are not optional concerns.
+- If `verification_status` is `failed` and the reviewer prompt does not produce a corresponding blocking finding, that is itself a reviewer error.
+- Verification findings do not replace your own review. Inspect the diff for issues the verifier cannot detect (logic, design, security, mutable-state leaks).
+{% endif %}
+
 ## Review Dimensions
 
 **Correctness**

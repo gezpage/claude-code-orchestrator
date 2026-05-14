@@ -16,7 +16,7 @@ from orchestrator import state as state_mod
 from orchestrator.logger import OrchestratorLogger
 from orchestrator.plan import expand_nodes, init_plan_md, update_plan_md
 from orchestrator.profile import ExpansionKind, StageConfig, load_profile
-from orchestrator.run_stage import _fmt_elapsed, run_interactive_stage, run_stage
+from orchestrator.run_stage import _fmt_elapsed, run_deterministic_stage, run_interactive_stage, run_stage
 
 _SLICE_RE = re.compile(r"S-\d+-")
 
@@ -59,6 +59,9 @@ def _generic_summary(signal: dict) -> str | None:
     parts = []
     if outcome := signal.get("outcome"):
         parts.append(str(outcome))
+    if vstatus := signal.get("verification_status"):
+        toolchain = signal.get("toolchain", "?")
+        parts.append(f"{toolchain}: {vstatus}")
     if signal.get("prd_path"):
         parts.append("PRD")
     if signal.get("context_path"):
@@ -784,7 +787,10 @@ def run_pipeline(
 
         update_plan_md(run_folder, stage_name, "in_progress")
         t0 = time.monotonic()
-        sig = _DISPATCHERS[stage.expansion](stage, variables, run_folder, ctx, signals)
+        if stage.mode == "deterministic":
+            sig = run_deterministic_stage(stage_name, variables["repo_root"], run_folder, ctx.project_log_path)
+        else:
+            sig = _DISPATCHERS[stage.expansion](stage, variables, run_folder, ctx, signals)
         elapsed = time.monotonic() - t0
 
         signals[stage_name] = sig

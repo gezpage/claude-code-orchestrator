@@ -26,6 +26,9 @@ stages:
     standards: true
     cwd_from_repo_root: true
 
+  - stage: verification
+    mode: deterministic
+
   - stage: review
     expansion: prompts
     prompts:

@@ -18,7 +18,7 @@ class ExpansionKind(StrEnum):
 @dataclass(frozen=True)
 class StageConfig:
     name: str
-    mode: Literal["auto", "interactive"] = "auto"
+    mode: Literal["auto", "interactive", "deterministic"] = "auto"
     prompt: str | None = None
     prompts: dict[str, str] = field(default_factory=dict)
     artifact: str | None = None  # interactive stages only
@@ -48,9 +48,13 @@ def _parse_stage(raw: dict) -> StageConfig:
     if not isinstance(prompts, dict):
         raise ValueError(f"Stage {raw.get('stage')!r}: 'prompts' must be a mapping")
 
+    mode = raw.get("mode", "auto")
+    if mode not in ("auto", "interactive", "deterministic"):
+        raise ValueError(f"Stage {raw.get('stage')!r}: unknown mode {mode!r}")
+
     return StageConfig(
         name=raw["stage"],
-        mode=raw.get("mode", "auto"),
+        mode=mode,
         prompt=raw.get("prompt"),
         prompts=dict(prompts),
         artifact=raw.get("artifact"),
