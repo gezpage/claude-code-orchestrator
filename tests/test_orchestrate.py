@@ -26,7 +26,9 @@ def _git_ok():
     r = MagicMock()
     r.returncode = 0
     r.stderr = ""
-    r.stdout = ""
+    # Default stdout is a minimal git diff so the orchestrator's diff validator accepts
+    # the synthesised pipeline. Harmless for non-diff subprocess calls (they ignore stdout).
+    r.stdout = "diff --git a/f b/f\nindex 1..2 100644\n--- a/f\n+++ b/f\n@@ -1 +1 @@\n-a\n+b\n"
     return r
 
 
@@ -723,6 +725,9 @@ def test_review_md_path_uses_stage_subfolder(tmp_path):
         patch("orchestrator.orchestrate.update_plan_md"),
         patch("orchestrator.orchestrate.subprocess.run", return_value=_git_ok()),
         patch("orchestrator.orchestrate._resolve_run_folder", return_value=run_folder_path),
+        # This test isolates the review stage with no upstream implementation, so the
+        # diff-validator gate would block. Bypass the validator — we only assert path placement.
+        patch("orchestrator.orchestrate.review_cycle_mod.is_valid_diff_file", return_value=True),
     ):
         orchestrate.run_pipeline(docs_root, "myproject", "feature", "feat/test", str(tmp_path / "test.yaml"))
 
@@ -1415,6 +1420,7 @@ def test_prompts_all_reviewers_run_and_statuses_collected(tmp_path):
         patch("orchestrator.orchestrate.run_stage", return_value=review_sig) as mock_rs,
         patch("orchestrator.orchestrate.update_plan_md"),
         patch("orchestrator.orchestrate.subprocess.run", return_value=_git_ok()),
+        patch("orchestrator.orchestrate.review_cycle_mod.is_valid_diff_file", return_value=True),
     ):
         result = _dispatch_prompts(stage, {"repo_root": "/tmp"}, run_folder, ctx, {})
 
@@ -1443,6 +1449,7 @@ def test_prompts_fix_cycle_triggered_automatically_when_reviewer_requests_change
         patch("orchestrator.orchestrate.run_stage", return_value=review_sig),
         patch("orchestrator.orchestrate.update_plan_md"),
         patch("orchestrator.orchestrate.subprocess.run", return_value=_git_ok()),
+        patch("orchestrator.orchestrate.review_cycle_mod.is_valid_diff_file", return_value=True),
         patch(
             "orchestrator.orchestrate.review_cycle_mod.run", return_value={"all_passed": True, "reviewers": []}
         ) as mock_cycle,
@@ -1474,6 +1481,7 @@ def test_prompts_review_cycle_failure_returns_blocked_signal(tmp_path):
         patch("orchestrator.orchestrate.run_stage", return_value=review_sig),
         patch("orchestrator.orchestrate.update_plan_md"),
         patch("orchestrator.orchestrate.subprocess.run", return_value=_git_ok()),
+        patch("orchestrator.orchestrate.review_cycle_mod.is_valid_diff_file", return_value=True),
         patch(
             "orchestrator.orchestrate.review_cycle_mod.run",
             return_value={"all_passed": False, "reviewers": ["architecture"]},
@@ -1513,3 +1521,62 @@ def test_prompts_diff_patch_written_when_commit_hashes_present(tmp_path):
     diff_file = run_folder / "review" / "diff-round-1.patch"
     assert diff_file.exists()
     assert "diff --git" in diff_file.read_text()
+
+
+def test_prompts_blocks_when_no_commits_for_round_1_diff(tmp_path):
+    """Round-1 review must not dispatch reviewers when there is no diff to review.
+
+    A missing diff (no commit_hashes from upstream, or `repo_root` unset) means there's
+    nothing to review — fail the stage deterministically rather than send reviewers a
+    prose summary or an empty file."""
+    from orchestrator.orchestrate import _dispatch_prompts
+
+    stage = StageConfig(
+        name="review",
+        expansion=ExpansionKind.PROMPTS,
+        prompts={"architecture": "prompts/review/architecture.md"},
+    )
+    ctx = _make_ctx(tmp_path)
+    run_folder = _make_run_folder(tmp_path)
+
+    with (
+        patch("orchestrator.orchestrate.run_stage") as mock_rs,
+        patch("orchestrator.orchestrate.update_plan_md"),
+    ):
+        # No implementation signal → no commit_hashes → diff path is "".
+        result = _dispatch_prompts(stage, {"repo_root": "/tmp"}, run_folder, ctx, {})
+
+    assert result["status"] == "blocked"
+    assert "no valid git diff" in result["message"]
+    mock_rs.assert_not_called()
+
+
+def test_prompts_blocks_when_diff_file_is_prose_summary(tmp_path):
+    """If the computed diff file contains a prose summary (not a real git diff), block
+    the stage deterministically instead of sending reviewers a non-diff input."""
+    from orchestrator.orchestrate import _dispatch_prompts
+
+    stage = StageConfig(
+        name="review",
+        expansion=ExpansionKind.PROMPTS,
+        prompts={"architecture": "prompts/review/architecture.md"},
+    )
+    ctx = _make_ctx(tmp_path)
+    run_folder = _make_run_folder(tmp_path)
+    signals = {"implementation": {"commit_hashes": ["aaa"]}}
+
+    git_summary = MagicMock()
+    git_summary.returncode = 0
+    git_summary.stdout = "Refactored auth module and added retry tests.\n"
+    git_summary.stderr = ""
+
+    with (
+        patch("orchestrator.orchestrate.run_stage") as mock_rs,
+        patch("orchestrator.orchestrate.update_plan_md"),
+        patch("orchestrator.orchestrate.subprocess.run", return_value=git_summary),
+    ):
+        result = _dispatch_prompts(stage, {"repo_root": "/tmp"}, run_folder, ctx, signals)
+
+    assert result["status"] == "blocked"
+    assert "no valid git diff" in result["message"]
+    mock_rs.assert_not_called()

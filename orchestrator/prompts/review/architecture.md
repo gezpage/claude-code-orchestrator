@@ -191,20 +191,21 @@ Requirements:
 Emit exactly one line:
 
 ```text
-SIGNAL_JSON: {"stage": "review", "status": "passed", "reviewer_statuses": {"architecture": "approved"}, "changes_requested": [], "findings": []}
+SIGNAL_JSON: {"stage": "review", "status": "passed", "reviewer_statuses": {"architecture": "approved"}, "changes_requested": [], "findings": [], "non_blocking_findings": []}
 ```
 
-If changes are required, populate `findings` with one short sentence per blocking issue:
+If changes are required, populate `findings` with one short sentence per blocking issue and `non_blocking_findings` with one short sentence per non-blocking issue:
 
 ```text
-SIGNAL_JSON: {"stage": "review", "status": "passed", "reviewer_statuses": {"architecture": "changes-requested"}, "changes_requested": ["architecture"], "findings": ["Module augmentation path targets wrong module namespace", "Handler list mutates shared registry without synchronisation"]}
+SIGNAL_JSON: {"stage": "review", "status": "passed", "reviewer_statuses": {"architecture": "changes-requested"}, "changes_requested": ["architecture"], "findings": ["Module augmentation path targets wrong module namespace", "Handler list mutates shared registry without synchronisation"], "non_blocking_findings": ["Naming inconsistency between adapter and handler classes"]}
 ```
 
 Rules:
-- `findings` should contain only concise issue summaries
+- `findings` and `non_blocking_findings` should contain only concise issue summaries
 - no file paths
 - no fix instructions
 - no duplicated findings
+- `non_blocking_findings` are persisted as accepted risks in the final run summary — only list issues you would file as follow-ups, not stylistic drive-bys
 
 Required fields:
 - `stage`
@@ -212,3 +213,6 @@ Required fields:
 - `reviewer_statuses`
 - `changes_requested`
 - `findings`
+
+Optional fields:
+- `non_blocking_findings` — omit or send `[]` if you have nothing to record; when present, items are persisted as accepted risks in the final run summary.

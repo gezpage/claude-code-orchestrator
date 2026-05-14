@@ -571,8 +571,20 @@ def _dispatch_prompts(
     else:
         variables["diff"] = ""
 
+    # Deterministic gate: reject the review stage if the diff input is missing, empty, or
+    # not a real git diff. Without this, the reviewer prompt's rejection rule is the only
+    # backstop, and an LLM may still attempt a speculative review of a prose summary.
+    if not review_cycle_mod.is_valid_diff_file(variables["diff"]):
+        msg = (
+            f"no valid git diff for review stage '{stage.name}' "
+            f"(diff={variables['diff']!r}); upstream stage produced no commits or diff is not a git diff"
+        )
+        ctx.logger.log(stage.name, "ERROR", msg)
+        return {"stage": stage.name, "status": "blocked", "message": msg}
+
     reviewer_statuses: dict[str, str] = {}
     reviewer_findings: dict[str, list[str]] = {}
+    reviewer_non_blocking_findings: dict[str, list[str]] = {}
     changes_requested: list[str] = []
     for reviewer, prompt_path in stage.prompts.items():
         sub_id = f"{stage.name}_{reviewer}"
@@ -596,6 +608,9 @@ def _dispatch_prompts(
         findings = sig.get("findings", [])
         if isinstance(findings, list) and findings:
             reviewer_findings[reviewer] = findings
+        non_blocking = sig.get("non_blocking_findings", [])
+        if isinstance(non_blocking, list) and non_blocking:
+            reviewer_non_blocking_findings[reviewer] = non_blocking
         if verdict == "changes-requested":
             changes_requested.append(reviewer)
         sub_status = "blocked" if verdict == "changes-requested" else "passed"
@@ -605,6 +620,9 @@ def _dispatch_prompts(
         "status": "passed",
         "reviewer_statuses": reviewer_statuses,
         "reviewer_findings": reviewer_findings,
+        # Carried into review_cycle.run as the seed for accepted_risks, persisted in
+        # plan.md after every cycle terminates (success, max-cycles, or invalid-diff abort).
+        "reviewer_non_blocking_findings": reviewer_non_blocking_findings,
         "changes_requested": changes_requested,
         "review_md": str(review_md_path),
     }
@@ -629,6 +647,14 @@ def _dispatch_prompts(
                 "status": "blocked",
                 "message": f"review cycle incomplete, reviewers={result.get('reviewers', [])}",
             }
+    else:
+        # No cycle needed (all approved), but still surface non-blocking findings as accepted risks.
+        review_cycle_mod.append_findings_summary(
+            run_folder / "plan.md",
+            findings_map={},
+            reviewer_statuses=reviewer_statuses,
+            accepted_risks=reviewer_non_blocking_findings,
+        )
 
     return review_signal
 

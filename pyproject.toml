@@ -73,3 +73,6 @@ exclude = ["^build/", "^dist/"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "--cov=orchestrator --cov-report=term-missing --cov-fail-under=80"
+markers = [
+    "real_validator: opt out of the test_review_cycle.py autouse fixture that bypasses is_valid_diff_file",
+]

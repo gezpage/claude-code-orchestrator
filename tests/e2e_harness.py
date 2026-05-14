@@ -64,7 +64,9 @@ def git_ok() -> MagicMock:
     r = MagicMock()
     r.returncode = 0
     r.stderr = ""
-    r.stdout = ""
+    # Default stdout is a minimal git diff so the orchestrator's diff validator accepts
+    # the synthesised pipeline. Harmless for non-diff subprocess calls (they ignore stdout).
+    r.stdout = "diff --git a/f b/f\nindex 1..2 100644\n--- a/f\n+++ b/f\n@@ -1 +1 @@\n-a\n+b\n"
     return r
 
 

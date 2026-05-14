@@ -1,5 +1,6 @@
 # Review cycle manager; runs reviewer feedback rounds up to the configured cycle limit (_MAX_CYCLES).
 import re
+import subprocess
 import time
 from pathlib import Path
 
@@ -67,6 +68,47 @@ def _update_review_md(review_md_path: Path, reviewer: str, verdict: str, round_n
     review_md_path.write_text(_write_frontmatter(meta, body + section))
 
 
+def _write_round_diff(run_folder: Path, repo_root: str, commit_hashes: list[str], round_num: int) -> str:
+    """Compute the real git diff for this fix cycle and persist it to review/diff-round-N.patch.
+
+    Reviewers must operate on the actual patch, not on a prose summary returned by the fix
+    agent. Returns the absolute path string (empty if no commits or repo_root)."""
+    if not commit_hashes or not repo_root:
+        return ""
+    first, last = commit_hashes[0], commit_hashes[-1]
+    diff_result = subprocess.run(
+        ["git", "-C", repo_root, "diff", f"{first}^..{last}"],
+        capture_output=True,
+        text=True,
+    )
+    diff_path = run_folder / "review" / f"diff-round-{round_num}.patch"
+    diff_path.parent.mkdir(parents=True, exist_ok=True)
+    diff_path.write_text(diff_result.stdout)
+    return str(diff_path)
+
+
+def is_valid_diff_file(path: str) -> bool:
+    """Return True if `path` is a usable git-diff file for a reviewer.
+
+    Used at the orchestrator level to fail review stages deterministically when the
+    diff input is missing, unreadable, empty, or a prose summary rather than a real
+    git diff. Prompt-level rejection alone is unreliable: an LLM reviewer may still
+    attempt a speculative review on an invalid input. This check runs before the
+    reviewer is dispatched so it cannot."""
+    if not path:
+        return False
+    p = Path(path)
+    if not p.is_file():
+        return False
+    try:
+        head = p.read_text(errors="replace")[:4096]
+    except OSError:
+        return False
+    if not head.strip():
+        return False
+    return "diff --git" in head
+
+
 def _inject_fix_divider(review_md_path: Path, cycle_num: int, commit_messages: list[str]) -> None:
     """Insert a fix-cycle commit marker into review-log.md before the next review round."""
     if not review_md_path.exists():
@@ -76,9 +118,20 @@ def _inject_fix_divider(review_md_path: Path, cycle_num: int, commit_messages: l
     review_md_path.write_text(review_md_path.read_text() + divider)
 
 
-def _append_findings_summary(plan_path: Path, findings_map: _FindingsMap, reviewer_statuses: dict) -> None:
-    """Append a Review Findings section to plan.md after all cycles complete."""
-    if not plan_path.exists() or not findings_map:
+def append_findings_summary(
+    plan_path: Path,
+    findings_map: _FindingsMap,
+    reviewer_statuses: dict,
+    accepted_risks: dict[str, list[str]] | None = None,
+) -> None:
+    """Append a Review Findings section to plan.md after all cycles complete.
+
+    Blocking findings come from ``findings_map`` (with per-cycle resolution status).
+    Non-blocking findings come from ``accepted_risks`` and are persisted as accepted risks
+    so the final summary makes them visible even when no fix cycle ran."""
+    if not plan_path.exists():
+        return
+    if not findings_map and not accepted_risks:
         return
 
     lines = ["\n## Review Findings\n"]
@@ -95,6 +148,16 @@ def _append_findings_summary(plan_path: Path, findings_map: _FindingsMap, review
                 lines.append(f"- {text} → Unresolved")
         lines.append("")
 
+    if accepted_risks and any(accepted_risks.values()):
+        lines.append("### Accepted Risks (non-blocking)\n")
+        for reviewer, risks in accepted_risks.items():
+            if not risks:
+                continue
+            lines.append(f"**{reviewer}:**\n")
+            for text in risks:
+                lines.append(f"- {text}")
+            lines.append("")
+
     section = "\n".join(lines)
     content = plan_path.read_text()
     markers = ["\n## File Manifest", "\n## Run Summary"]
@@ -110,6 +173,10 @@ def _append_findings_summary(plan_path: Path, findings_map: _FindingsMap, review
         plan_path.write_text(content + section)
 
 
+# Back-compat alias for callers/tests that referenced the private name.
+_append_findings_summary = append_findings_summary
+
+
 def run(run_folder, docs_root, project, branch, review_signal, project_log_path, repo_root: str = "") -> dict:
     run_folder = Path(run_folder)
     logger = OrchestratorLogger(run_folder, str(project_log_path))
@@ -119,6 +186,7 @@ def run(run_folder, docs_root, project, branch, review_signal, project_log_path,
 
     reviewer_statuses = dict(review_signal.get("reviewer_statuses", {}))
     changes_requested = [r for r, s in reviewer_statuses.items() if s == "changes-requested"]
+    accepted_risks: dict[str, list[str]] = dict(review_signal.get("reviewer_non_blocking_findings", {}) or {})
 
     if not changes_requested:
         return {"all_passed": True}
@@ -175,12 +243,32 @@ def run(run_folder, docs_root, project, branch, review_signal, project_log_path,
         commit_messages = fix_sig.get("commit_messages", commit_hashes)
         _inject_fix_divider(review_md_path, cycle, commit_messages)
 
+        diff_path = _write_round_diff(run_folder, repo_root, commit_hashes, round_num)
+
+        # Deterministic gate: if the fix cycle produced no usable diff, fail the cycle here
+        # rather than dispatch reviewers against an empty or non-diff input.
+        if not is_valid_diff_file(diff_path):
+            msg = (
+                f"review-cycle round {round_num} aborted: no valid git diff at {diff_path!r} "
+                f"(fix-implementation commits={commit_hashes!r})"
+            )
+            logger.log("review-cycle", "ERROR", msg)
+            append_findings_summary(
+                run_folder / "plan.md", findings_map, reviewer_statuses, accepted_risks=accepted_risks
+            )
+            return {
+                "all_passed": False,
+                "blocked": True,
+                "reviewers": changes_requested,
+                "message": msg,
+            }
+
         for reviewer in list(changes_requested):
             review_vars = {
                 "run_folder": str(run_folder),
                 "docs_root": docs_root,
                 "review_md": str(review_md_path),
-                "diff": fix_sig.get("diff", ""),
+                "diff": diff_path,
                 "round": str(round_num),
                 "context_path": context_path,
                 "repo_root": repo_root,
@@ -200,6 +288,13 @@ def run(run_folder, docs_root, project, branch, review_signal, project_log_path,
             review_elapsed = time.monotonic() - review_t0
             verdict = sig.get("reviewer_statuses", {}).get(reviewer, sig.get("status", "unknown"))
             reviewer_statuses[reviewer] = verdict
+            round_non_blocking = sig.get("non_blocking_findings", [])
+            if isinstance(round_non_blocking, list) and round_non_blocking:
+                # Merge later-round non-blocking findings into accepted risks, de-duplicating.
+                existing = accepted_risks.setdefault(reviewer, [])
+                for text in round_non_blocking:
+                    if text not in existing:
+                        existing.append(text)
             _update_review_md(review_md_path, reviewer, verdict, round_num, sig.get("message", ""))
             plan_mod.update_plan_md(
                 run_folder,
@@ -219,8 +314,10 @@ def run(run_folder, docs_root, project, branch, review_signal, project_log_path,
 
         changes_requested = [r for r, s in reviewer_statuses.items() if s == "changes-requested"]
         if not changes_requested:
-            _append_findings_summary(run_folder / "plan.md", findings_map, reviewer_statuses)
+            append_findings_summary(
+                run_folder / "plan.md", findings_map, reviewer_statuses, accepted_risks=accepted_risks
+            )
             return {"all_passed": True}
 
-    _append_findings_summary(run_folder / "plan.md", findings_map, reviewer_statuses)
+    append_findings_summary(run_folder / "plan.md", findings_map, reviewer_statuses, accepted_risks=accepted_risks)
     return {"all_passed": False, "blocked": True, "reviewers": changes_requested}

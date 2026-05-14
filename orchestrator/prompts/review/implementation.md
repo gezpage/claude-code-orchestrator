@@ -38,6 +38,11 @@ You have read access to the full repository at `$REPO_ROOT`. Use this to substan
 Explore only what is needed to confirm or rule out a concern identified from the diff.
 {% endif %}
 
+If the diff path is missing, unreadable, or not a full git diff file:
+- mark the review as `changes-requested`
+- emit a blocking finding that the review input is invalid
+- do not continue with speculative review
+
 ## Review Dimensions
 
 **Correctness**
@@ -60,6 +65,28 @@ Explore only what is needed to confirm or rule out a concern identified from the
   - Swallowed errors (bare `except`, unchecked return values)
   - Mutation of inputs or shared state without documentation
   - Premature abstraction or unnecessary indirection
+
+**Mutable reference leaks**
+
+Returning or emitting mutable references is blocking when callers can corrupt:
+- repository state
+- cached state
+- summaries
+- emitted events
+- future outputs
+
+Do not downgrade a reproducible mutation leak to non-blocking just because existing tests do not cover it. The fix is one of: cloning on the way out, freezing, returning an immutable type, or an explicit documented contract plus tests asserting callers cannot affect retained state.
+
+**Public surface and manifest sanity**
+
+If the repository has a package or build manifest (e.g. `package.json`, `pyproject.toml`, `Cargo.toml`, `go.mod`), inspect it.
+
+Block on:
+- fake or no-op quality scripts such as `"lint": "echo add eslint"`
+- documented commands (in README, manifest, or CONTRIBUTING) that do not work
+- package scripts pointing to missing files (e.g. `"start": "node src/server.js"` when `src/server.js` does not exist)
+- unused production dependencies introduced or left by the change
+- dependency ranges that unintentionally allow major-version drift
 
 **Architecture**
 - Separation of concerns: is logic spread across the right layers?
@@ -123,13 +150,15 @@ Write your findings under `## Implementation Review — Round {{ round }}` in `{
 Emit exactly one line:
 
 ```
-SIGNAL_JSON: {"stage": "review", "status": "passed", "reviewer_statuses": {"implementation": "approved"}, "changes_requested": [], "findings": []}
+SIGNAL_JSON: {"stage": "review", "status": "passed", "reviewer_statuses": {"implementation": "approved"}, "changes_requested": [], "findings": [], "non_blocking_findings": []}
 ```
 
-If changes are required, populate `findings` with one short sentence per blocking issue (the issue only — no file paths, no fix instructions):
+If changes are required, populate `findings` with one short sentence per blocking issue and `non_blocking_findings` with one short sentence per non-blocking issue (the issue only — no file paths, no fix instructions):
 
 ```
-SIGNAL_JSON: {"stage": "review", "status": "passed", "reviewer_statuses": {"implementation": "changes-requested"}, "changes_requested": ["implementation"], "findings": ["Retry delay formula applies wrong exponent base", "Dead-letter callback errors are silently swallowed"]}
+SIGNAL_JSON: {"stage": "review", "status": "passed", "reviewer_statuses": {"implementation": "changes-requested"}, "changes_requested": ["implementation"], "findings": ["Retry delay formula applies wrong exponent base", "Dead-letter callback errors are silently swallowed"], "non_blocking_findings": ["Backoff jitter coefficient could be tunable"]}
 ```
 
-Required fields: `stage`, `status`, `reviewer_statuses`, `changes_requested`, `findings`.
+`non_blocking_findings` is optional — omit or send `[]` if you have nothing to record. When present, items are persisted as accepted risks in the final run summary, so only list issues you would file as follow-ups, not stylistic drive-bys.
+
+Required fields: `stage`, `status`, `reviewer_statuses`, `changes_requested`, `findings`. Optional: `non_blocking_findings`.

@@ -8,6 +8,8 @@
     "message": {"type": "string"},
     "reviewer_statuses": {"type": "object"},
     "changes_requested": {"type": "array", "items": {"type": "string"}},
+    "findings": {"type": "array", "items": {"type": "string"}},
+    "non_blocking_findings": {"type": "array", "items": {"type": "string"}},
     "review_md": {"type": "string"}
   },
   "additionalProperties": true
