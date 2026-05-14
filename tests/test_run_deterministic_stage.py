@@ -61,9 +61,9 @@ def test_no_claude_subprocess_invoked(tmp_path: Path):
     """Deterministic mode must never spawn the claude CLI — that's the whole point."""
     repo, run_folder, log_path = _setup(tmp_path)
     with (
-        patch("orchestrator.run_stage._run_claude") as mock_claude,
+        patch("orchestrator.agent_runner._claude.subprocess.Popen") as mock_popen,
         patch("orchestrator.verifiers.engine.subprocess.run") as mock_run,
     ):
         mock_run.return_value = type("P", (), {"returncode": 0, "stdout": "", "stderr": ""})()
         run_deterministic_stage("verification", str(repo), run_folder, str(log_path))
-    mock_claude.assert_not_called()
+    mock_popen.assert_not_called()

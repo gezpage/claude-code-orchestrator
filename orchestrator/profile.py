@@ -26,12 +26,16 @@ class StageConfig:
     expansion: ExpansionKind = ExpansionKind.NONE
     slices_from_stage: str | None = None  # SLICES: which prior signal carries slice_files
     cwd_from_repo_root: bool = False
+    # Raw agent config; merged with the profile-level default at dispatch time so
+    # profile parsing stays oblivious to the agent_runner module.
+    agent: dict[str, object] | None = None
 
 
 @dataclass(frozen=True)
 class Profile:
     name: str
     stages: tuple[StageConfig, ...]
+    agent: dict[str, object] | None = None
 
 
 _BUNDLED_PROFILES_DIR = Path(__file__).parent / "profiles"
@@ -52,6 +56,10 @@ def _parse_stage(raw: dict) -> StageConfig:
     if mode not in ("auto", "interactive", "deterministic"):
         raise ValueError(f"Stage {raw.get('stage')!r}: unknown mode {mode!r}")
 
+    agent = raw.get("agent")
+    if agent is not None and not isinstance(agent, dict):
+        raise ValueError(f"Stage {raw.get('stage')!r}: 'agent' must be a mapping")
+
     return StageConfig(
         name=raw["stage"],
         mode=mode,
@@ -62,6 +70,7 @@ def _parse_stage(raw: dict) -> StageConfig:
         expansion=expansion,
         slices_from_stage=raw.get("slices_from_stage"),
         cwd_from_repo_root=bool(raw.get("cwd_from_repo_root", False)),
+        agent=dict(agent) if agent else None,
     )
 
 
@@ -83,7 +92,12 @@ def load_profile(profile: str | Path, bundled_dir: Path | None = None) -> Profil
             raise FileNotFoundError(f"Unknown profile '{profile_str}'. Available: {available}")
         raw = yaml.safe_load(bundled.read_text())
 
+    profile_agent = raw.get("agent")
+    if profile_agent is not None and not isinstance(profile_agent, dict):
+        raise ValueError(f"Profile {raw.get('name')!r}: 'agent' must be a mapping")
+
     return Profile(
         name=raw.get("name", ""),
         stages=tuple(_parse_stage(s) for s in raw.get("stages", [])),
+        agent=dict(profile_agent) if profile_agent else None,
     )

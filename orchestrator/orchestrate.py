@@ -13,9 +13,10 @@ import yaml
 import orchestrator.review_cycle as review_cycle_mod
 from orchestrator import paths
 from orchestrator import state as state_mod
+from orchestrator.agent_runner import AgentRunner, build_runner, resolve_agent_config
 from orchestrator.logger import OrchestratorLogger
 from orchestrator.plan import expand_nodes, init_plan_md, update_plan_md
-from orchestrator.profile import ExpansionKind, StageConfig, load_profile
+from orchestrator.profile import ExpansionKind, Profile, StageConfig, load_profile
 from orchestrator.run_stage import _fmt_elapsed, run_deterministic_stage, run_interactive_stage, run_stage
 
 _SLICE_RE = re.compile(r"S-\d+-")
@@ -30,6 +31,14 @@ class _PipelineContext:
     branch: str
     project_config: dict
     project_standards: list
+    runners: dict[str, AgentRunner]
+    agent_metadata: dict[str, dict[str, str | None]]
+
+    def runner_for(self, stage_name: str) -> AgentRunner | None:
+        # Returns None for stages without a runner (e.g. deterministic stages or test
+        # contexts that patch run_stage at the call site). run_stage falls back to its
+        # default ClaudeCodePrintRunner when runner=None.
+        return self.runners.get(stage_name)
 
 
 def _output_summary(stage: StageConfig, signal: dict) -> str | None:
@@ -174,6 +183,25 @@ def _create_branch(branch: str, repo_root: str, logger, stage_name: str) -> None
     logger.log(stage_name, "INFO", f"Created branch {branch}")
 
 
+def _build_stage_runners(profile: Profile) -> tuple[dict[str, AgentRunner], dict[str, dict[str, str | None]]]:
+    """Resolve one runner per stage by merging profile-level + stage-level agent config.
+
+    Deterministic stages are skipped — they execute Python in-process and never invoke
+    the runner. Their metadata records `backend: "deterministic"` so the state.yaml is
+    truthful about what executed each stage.
+    """
+    runners: dict[str, AgentRunner] = {}
+    metadata: dict[str, dict[str, str | None]] = {}
+    for stage in profile.stages:
+        if stage.mode == "deterministic":
+            metadata[stage.name] = {"backend": "deterministic", "model": None}
+            continue
+        config = resolve_agent_config(profile.agent, stage.agent)
+        runners[stage.name] = build_runner(config)
+        metadata[stage.name] = {"backend": config.backend, "model": config.model}
+    return runners, metadata
+
+
 def _resolve_run_folder(docs_root: str, project: str, feature_path: str, resume: bool) -> Path:
     date_str = datetime.date.today().isoformat()
     feature_slug = Path(feature_path).stem.lower().replace(" ", "-")
@@ -219,6 +247,7 @@ def _dispatch_default(
         ctx.project_log_path,
         cwd=stage_cwd,
         standards=stage_standards,
+        runner=ctx.runner_for(stage.name),
     )
 
 
@@ -271,6 +300,7 @@ def _run_track(
         output_suffix=track["name"],
         prompt_file=track["prompt_file"],
         schema_name="discovery_track",
+        runner=ctx.runner_for(stage.name),
     )
     track_elapsed = time.monotonic() - t_start
     if tid:
@@ -296,6 +326,7 @@ def _dispatch_tracks(
         ctx.project_log_path,
         output_suffix="planning",
         schema_name="discovery_planning",
+        runner=ctx.runner_for(stage.name),
     )
     if planning_sig.get("status") != "passed":
         return planning_sig
@@ -384,6 +415,7 @@ def _run_slice(
         sub_id,
         cwd=cwd,
         standards=standards,
+        runner=ctx.runner_for(stage_name),
     )
     return sig, time.monotonic() - t0
 
@@ -604,6 +636,7 @@ def _dispatch_prompts(
             ctx.project_log_path,
             output_suffix=reviewer,
             cwd=variables.get("repo_root") or None,
+            runner=ctx.runner_for(stage.name),
         )
         elapsed = time.monotonic() - t0
         verdict = sig.get("reviewer_statuses", {}).get(reviewer, sig.get("status", "unknown"))
@@ -734,6 +767,7 @@ def run_pipeline(
 
     init_plan_md(run_folder, profile)
 
+    runners, agent_metadata = _build_stage_runners(profile)
     ctx = _PipelineContext(
         docs_root=docs_root,
         project=project,
@@ -742,6 +776,8 @@ def run_pipeline(
         branch=branch,
         project_config=project_config,
         project_standards=project_standards,
+        runners=runners,
+        agent_metadata=agent_metadata,
     )
 
     for stage in profile.stages:
@@ -782,6 +818,8 @@ def run_pipeline(
             signals[stage_name] = sig
             state_mod.update_stage_status(run_folder, stage_name, "passed")
             state_mod.save_stage_signal(run_folder, stage_name, sig)
+            meta = ctx.agent_metadata.get(stage_name, {})
+            state_mod.save_stage_agent(run_folder, stage_name, meta.get("backend", "interactive"), meta.get("model"))
             update_plan_md(run_folder, stage_name, "passed", elapsed_secs=elapsed, signal=sig, impl_name="Interactive")
             continue
 
@@ -807,6 +845,8 @@ def run_pipeline(
 
         state_mod.update_stage_status(run_folder, stage_name, "passed")
         state_mod.save_stage_signal(run_folder, stage_name, sig)
+        meta = ctx.agent_metadata.get(stage_name, {})
+        state_mod.save_stage_agent(run_folder, stage_name, meta.get("backend", "unknown"), meta.get("model"))
         impl_name = _impl_from_prompt(stage.prompt) if stage.prompt else None
         update_plan_md(
             run_folder,

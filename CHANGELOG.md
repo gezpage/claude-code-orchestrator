@@ -8,6 +8,7 @@ Format: [Unreleased] at the top, dated releases below, newest first.
 ## [Unreleased]
 
 ### Added
+- 2026-05-14: Agent runner abstraction (`orchestrator/agent_runner/`) introducing `AgentRunner` Protocol, `AgentRunRequest`/`AgentRunResult` dataclasses, `ClaudeCodePrintRunner`, `CodexCliRunner`, and `FakeRunner`. Backend selection is config-driven via an optional `agent:` block at profile and stage levels (stage overrides shallow-merge over profile defaults). The effective backend and model are recorded in `_state.yaml` under `agent:`. Sterile context (`CLAUDE_CODE_DISABLE_AUTO_MEMORY=1`) is now the default for the Claude Code backend — existing pipelines no longer inherit ambient auto-memory unless they opt out with `agent.sterile_context: false`. ADR-003 and ADR-012 are superseded by [ADR-018](docs/adrs/ADR-018-agent-runner-abstraction.md). See issue #75.
 - 2026-05-14: Deterministic verification stage (`mode: deterministic`) and recipe-driven verifier framework under `orchestrator/verifiers/`. Bundled Node and Go recipes with `node_manifest_sanity` and `go_module_sanity` probes; project-level overrides via `.cco.yaml` at the repo root; `VERIFY.md` and `verify.json` artefacts consumed by review prompts. Inserted into the minimal and full profiles between implementation/QA and review. Not a hard gate — verification surfaces evidence to reviewers; repos without recognised toolchain markers produce a benign `skipped` report. See ADR-017 and issue #22.
 
 ### Changed

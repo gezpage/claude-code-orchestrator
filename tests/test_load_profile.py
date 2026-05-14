@@ -101,3 +101,52 @@ def test_full_profile_has_deterministic_verification():
     verification = next((s for s in profile.stages if s.name == "verification"), None)
     assert verification is not None
     assert verification.mode == "deterministic"
+
+
+def test_profile_level_agent_parsed(tmp_path):
+    p = tmp_path / "p.yaml"
+    p.write_text(
+        yaml.dump(
+            {
+                "name": "p",
+                "agent": {"backend": "claude_code_print", "model": "opus", "sterile_context": True},
+                "stages": [{"stage": "discovery"}],
+            }
+        )
+    )
+    profile = load_profile(str(p))
+    assert profile.agent == {"backend": "claude_code_print", "model": "opus", "sterile_context": True}
+    assert profile.stages[0].agent is None
+
+
+def test_stage_level_agent_parsed(tmp_path):
+    p = tmp_path / "p.yaml"
+    p.write_text(
+        yaml.dump(
+            {
+                "name": "p",
+                "stages": [
+                    {"stage": "discovery"},
+                    {"stage": "review", "agent": {"backend": "codex_cli", "model": "gpt-5.1-codex"}},
+                ],
+            }
+        )
+    )
+    profile = load_profile(str(p))
+    assert profile.agent is None
+    assert profile.stages[0].agent is None
+    assert profile.stages[1].agent == {"backend": "codex_cli", "model": "gpt-5.1-codex"}
+
+
+def test_stage_agent_must_be_mapping(tmp_path):
+    p = tmp_path / "bad.yaml"
+    p.write_text(yaml.dump({"name": "p", "stages": [{"stage": "discovery", "agent": ["nope"]}]}))
+    with pytest.raises(ValueError, match="'agent' must be a mapping"):
+        load_profile(str(p))
+
+
+def test_profile_agent_must_be_mapping(tmp_path):
+    p = tmp_path / "bad.yaml"
+    p.write_text(yaml.dump({"name": "p", "agent": "nope", "stages": []}))
+    with pytest.raises(ValueError, match="'agent' must be a mapping"):
+        load_profile(str(p))

@@ -44,4 +44,4 @@ def render_prompt(
         ext_rendered = ext_template.render(**variables)
         rendered = rendered.rstrip("\n") + "\n\n## Project conventions\n\n" + ext_rendered
 
-    return rendered
+    return str(rendered)

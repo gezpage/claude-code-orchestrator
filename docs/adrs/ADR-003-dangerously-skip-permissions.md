@@ -1,13 +1,18 @@
 ---
-status: accepted
+status: superseded
+superseded_by: ADR-018
 date: 2026-05-07
 affects: [run_stage.py]
 ---
 
 # ADR-003: `--dangerously-skip-permissions` in All Stage Dispatches
 
-**Status:** Accepted
+**Status:** Superseded by [ADR-018](ADR-018-agent-runner-abstraction.md)
 **Date:** 2026-05-07
+
+> **Note.** The invariant from this ADR now lives inside `ClaudeCodePrintRunner`
+> (see ADR-018). The flag is still mandatory, but it is enforced by the runner,
+> not by every `run_stage()` call site.
 
 ## Context
 

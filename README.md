@@ -162,6 +162,46 @@ Interactive stages require `mode: interactive` and an `artifact` field:
     prompt: prompts/alignment/interactive.md
 ```
 
+## Agent backends
+
+Autonomous stages dispatch through an `AgentRunner` (see [ADR-018](docs/adrs/ADR-018-agent-runner-abstraction.md)). The backend is selected via an optional `agent:` block at the profile level, with optional per-stage overrides:
+
+```yaml
+name: mixed
+agent:                       # profile-level default
+  backend: claude_code_print
+  model: opus
+  sterile_context: true      # default — sets CLAUDE_CODE_DISABLE_AUTO_MEMORY=1
+
+stages:
+  - stage: implementation
+    prompt: prompts/implementation/default.md
+    agent:
+      model: sonnet           # stage-level override; backend inherited from profile
+
+  - stage: review
+    expansion: prompts
+    prompts:
+      architecture: prompts/review/architecture.md
+    agent:
+      backend: codex_cli
+      model: gpt-5.1-codex
+```
+
+| Backend | Selector | Command shape | Notes |
+|---------|----------|---------------|-------|
+| Claude Code (print mode) | `claude_code_print` *(default)* | `claude -p <prompt> --bare --dangerously-skip-permissions [--model <m>]` | `sterile_context: true` (default) sets `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1` to suppress ambient auto-memory injection. The `--bare` and `--dangerously-skip-permissions` flags are mandatory invariants of this runner. |
+| Codex CLI | `codex_cli` | `codex exec <prompt> [--sandbox <mode> \| --full-auto] [-m <model>]` | `permission_mode` accepts `read-only`, `workspace-write`, `danger-full-access`. Defaults to `--full-auto` when no mode is set. Requires the `codex` binary on PATH. |
+
+Current limitations:
+
+- Anthropic API and OpenAI API backends are not implemented (the seam is in place — adding them is a single module + one branch in `agent_runner/_select.py`).
+- Output streaming/JSON-mode normalisation is not implemented; `output_mode` is consumed by `ClaudeCodePrintRunner` (maps to `--output-format`) but ignored by Codex.
+- Interactive stages (`mode: interactive`) bypass the runner seam and always use `claude`.
+- Fix-cycle dispatches inside `review_cycle.py` currently use the default runner; per-stage backend overrides do not propagate into fix cycles.
+
+The effective backend and model for each stage are persisted to `_state.yaml` under the `agent:` key so a finished run is reproducible without re-deriving config from the profile.
+
 ## Commands
 
 ### `orchestrator run` — start a pipeline

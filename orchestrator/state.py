@@ -43,3 +43,11 @@ def save_stage_elapsed(run_folder, stage: str, secs: float) -> None:
 def load_elapsed(run_folder) -> dict:
     state = load_state(run_folder)
     return state.get("elapsed", {})  # type: ignore[no-any-return]
+
+
+def save_stage_agent(run_folder, stage: str, backend: str | None, model: str | None) -> None:
+    """Record which agent backend + model executed a stage. Required by ADR-018 so the
+    run artifact carries the effective context controls, not just the signal."""
+    state = load_state(run_folder)
+    state.setdefault("agent", {})[stage] = {"backend": backend, "model": model}
+    save_state(run_folder, state)

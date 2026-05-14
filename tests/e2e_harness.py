@@ -205,6 +205,7 @@ class FakeRunStage:
         prompt_file: str | None = None,
         schema_name: str | None = None,
         standards: list[str] | None = None,
+        runner: Any = None,
     ) -> dict[str, Any]:
         run_folder = Path(run_folder)
         output_dir = run_folder / stage
