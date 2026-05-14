@@ -12,13 +12,15 @@ from orchestrator.agent_runner._protocol import AgentRunner, AgentRunRequest, Ag
 class CodexCliRunner(AgentRunner):
     """Dispatch via `codex exec` non-interactive mode.
 
-    Defaults to `--sandbox workspace-write` — the most permissive sandbox that still
-    blocks arbitrary network egress and writes outside the repo. `--full-auto` is
-    available by setting `permission_mode: danger-full-access` (or the explicit
-    `full-auto` alias) but is never the default for a freshly added backend.
-    `sterile_context` is currently a no-op for this backend — codex has no equivalent
-    of CLAUDE_CODE_DISABLE_AUTO_MEMORY, but the constructor accepts the flag so the
-    selector can pass it uniformly.
+    Defaults to `--sandbox workspace-write` — the least-permissive sandbox that is
+    still useful for stage work (sandboxed FS writes, no network egress, no host
+    access). `permission_mode: danger-full-access` lifts the filesystem sandbox so
+    the agent can write `.git/` (needed when a stage must commit). The explicit
+    `full-auto` alias maps to `--dangerously-bypass-approvals-and-sandbox` (the
+    current Codex flag for "no sandbox, no approvals") and is never the default.
+    `sterile_context` is currently a no-op for this backend — codex has no
+    equivalent of CLAUDE_CODE_DISABLE_AUTO_MEMORY, but the constructor accepts the
+    flag so the selector can pass it uniformly.
     """
 
     backend_name = "codex_cli"
@@ -45,7 +47,8 @@ class CodexCliRunner(AgentRunner):
         cmd = ["codex", "exec", request.prompt]
         mode = (request.permission_mode or self._permission_mode or "").replace("_", "-")
         if mode == "full-auto":
-            cmd += ["--full-auto"]
+            # Codex CLI replaced --full-auto with --dangerously-bypass-approvals-and-sandbox.
+            cmd += ["--dangerously-bypass-approvals-and-sandbox"]
         elif mode in self._SANDBOX_MODES:
             cmd += ["--sandbox", mode]
         else:
@@ -108,10 +111,14 @@ class CodexCliRunner(AgentRunner):
             except FileNotFoundError:
                 pass
 
+        # Prefer the clean final agent message captured by --output-last-message.
+        # The full terminal stream contains the Codex banner, workdir/model/sandbox
+        # metadata, prompt echo, command logs, diffs and token accounting which
+        # are not useful run artefacts and balloon the transcript.
+        result_stdout = last_message if last_message.strip() else stdout
         if request.transcript_path is not None:
             request.transcript_path.parent.mkdir(parents=True, exist_ok=True)
-            request.transcript_path.write_text(stdout)
-        result_stdout = last_message if last_message.strip() else stdout
+            request.transcript_path.write_text(result_stdout)
 
         return AgentRunResult(
             backend=self.backend_name,

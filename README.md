@@ -108,7 +108,7 @@ Built-in profiles ship with the package:
 |------|--------|
 | `full` *(default)* | discovery → alignment → specification → decomposition → implementation → QA → verification → review → harvest |
 | `minimal` | specification → decomposition → implementation → verification → review (single reviewer) — no discovery, alignment, QA, or harvest |
-| `minimal-codex` | Same stages as `minimal`, but dispatches autonomous stages through the `codex_cli` backend (`--sandbox workspace-write`) using the user's Codex CLI default model. Intended for fast local runs when Claude Code print-mode is unavailable. |
+| `minimal-codex` | Same stages as `minimal`, but dispatches autonomous stages through the `codex_cli` backend (`--sandbox workspace-write`) using the user's Codex CLI default model. The implementation stage overrides to `--sandbox danger-full-access` so it can write `.git` and commit. Intended for fast local runs when Claude Code print-mode is unavailable. |
 | `spike` | discovery only — research and findings, no implementation |
 
 To use a custom profile, pass a path to any YAML file:
@@ -192,7 +192,7 @@ stages:
 | Backend | Selector | Command shape | Notes |
 |---------|----------|---------------|-------|
 | Claude Code (print mode) | `claude_code_print` *(default)* | `claude -p <prompt> --bare --dangerously-skip-permissions [--model <m>]` | `sterile_context: true` (default) sets `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1` to suppress ambient auto-memory injection. The `--bare` and `--dangerously-skip-permissions` flags are mandatory invariants of this runner. |
-| Codex CLI | `codex_cli` | `codex exec <prompt> --sandbox <mode> [-m <model>]` | `permission_mode` accepts `read-only`, `workspace-write` *(default)*, `danger-full-access`, and `full-auto` (opt-in to `--full-auto` for unattended runs that need network egress). Requires the `codex` binary on PATH. |
+| Codex CLI | `codex_cli` | `codex exec <prompt> --sandbox <mode> [-m <model>]` | `permission_mode` accepts `read-only`, `workspace-write` *(default)*, `danger-full-access` (lifts the FS sandbox so e.g. `.git` writes work), and the explicit `full-auto` alias (maps to `--dangerously-bypass-approvals-and-sandbox` — no sandbox and no approvals). Requires the `codex` binary on PATH. |
 
 Current limitations:
 
