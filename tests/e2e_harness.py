@@ -216,9 +216,7 @@ def make_fake_run_claude(signals: Mapping[str, Any]) -> Callable[[str, str | Non
             sig = spec(prompt, idx)
         elif isinstance(spec, list):
             if idx >= len(spec):
-                raise AssertionError(
-                    f"stage key {key!r} called {idx + 1} times but only {len(spec)} signals provided"
-                )
+                raise AssertionError(f"stage key {key!r} called {idx + 1} times but only {len(spec)} signals provided")
             sig = dict(spec[idx])
         else:
             sig = dict(spec)
