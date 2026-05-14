@@ -10,8 +10,10 @@ from orchestrator.agent_runner._protocol import AgentRunner, AgentRunRequest, Ag
 class CodexCliRunner(AgentRunner):
     """Dispatch via `codex exec` non-interactive mode.
 
-    Defaults to `--full-auto` (no permission prompts). If `permission_mode` is set to
-    a recognised codex sandbox label, that maps to `--sandbox <label>` instead.
+    Defaults to `--sandbox workspace-write` — the most permissive sandbox that still
+    blocks arbitrary network egress and writes outside the repo. `--full-auto` is
+    available by setting `permission_mode: danger-full-access` (or the explicit
+    `full-auto` alias) but is never the default for a freshly added backend.
     `sterile_context` is currently a no-op for this backend — codex has no equivalent
     of CLAUDE_CODE_DISABLE_AUTO_MEMORY, but the constructor accepts the flag so the
     selector can pass it uniformly.
@@ -20,6 +22,7 @@ class CodexCliRunner(AgentRunner):
     backend_name = "codex_cli"
 
     _SANDBOX_MODES = frozenset({"read-only", "workspace-write", "danger-full-access"})
+    _DEFAULT_SANDBOX = "workspace-write"
 
     def __init__(self, *, sterile_context: bool = True) -> None:
         self._sterile_context = sterile_context
@@ -27,10 +30,12 @@ class CodexCliRunner(AgentRunner):
     def run(self, request: AgentRunRequest) -> AgentRunResult:
         cmd = ["codex", "exec", request.prompt]
         mode = (request.permission_mode or "").replace("_", "-")
-        if mode in self._SANDBOX_MODES:
+        if mode == "full-auto":
+            cmd += ["--full-auto"]
+        elif mode in self._SANDBOX_MODES:
             cmd += ["--sandbox", mode]
         else:
-            cmd += ["--full-auto"]
+            cmd += ["--sandbox", self._DEFAULT_SANDBOX]
         if request.model:
             cmd += ["-m", request.model]
 

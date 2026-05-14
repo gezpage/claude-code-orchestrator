@@ -43,9 +43,13 @@ Introduce `orchestrator.agent_runner`, a small package exposing:
   ADR-012 invariants; they are now invariants of this runner specifically.
   Sets `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1` when `sterile_context=True`
   (the default).
-- `CodexCliRunner` — wraps `codex exec <prompt>`. Defaults to `--full-auto`.
-  Maps `permission_mode` values `read-only` / `workspace-write` /
-  `danger-full-access` to `--sandbox <mode>`.
+- `CodexCliRunner` — wraps `codex exec <prompt>`. Defaults to
+  `--sandbox workspace-write` (least-permissive sandbox that is still useful
+  for stage work — sandboxed FS writes, no network egress, no host access).
+  `permission_mode` accepts `read-only`, `workspace-write`,
+  `danger-full-access`, and the explicit alias `full-auto` (which maps to
+  `--full-auto`). `--full-auto` is never the default for a freshly added
+  backend; opting into it is an explicit profile decision.
 - `FakeRunner` — test double. Records requests, returns canned stdout.
 - `AgentConfig` + `resolve_agent_config(profile_agent, stage_agent)` +
   `build_runner(config)` — config-driven backend selection. Stage-level

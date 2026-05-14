@@ -179,6 +179,64 @@ def test_transcript_path_passed_to_runner(tmp_path):
     assert req.transcript_path.exists()
 
 
+def test_non_zero_exit_blocks_signal_extraction(tmp_path):
+    """A runner that fails with a non-zero exit code must not have its stdout parsed
+    as a valid SIGNAL_JSON. Failure dominates whatever the agent claims to have
+    emitted — otherwise a partial run could be accepted as success."""
+    run_folder, log_path = _setup_run_folder(tmp_path)
+    # stdout *looks* successful, but the process failed.
+    runner = FakeRunner(f"SIGNAL_JSON: {GOOD_SIGNAL}", exit_code=1)
+    result = run_stage(
+        "discovery", "default", VARS, run_folder, str(tmp_path), "myproject", str(log_path), runner=runner
+    )
+    assert result["status"] == "blocked"
+    assert "exit code 1" in result["message"]
+
+
+def test_timed_out_blocks_signal_extraction(tmp_path):
+    run_folder, log_path = _setup_run_folder(tmp_path)
+    runner = FakeRunner(f"SIGNAL_JSON: {GOOD_SIGNAL}", timed_out=True)
+    result = run_stage(
+        "discovery", "default", VARS, run_folder, str(tmp_path), "myproject", str(log_path), runner=runner
+    )
+    assert result["status"] == "blocked"
+    assert "timed out" in result["message"]
+
+
+def test_exit_code_none_is_treated_as_success(tmp_path):
+    """The FakeRunner-default of None and the explicit success of 0 must both pass
+    through to signal extraction. Only non-zero, non-None exit codes block."""
+    run_folder, log_path = _setup_run_folder(tmp_path)
+    runner = FakeRunner(f"SIGNAL_JSON: {GOOD_SIGNAL}", exit_code=0)
+    result = run_stage(
+        "discovery", "default", VARS, run_folder, str(tmp_path), "myproject", str(log_path), runner=runner
+    )
+    assert result["status"] == "passed"
+
+
+def test_grace_retry_blocks_on_runner_failure(tmp_path):
+    """If the initial call returned no SIGNAL_JSON and the grace retry then fails
+    (non-zero exit), the stage must block on the retry failure rather than report
+    'No signal emitted'."""
+    run_folder, log_path = _setup_run_folder(tmp_path)
+    runner = FakeRunner(["no signal here", f"SIGNAL_JSON: {GOOD_SIGNAL}"], exit_code=[0, 1])
+    result = run_stage(
+        "discovery", "default", VARS, run_folder, str(tmp_path), "myproject", str(log_path), runner=runner
+    )
+    assert result["status"] == "blocked"
+    assert "exit code 1" in result["message"]
+
+
+def test_grace_retry_blocks_on_timeout(tmp_path):
+    run_folder, log_path = _setup_run_folder(tmp_path)
+    runner = FakeRunner(["no signal here", f"SIGNAL_JSON: {GOOD_SIGNAL}"], timed_out=[False, True])
+    result = run_stage(
+        "discovery", "default", VARS, run_folder, str(tmp_path), "myproject", str(log_path), runner=runner
+    )
+    assert result["status"] == "blocked"
+    assert "timed out" in result["message"]
+
+
 @pytest.mark.parametrize("suffix", ["", "planning", "architecture"])
 def test_transcript_filename_includes_output_suffix(tmp_path, suffix):
     run_folder, log_path = _setup_run_folder(tmp_path)

@@ -62,6 +62,24 @@ def _default_runner() -> AgentRunner:
     return ClaudeCodePrintRunner(sterile_context=True)
 
 
+def _runner_failure_signal(stage: str, result) -> dict | None:
+    """If the runner reported timeout or a non-zero exit, return a blocked signal.
+
+    Must be checked before signal extraction — otherwise stdout from a failed or
+    partial run could be parsed as a valid SIGNAL_JSON and accepted, which defeats
+    the purpose of capturing exit_code / timed_out at the runner layer.
+    """
+    if result.timed_out:
+        return {"stage": stage, "status": "blocked", "message": "Agent runner timed out"}
+    if result.exit_code not in (0, None):
+        return {
+            "stage": stage,
+            "status": "blocked",
+            "message": f"Agent runner failed with exit code {result.exit_code}",
+        }
+    return None
+
+
 def run_stage(
     stage: str,
     implementation: str,
@@ -114,6 +132,10 @@ def run_stage(
     output_file = output_dir / f"{stage}{tag}-output.md"
     output_file.write_text(stdout)
 
+    if failure := _runner_failure_signal(stage, result):
+        logger.log(stage, "ERROR", failure["message"])
+        return failure
+
     sig = signal_mod.extract_signal(stdout)
 
     if sig is None:
@@ -135,6 +157,9 @@ def run_stage(
                 transcript_path=output_dir / f"{stage}{tag}-grace-transcript.md",
             )
         )
+        if failure := _runner_failure_signal(stage, retry_result):
+            logger.log(stage, "ERROR", f"grace retry: {failure['message']}")
+            return failure
         sig = signal_mod.extract_signal(retry_result.stdout)
 
     if sig is None:

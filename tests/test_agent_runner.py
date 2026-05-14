@@ -148,8 +148,10 @@ def test_codex_runner_command_construction(monkeypatch):
     assert cmd[0] == "codex"
     assert cmd[1] == "exec"
     assert "do work" in cmd
-    # Default mode is --full-auto when no sandbox label provided.
-    assert "--full-auto" in cmd
+    # Default is --sandbox workspace-write; --full-auto is opt-in via permission_mode.
+    assert "--sandbox" in cmd
+    assert "workspace-write" in cmd
+    assert "--full-auto" not in cmd
 
 
 def test_codex_runner_sandbox_mode_mapping(monkeypatch):
@@ -157,11 +159,22 @@ def test_codex_runner_sandbox_mode_mapping(monkeypatch):
 
     captured = _stub_popen(monkeypatch, codex_mod)
     runner = CodexCliRunner()
-    runner.run(AgentRunRequest(prompt="x", permission_mode="workspace-write"))
+    runner.run(AgentRunRequest(prompt="x", permission_mode="read-only"))
     cmd = captured["cmd"]
     assert "--sandbox" in cmd
-    assert "workspace-write" in cmd
+    assert "read-only" in cmd
     assert "--full-auto" not in cmd
+
+
+def test_codex_runner_full_auto_opt_in(monkeypatch):
+    from orchestrator.agent_runner import _codex as codex_mod
+
+    captured = _stub_popen(monkeypatch, codex_mod)
+    runner = CodexCliRunner()
+    runner.run(AgentRunRequest(prompt="x", permission_mode="full-auto"))
+    cmd = captured["cmd"]
+    assert "--full-auto" in cmd
+    assert "--sandbox" not in cmd
 
 
 def test_codex_runner_model_flag(monkeypatch):
