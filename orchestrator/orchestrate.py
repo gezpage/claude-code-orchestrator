@@ -127,9 +127,7 @@ def _create_worktree(repo_root: str, temp_branch: str, base_branch: str, logger,
     import tempfile
 
     if git_state.branch_exists(repo_root, temp_branch):
-        raise GitStateError(
-            f"cannot create worktree on '{temp_branch}': branch already exists in {repo_root}"
-        )
+        raise GitStateError(f"cannot create worktree on '{temp_branch}': branch already exists in {repo_root}")
     wt_path = tempfile.mkdtemp(prefix=f"orch-wt-{temp_branch}-")
     result = subprocess.run(
         ["git", "-C", repo_root, "worktree", "add", wt_path, "-b", temp_branch, base_branch],
@@ -167,25 +165,19 @@ def _merge_worktree_branch(repo_root: str, temp_branch: str, logger, stage_name:
     if result.returncode != 0:
         if git_state.has_merge_conflicts(repo_root):
             git_state.abort_merge(repo_root)
-            raise GitStateError(
-                f"merge conflict on '{temp_branch}' — aborted; manual resolution required"
-            )
+            raise GitStateError(f"merge conflict on '{temp_branch}' — aborted; manual resolution required")
         raise GitStateError(f"git merge {temp_branch} failed: {result.stderr.strip()}")
     logger.log(stage_name, "INFO", f"Merged {temp_branch} into HEAD")
 
 
 def _create_branch(branch: str, repo_root: str, logger, stage_name: str) -> None:
     if not git_state.is_clean(repo_root):
-        raise GitStateError(
-            f"working tree not clean in {repo_root} — refuse to create or switch to '{branch}'"
-        )
+        raise GitStateError(f"working tree not clean in {repo_root} — refuse to create or switch to '{branch}'")
     if git_state.branch_exists(repo_root, branch):
         if git_state.current_branch(repo_root) == branch:
             logger.log(stage_name, "INFO", f"already on branch '{branch}' — continuing")
             return
-        result = subprocess.run(
-            ["git", "-C", repo_root, "checkout", branch], capture_output=True, text=True
-        )
+        result = subprocess.run(["git", "-C", repo_root, "checkout", branch], capture_output=True, text=True)
         if result.returncode != 0:
             raise GitStateError(f"git checkout {branch} failed: {result.stderr.strip()}")
         logger.log(stage_name, "INFO", f"checked out existing branch '{branch}'")
