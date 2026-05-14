@@ -30,6 +30,13 @@ class Node:
     shape: str = "rect"  # rect | stadium | hex | circle
     display: str = ""
     impl: str = ""
+    mode: str = ""
+    # stage_dir + file_suffix locate this node's prompt/output files in the run folder.
+    # A file matches when its parent directory equals stage_dir and its stem (after
+    # stripping any -prompt / -output suffix) equals f"{stage_dir}-{file_suffix}" — or
+    # stage_dir itself when file_suffix is empty.
+    stage_dir: str = ""
+    file_suffix: str = ""
     status: str = "pending"
     elapsed_secs: float | None = None
     css_class: str = "pending"

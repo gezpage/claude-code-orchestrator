@@ -60,7 +60,9 @@ def test_init_plan_md_alignment_gate_shape(tmp_path):
     )
     init_plan_md(run_folder, profile)
     content = (run_folder / "plan.md").read_text()
-    assert 'alignment{{"✋ Alignment"}}' in content
+    # Hex shape is preserved; the label now also carries a Mode line.
+    assert 'alignment{{"✋ Alignment' in content
+    assert "Mode: interactive" in content
     assert "class alignment gate" in content
 
 
@@ -505,3 +507,82 @@ def test_add_fix_cycle_node_noop_when_no_reviewers(tmp_path):
     original = (run_folder / "plan.md").read_text()
     add_fix_cycle_node(run_folder, cycle_num=1, reviewers=[])
     assert (run_folder / "plan.md").read_text() == original
+
+
+# --- node label: Mode line, file links, legend ---
+
+
+def test_node_label_shows_mode_line(tmp_path):
+    run_folder = _make_run_folder(tmp_path)
+    profile = Profile(
+        name="test",
+        stages=(
+            StageConfig(name="specification", prompt="prompts/specification/default.md"),
+            StageConfig(name="alignment", mode="interactive", artifact="alignment-log.md"),
+        ),
+    )
+    init_plan_md(run_folder, profile)
+    content = (run_folder / "plan.md").read_text()
+    assert "Mode: auto" in content
+    assert "Mode: interactive" in content
+
+
+def test_render_inlines_file_links_per_node(tmp_path):
+    run_folder = _make_run_folder(tmp_path)
+    profile = _simple_profile("specification")
+    init_plan_md(run_folder, profile)
+    spec_dir = run_folder / "specification"
+    spec_dir.mkdir()
+    (spec_dir / "specification-prompt.md").write_text("p")
+    (spec_dir / "specification-output.md").write_text("o")
+    (spec_dir / "prd.md").write_text("prd")
+    # Trigger a re-render through the public API.
+    update_plan_md(run_folder, "specification", "passed", elapsed_secs=10)
+    content = (run_folder / "plan.md").read_text()
+    assert "<a href='specification/specification-prompt.md'>Prompt</a>" in content
+    assert "<a href='specification/specification-output.md'>Output</a>" in content
+    assert "<a href='specification/prd.md'>prd</a>" in content
+
+
+def test_render_legend_box_for_unattached_files(tmp_path):
+    run_folder = _make_run_folder(tmp_path)
+    profile = _simple_profile("specification")
+    init_plan_md(run_folder, profile)
+    (run_folder / "run.log").write_text("log")
+    (run_folder / "stray.txt").write_text("stray")
+    update_plan_md(run_folder, "specification", "passed", elapsed_secs=10)
+    content = (run_folder / "plan.md").read_text()
+    assert 'subgraph sg_legend["Legend"]' in content
+    # Extensions are stripped from the link display.
+    assert "<a href='run.log'>run</a>" in content
+    assert "<a href='stray.txt'>stray</a>" in content
+    # Legend is anchored near Start with an invisible link.
+    assert "legend_files ~~~ Start" in content
+
+
+def test_render_reviewer_subnode_links_to_per_reviewer_files(tmp_path):
+    run_folder = _make_run_folder(tmp_path)
+    init_plan_md(run_folder, _profile_with_review())
+    review_dir = run_folder / "review"
+    review_dir.mkdir()
+    (review_dir / "review-tests-prompt.md").write_text("p")
+    (review_dir / "review-tests-output.md").write_text("o")
+    update_plan_md(run_folder, "review_tests", "passed", elapsed_secs=5)
+    content = (run_folder / "plan.md").read_text()
+    assert "<a href='review/review-tests-prompt.md'>Prompt</a>" in content
+    assert "<a href='review/review-tests-output.md'>Output</a>" in content
+
+
+def test_render_slice_node_links_to_implementation_files(tmp_path):
+    run_folder = _make_run_folder(tmp_path)
+    profile = _simple_profile("decomposition", "implementation")
+    init_plan_md(run_folder, profile)
+    expand_nodes(run_folder, _impl_stage(), slice_files=["slice-1.md", "slice-2.md"])
+    impl_dir = run_folder / "implementation"
+    impl_dir.mkdir()
+    (impl_dir / "implementation-impl_1-prompt.md").write_text("p")
+    (impl_dir / "implementation-impl_1-output.md").write_text("o")
+    update_plan_md(run_folder, "impl_1", "passed", elapsed_secs=5)
+    content = (run_folder / "plan.md").read_text()
+    assert "<a href='implementation/implementation-impl_1-prompt.md'>Prompt</a>" in content
+    assert "<a href='implementation/implementation-impl_1-output.md'>Output</a>" in content

@@ -28,13 +28,24 @@ def _node_label(
     status: str = "pending",
     elapsed_secs: float | None = None,
     output_summary: str | None = None,
+    mode: str = "",
+    file_links: list[tuple[str, str]] | None = None,
 ) -> str:
+    # Using HTML <br/> + <a> tags so file_links render as clickable links inside the
+    # node; mermaid's flowchart renderer treats <br/> as a line break when htmlLabels
+    # is on (default).
     icon = _STATUS_ICON.get(status, "-")
-    parts = [f"{display} {icon}", impl]
+    parts = [f"{display} {icon}"]
+    if impl:
+        parts.append(impl)
+    if mode:
+        parts.append(f"Mode: {mode}")
     if elapsed_secs is not None:
         parts.append(f"⏱ {_format_elapsed(elapsed_secs)}")
+    if file_links:
+        parts.append(" · ".join(f"<a href='{url}'>{name}</a>" for name, url in file_links))
     # output_summary appears in the markdown section, not the diagram node
-    return "\\n".join(parts)
+    return "<br/>".join(parts)
 
 
 def _track_node_id(stage_name: str, track_name: str) -> str:

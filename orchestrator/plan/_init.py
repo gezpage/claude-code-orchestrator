@@ -43,6 +43,8 @@ def build_initial_graph(profile: Profile) -> Graph:
                     raw_label=f"✋ {name.title()}",
                     css_class="gate",
                     subgraph=f"sg_{name}",
+                    mode=stage.mode,
+                    stage_dir=name,
                 )
             )
             chain_ids.append(name)
@@ -54,6 +56,8 @@ def build_initial_graph(profile: Profile) -> Graph:
                     display=name.title(),
                     css_class="pending",
                     subgraph=f"sg_{name}",
+                    mode=stage.mode,
+                    stage_dir=name,
                 )
             )
             for reviewer, prompt_path in stage.prompts.items():
@@ -66,6 +70,9 @@ def build_initial_graph(profile: Profile) -> Graph:
                         impl=reviewer_impl,
                         css_class="pending",
                         subgraph=f"sg_{name}",
+                        mode=stage.mode,
+                        stage_dir=name,
+                        file_suffix=reviewer,
                     )
                 )
                 parents.setdefault(name, []).append(sub_id)
@@ -81,6 +88,8 @@ def build_initial_graph(profile: Profile) -> Graph:
                     impl=impl,
                     css_class="pending",
                     subgraph=f"sg_{name}",
+                    mode=stage.mode,
+                    stage_dir=name,
                 )
             )
             chain_ids.append(name)

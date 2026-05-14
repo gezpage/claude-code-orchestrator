@@ -49,6 +49,8 @@ def _add_fix_cycle_node(run_folder: Path, cycle_num: int, reviewers: list[str]) 
             status="in_progress",
             css_class="active",
             subgraph=sg_id,
+            stage_dir="fix-implementation",
+            file_suffix=str(cycle_num),
         )
     )
     for reviewer, rerun_id in zip(reviewers, rerun_ids, strict=True):
@@ -60,6 +62,8 @@ def _add_fix_cycle_node(run_folder: Path, cycle_num: int, reviewers: list[str]) 
                 status="pending",
                 css_class="pending",
                 subgraph=sg_id,
+                stage_dir="review",
+                file_suffix=f"{reviewer}-round{round_num}",
             )
         )
 
