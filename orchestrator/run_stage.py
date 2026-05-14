@@ -148,6 +148,50 @@ def run_stage(
     return sig
 
 
+def run_deterministic_stage(
+    stage: str,
+    repo_root: str,
+    run_folder,
+    project_log_path: str,
+) -> dict:
+    """Run a deterministic verification stage in-process.
+
+    No Claude subprocess is invoked; the --bare and --dangerously-skip-permissions
+    invariants apply only to run_stage(). See ADR-017.
+
+    Returns a signal dict matching schemas/verification.json. On engine failure
+    (e.g. no toolchain resolvable), returns a 'blocked' signal so the existing
+    pipeline halt machinery handles it.
+    """
+    from orchestrator.verifiers import engine as verifier_engine
+    from orchestrator.verifiers.engine import VerificationError
+
+    run_folder = Path(run_folder)
+    logger = OrchestratorLogger(run_folder, project_log_path)
+    logger.log(stage, "INFO", "dispatching deterministic")
+
+    t0 = time.monotonic()
+    try:
+        sig = verifier_engine.verify(Path(repo_root), run_folder)
+    except VerificationError as exc:
+        logger.log(stage, "ERROR", f"verification could not start: {exc}")
+        return {"stage": stage, "status": "blocked", "message": str(exc)}
+    elapsed = time.monotonic() - t0
+
+    validator.validate_output(stage, sig)
+    summary = sig.get("summary", "")
+    completion_msg = f"{stage} {sig['status']} ({_fmt_elapsed(elapsed)})"
+    if summary:
+        completion_msg += f" — {summary}"
+    logger.log(stage, "INFO", completion_msg)
+    for key, value in sig.items():
+        if key == "stage":
+            continue
+        v = json.dumps(value) if isinstance(value, (dict, list)) else str(value)
+        logger.log(stage, "DEBUG", f"signal.{key}={v}")
+    return sig
+
+
 def run_interactive_stage(
     stage: str,
     prompt_path: str | None,

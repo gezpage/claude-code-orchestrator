@@ -1,0 +1,21 @@
+toolchain: go
+priority: 50
+
+markers:
+  - go.mod
+
+commands:
+  - id: build
+    command: go build ./...
+    required: true
+
+  - id: test
+    command: go test ./...
+    required: true
+
+  - id: vet
+    command: go vet ./...
+    required: false
+
+probes:
+  - go_module_sanity

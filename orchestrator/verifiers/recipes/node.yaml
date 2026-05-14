@@ -1,0 +1,29 @@
+toolchain: node
+priority: 50
+
+markers:
+  - package.json
+
+commands:
+  - id: test
+    command: npm test
+    required: true
+    if_script_exists: test
+
+  - id: lint
+    command: npm run lint
+    required: false
+    if_script_exists: lint
+
+  - id: typecheck
+    command: npm run typecheck
+    required: false
+    if_script_exists: typecheck
+
+  - id: build
+    command: npm run build
+    required: false
+    if_script_exists: build
+
+probes:
+  - node_manifest_sanity

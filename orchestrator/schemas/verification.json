@@ -1,0 +1,20 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "required": ["stage", "status"],
+  "properties": {
+    "stage": {"type": "string"},
+    "status": {"type": "string", "enum": ["passed", "blocked", "failed"]},
+    "message": {"type": "string"},
+    "verification_status": {"type": "string", "enum": ["passed", "warned", "failed", "skipped"]},
+    "toolchain": {"type": "string"},
+    "verify_md_path": {"type": "string"},
+    "verify_json_path": {"type": "string"},
+    "summary": {"type": "string"},
+    "command_ids": {"type": "array", "items": {"type": "string"}},
+    "failed_command_ids": {"type": "array", "items": {"type": "string"}},
+    "probe_ids": {"type": "array", "items": {"type": "string"}},
+    "failed_probe_ids": {"type": "array", "items": {"type": "string"}}
+  },
+  "additionalProperties": true
+}

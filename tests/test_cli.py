@@ -213,5 +213,15 @@ def test_full_yaml_stage_order():
     profiles_dir = Path(__file__).parent.parent / "orchestrator" / "profiles"
     full = yaml.safe_load((profiles_dir / "full.yaml").read_text())
     names = [s["stage"] for s in full["stages"]]
-    expected = ["discovery", "alignment", "specification", "decomposition", "implementation", "qa", "review", "harvest"]
+    expected = [
+        "discovery",
+        "alignment",
+        "specification",
+        "decomposition",
+        "implementation",
+        "qa",
+        "verification",
+        "review",
+        "harvest",
+    ]
     assert names == expected

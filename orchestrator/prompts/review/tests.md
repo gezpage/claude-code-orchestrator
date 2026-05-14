@@ -43,6 +43,12 @@ If the diff path is missing, unreadable, or not a full git diff file:
 - emit a blocking finding that the review input is invalid
 - do not continue with speculative review
 
+{% if verify_md_path %}
+## Deterministic verification context
+
+Read `{{ verify_md_path }}` before you start. It records whether the project's test command ran cleanly and whether toolchain probes detected fake or no-op test/lint scripts. Failed test commands and probe findings about test scripts are blocking unless the diff itself explains and addresses the failure. A green verification report does not absolve missing test coverage — assess the diff independently for new code paths without tests.
+{% endif %}
+
 ## Review Dimensions
 
 **Coverage mapping**
