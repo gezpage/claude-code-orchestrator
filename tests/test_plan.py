@@ -433,6 +433,66 @@ def test_add_fix_cycle_node_multiple_reviewers(tmp_path):
     assert "fix_impl_1 --> review_architecture_2 & review_tests_2" in content
 
 
+def test_add_fix_cycle_node_redirects_failing_reviewer_away_from_downstream(tmp_path):
+    run_folder = _make_run_folder(tmp_path)
+    profile = Profile(
+        name="test",
+        stages=(
+            StageConfig(
+                name="review",
+                expansion=ExpansionKind.PROMPTS,
+                prompts={
+                    "architecture": "prompts/review/architecture.md",
+                    "implementation": "prompts/review/implementation.md",
+                    "tests": "prompts/review/tests.md",
+                },
+            ),
+            StageConfig(name="harvest", prompt="prompts/harvest/default.md"),
+        ),
+    )
+    init_plan_md(run_folder, profile)
+    add_fix_cycle_node(run_folder, cycle_num=1, reviewers=["architecture"])
+    content = (run_folder / "plan.md").read_text()
+    assert "review_implementation & review_tests --> harvest" in content
+    assert "review_architecture & review_implementation & review_tests --> harvest" not in content
+    assert "review_architecture --> fix_impl_1" in content
+    assert "review_architecture_2 --> harvest" in content
+
+
+def test_add_fix_cycle_node_removes_edge_when_all_reviewers_fail(tmp_path):
+    run_folder = _make_run_folder(tmp_path)
+    profile = Profile(
+        name="test",
+        stages=(
+            StageConfig(
+                name="review",
+                expansion=ExpansionKind.PROMPTS,
+                prompts={
+                    "architecture": "prompts/review/architecture.md",
+                    "tests": "prompts/review/tests.md",
+                },
+            ),
+            StageConfig(name="harvest", prompt="prompts/harvest/default.md"),
+        ),
+    )
+    init_plan_md(run_folder, profile)
+    add_fix_cycle_node(run_folder, cycle_num=1, reviewers=["architecture", "tests"])
+    content = (run_folder / "plan.md").read_text()
+    assert "review_architecture & review_tests --> harvest" not in content
+    assert "review_architecture_2 & review_tests_2 --> harvest" in content
+
+
+def test_add_fix_cycle_node_cycle2_re_redirects_through_new_fix(tmp_path):
+    run_folder = _make_run_folder(tmp_path)
+    init_plan_md(run_folder, _profile_with_review())
+    add_fix_cycle_node(run_folder, cycle_num=1, reviewers=["tests"])
+    add_fix_cycle_node(run_folder, cycle_num=2, reviewers=["tests"])
+    content = (run_folder / "plan.md").read_text()
+    assert "review_tests_2 --> harvest" not in content
+    assert "review_tests_2 --> fix_impl_2" in content
+    assert "review_tests_3 --> harvest" in content
+
+
 def test_add_fix_cycle_node_noop_when_no_plan(tmp_path):
     run_folder = _make_run_folder(tmp_path)
     add_fix_cycle_node(run_folder, cycle_num=1, reviewers=["tests"])

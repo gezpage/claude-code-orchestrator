@@ -42,12 +42,19 @@ def _add_fix_cycle_node(run_folder: Path, cycle_num: int, reviewers: list[str]) 
         new_subgraph_lines.append(f'    {rerun_id}["{rerun_label}"]')
     new_subgraph_lines.append("    end")
 
+    # Redirect the existing fan-in edge: failing reviewer nodes must point at the
+    # new fix-implementation node, not the downstream stage. The re-review nodes
+    # take over the fan-in to the downstream stage.
+    content, downstream_target = _redirect_fanin_edge(content, source_ids)
+
     src_str = " & ".join(source_ids)
     dst_str = " & ".join(rerun_ids)
     new_edges = [
         f"    {src_str} --> {fix_node_id}",
         f"    {fix_node_id} --> {dst_str}",
     ]
+    if downstream_target:
+        new_edges.append(f"    {dst_str} --> {downstream_target}")
     new_classes = [f"    class {fix_node_id} active"]
     for rerun_id in rerun_ids:
         new_classes.append(f"    class {rerun_id} pending")
@@ -63,3 +70,31 @@ def _add_fix_cycle_node(run_folder: Path, cycle_num: int, reviewers: list[str]) 
         content = content[:last_fence] + "\n".join(new_classes) + "\n" + content[last_fence:]
 
     plan_path.write_text(content)
+
+
+def _redirect_fanin_edge(content: str, source_ids: list[str]) -> tuple[str, str | None]:
+    """Strip source_ids from any `<...> --> target` fan-in edge and return target.
+
+    Returns the rewritten content and the downstream target captured from the edge
+    (so the caller can re-fan-in the re-review nodes to it). If no matching edge
+    is found, returns the content unchanged and None.
+    """
+    source_set = set(source_ids)
+    lines = content.splitlines(keepends=True)
+    for i, line in enumerate(lines):
+        body = line.rstrip("\n")
+        if " --> " not in body:
+            continue
+        left, _, right = body.partition(" --> ")
+        indent = left[: len(left) - len(left.lstrip())]
+        left_items = [item.strip() for item in left.strip().split("&")]
+        if not any(item in source_set for item in left_items):
+            continue
+        target = right.strip()
+        remaining = [item for item in left_items if item not in source_set]
+        if remaining:
+            lines[i] = f"{indent}{' & '.join(remaining)} --> {target}\n"
+        else:
+            lines.pop(i)
+        return "".join(lines), target
+    return content, None
