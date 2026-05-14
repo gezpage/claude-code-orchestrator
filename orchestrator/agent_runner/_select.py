@@ -39,7 +39,18 @@ def build_runner(config: AgentConfig) -> AgentRunner:
     if config.backend not in _KNOWN_BACKENDS:
         raise ValueError(f"Unknown agent backend {config.backend!r}; supported: {sorted(_KNOWN_BACKENDS)}")
     if config.backend == "claude_code_print":
-        return ClaudeCodePrintRunner(sterile_context=config.sterile_context)
+        return ClaudeCodePrintRunner(
+            sterile_context=config.sterile_context,
+            model=config.model,
+            timeout_seconds=config.timeout_seconds,
+            output_mode=config.output_mode,
+        )
     if config.backend == "codex_cli":
-        return CodexCliRunner(sterile_context=config.sterile_context)
+        return CodexCliRunner(
+            sterile_context=config.sterile_context,
+            model=config.model,
+            timeout_seconds=config.timeout_seconds,
+            permission_mode=config.permission_mode,
+            output_mode=config.output_mode,
+        )
     raise AssertionError(f"unreachable: backend {config.backend}")

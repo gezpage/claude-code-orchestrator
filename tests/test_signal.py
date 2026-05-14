@@ -15,6 +15,17 @@ def test_sentinel_buried_in_prose():
     assert result["status"] == "passed"
 
 
+def test_last_sentinel_wins():
+    stdout = "\n".join(
+        [
+            'SIGNAL_JSON: {"stage": "specification", "status": "passed"}',
+            'SIGNAL_JSON: {"stage": "specification", "status": "blocked", "message": "real failure"}',
+        ]
+    )
+    result = extract_signal(stdout)
+    assert result == {"stage": "specification", "status": "blocked", "message": "real failure"}
+
+
 def test_no_sentinel():
     stdout = "No signal here\nJust prose output"
     result = extract_signal(stdout)

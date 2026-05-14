@@ -188,6 +188,56 @@ def test_codex_runner_model_flag(monkeypatch):
     assert "gpt-5.1-codex" in cmd
 
 
+def test_codex_runner_uses_config_defaults(monkeypatch):
+    from orchestrator.agent_runner import _codex as codex_mod
+
+    captured = _stub_popen(monkeypatch, codex_mod)
+    runner = build_runner(AgentConfig(backend="codex_cli", model="gpt-5-codex", permission_mode="read-only"))
+    runner.run(AgentRunRequest(prompt="x"))
+    cmd = captured["cmd"]
+    assert "-m" in cmd
+    assert "gpt-5-codex" in cmd
+    assert "--sandbox" in cmd
+    assert "read-only" in cmd
+
+
+def test_codex_runner_workspace_roots_and_last_message(monkeypatch, tmp_path):
+    from orchestrator.agent_runner import _codex as codex_mod
+
+    class _FakePopen:
+        def __init__(self, cmd, **kwargs):
+            captured["cmd"] = cmd
+            captured["kwargs"] = kwargs
+            output_path = cmd[cmd.index("--output-last-message") + 1]
+            from pathlib import Path
+
+            Path(output_path).write_text('SIGNAL_JSON: {"stage":"x","status":"passed"}')
+            self.stdout = iter(["full transcript\n"])
+
+        def wait(self, timeout=None):
+            return 0
+
+        def kill(self):
+            pass
+
+    captured: dict = {}
+    monkeypatch.setattr(codex_mod.subprocess, "Popen", _FakePopen)
+    runner = CodexCliRunner()
+    result = runner.run(
+        AgentRunRequest(
+            prompt="x",
+            workspace_root=str(tmp_path / "repo"),
+            writable_roots=(str(tmp_path / "repo"), str(tmp_path / "docs")),
+        )
+    )
+    cmd = captured["cmd"]
+    assert "--cd" in cmd
+    assert str(tmp_path / "repo") in cmd
+    assert "--add-dir" in cmd
+    assert str(tmp_path / "docs") in cmd
+    assert result.stdout == 'SIGNAL_JSON: {"stage":"x","status":"passed"}'
+
+
 # ── Selection / config merge ──────────────────────────────────────────────────
 
 

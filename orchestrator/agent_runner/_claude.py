@@ -17,15 +17,28 @@ class ClaudeCodePrintRunner(AgentRunner):
 
     backend_name = "claude_code_print"
 
-    def __init__(self, *, sterile_context: bool = True) -> None:
+    def __init__(
+        self,
+        *,
+        sterile_context: bool = True,
+        model: str | None = None,
+        timeout_seconds: int | None = None,
+        output_mode: str = "text",
+    ) -> None:
         self._sterile_context = sterile_context
+        self._model = model
+        self._timeout_seconds = timeout_seconds
+        self._output_mode = output_mode
 
     def run(self, request: AgentRunRequest) -> AgentRunResult:
         cmd = ["claude", "-p", request.prompt, "--bare", "--dangerously-skip-permissions"]
-        if request.model:
-            cmd += ["--model", request.model]
-        if request.output_mode and request.output_mode != "text":
-            cmd += ["--output-format", request.output_mode]
+        model = request.model or self._model
+        output_mode = request.output_mode if request.output_mode != "text" else self._output_mode
+        timeout_seconds = request.timeout_seconds if request.timeout_seconds is not None else self._timeout_seconds
+        if model:
+            cmd += ["--model", model]
+        if output_mode and output_mode != "text":
+            cmd += ["--output-format", output_mode]
 
         env = os.environ.copy()
         if self._sterile_context:
@@ -54,7 +67,7 @@ class ClaudeCodePrintRunner(AgentRunner):
                 print(line, end="", flush=True)  # noqa: T201
                 chunks.append(line)
             try:
-                exit_code = proc.wait(timeout=request.timeout_seconds)
+                exit_code = proc.wait(timeout=timeout_seconds)
             except subprocess.TimeoutExpired:
                 proc.kill()
                 proc.wait()

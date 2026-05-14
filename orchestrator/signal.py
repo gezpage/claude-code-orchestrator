@@ -5,7 +5,8 @@ SENTINEL = "SIGNAL_JSON:"
 
 
 def extract_signal(stdout: str) -> dict | None:
-    for line in stdout.splitlines():
+    # The final sentinel is authoritative; prompt examples can appear earlier in transcripts.
+    for line in reversed(stdout.splitlines()):
         stripped = line.strip().strip("`")
         if stripped.startswith(SENTINEL):
             payload = stripped[len(SENTINEL) :].strip()
