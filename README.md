@@ -2,7 +2,7 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-Pipeline sequencer for feature development. Takes a feature spec and drives it through a fixed sequence of stages — discovery, alignment, specification, decomposition, implementation, QA, review, harvest — by orchestrating Claude Code agents, managing state, and coordinating parallel execution.
+Pipeline sequencer for feature development. Takes a feature spec and drives it through a fixed sequence of stages — discovery, alignment, specification, decomposition, implementation, QA, verification, review, harvest — by orchestrating Claude Code agents, managing state, and coordinating parallel execution.
 
 > ## Safety notice — read before running
 >
@@ -45,7 +45,7 @@ Each run produces a folder of stage prompts, raw outputs, and a `_state.yaml` th
 
 ## Pipeline
 
-The default `full` profile runs eight stages in sequence:
+The default `full` profile runs nine stages in sequence:
 
 | Stage | Expansion | Description |
 |-------|-----------|-------------|
@@ -55,6 +55,7 @@ The default `full` profile runs eight stages in sequence:
 | **decomposition** | — | Breaks the spec into named implementation slices |
 | **implementation** | slices | Each slice runs in a dedicated git worktree in parallel; merged back on completion |
 | **qa** | — | Quality assurance pass against the implemented branch, run from the repo root |
+| **verification** | — | Deterministic, in-process check — runs the toolchain's lint/test/build commands and probes, writes `VERIFY.md` and `verify.json` for reviewers. No Claude invocation. See [ADR-017](docs/adrs/ADR-017-deterministic-verification-stage.md). |
 | **review** | prompts | Architecture, implementation, and tests reviewers run in parallel; triggers up to two fix cycles if changes are requested |
 | **harvest** | — | Final outcome summary and documentation |
 
@@ -84,12 +85,8 @@ pipx install -e /path/to/orchestrator
 Each project requires a `project.yaml` file at `{docs-root}/projects/{project}/project.yaml`.
 
 ```yaml
-name: my-api
-description: REST API for the platform
-repo-root: /path/to/my-api     # path to the code repository
-default-profile: full          # profile used when --profile is omitted
-merge-target: main             # branch PRs merge into
-agent-rules: CLAUDE.md         # agent rules file in the code repo
+repo-root: /path/to/my-api     # required: path to the code repository
+log_level: DEBUG               # optional: orchestrator log level (default: DEBUG)
 
 # Engineering standards injected into implementation and QA stage prompts.
 # Each entry maps to a harsh-{name}-engineering-standards skill in .claude/skills/.
@@ -99,7 +96,9 @@ standards:
   - mysql
 ```
 
-The `standards` list is optional. If omitted, only the general engineering standard is injected when the active profile opts stages in via `standards: true`. Add any identifier that has a corresponding `harsh-{name}-engineering-standards` skill symlinked in the orchestrator's `.claude/skills/` directory.
+Only `repo-root` is required. The `standards` list is optional — if omitted, only the general engineering standard is injected when the active profile opts stages in via `standards: true`. Add any identifier that has a corresponding `harsh-{name}-engineering-standards` skill symlinked in the orchestrator's `.claude/skills/` directory.
+
+The default profile is controlled by the `--profile` CLI flag (defaults to `full`); it is not read from `project.yaml`.
 
 ## Profiles
 
@@ -107,7 +106,8 @@ Built-in profiles ship with the package:
 
 | Name | Stages |
 |------|--------|
-| `full` *(default)* | discovery → alignment → specification → decomposition → implementation → QA → review → harvest |
+| `full` *(default)* | discovery → alignment → specification → decomposition → implementation → QA → verification → review → harvest |
+| `minimal` | specification → decomposition → implementation → verification → review (single reviewer) — no discovery, alignment, QA, or harvest |
 | `spike` | discovery only — research and findings, no implementation |
 
 To use a custom profile, pass a path to any YAML file:
@@ -161,6 +161,38 @@ Interactive stages require `mode: interactive` and an `artifact` field:
     artifact: alignment-log.md
     prompt: prompts/alignment/interactive.md
 ```
+
+Deterministic stages use `mode: deterministic` — they run pure Python in-process and never invoke Claude. The only deterministic stage today is `verification`:
+
+```yaml
+  - stage: verification
+    mode: deterministic
+```
+
+## Verification config
+
+The deterministic `verification` stage detects the repo's toolchain by looking for marker files (e.g. `package.json`, `go.mod`) and runs the matching bundled recipe under `orchestrator/verifiers/recipes/`. Repos without a recognised toolchain produce a benign `skipped` report — verification is not a hard gate.
+
+To override the bundled behaviour, drop a `.cco.yaml` at the **code repo root** (the `repo-root` from `project.yaml`, not the docs root):
+
+```yaml
+verification:
+  toolchain: node              # optional — pins detection; skips marker-based auto-detect
+  commands:                    # optional — REPLACES the recipe's commands wholesale
+    - id: test
+      command: npm test
+      required: true
+      if_script_exists: test
+      timeout_seconds: 600
+    - id: lint
+      command: npm run lint
+      required: false
+      if_script_exists: lint
+  probes:                      # optional — REPLACES the recipe's probes wholesale
+    - node_manifest_sanity
+```
+
+Overrides replace rather than merge — predictable beats clever. Bundled recipes ship for `node` and `go`; probes ship as `node_manifest_sanity` and `go_module_sanity`. Adding a new toolchain means adding a recipe YAML (and any probes it needs) under `orchestrator/verifiers/`, not editing orchestration code. See [ADR-017](docs/adrs/ADR-017-deterministic-verification-stage.md).
 
 ## Commands
 
