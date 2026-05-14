@@ -6,19 +6,15 @@ private _* helpers. Private helpers must NOT be called without holding the lock.
 
 import datetime
 import os
-import re
 import threading
 from pathlib import Path
 
 from orchestrator import state as state_mod
-from orchestrator.plan._constants import _CLASSDEFS, _STATUS_CLASS
-from orchestrator.plan._helpers import (
-    _fetch_commit_messages,
-    _format_elapsed,
-    _node_label,
-    _stage_files,
-)
+from orchestrator.plan._constants import _STATUS_CLASS
+from orchestrator.plan._graph import Graph, Node, load_graph, save_graph
+from orchestrator.plan._helpers import _fetch_commit_messages, _format_elapsed, _stage_files
 from orchestrator.plan._manifest import _update_run_files_table
+from orchestrator.plan._render import render_block, replace_mermaid_block
 from orchestrator.plan._summary import _update_run_summary
 
 _plan_lock = threading.Lock()
@@ -42,50 +38,52 @@ def _update_plan_md(
     run_folder: Path,
     stage: str,
     status: str,
-    elapsed_secs: float | None = None,
-    output_summary: str | None = None,
-    signal: dict | None = None,
-    impl_name: str | None = None,
-    repo_root: str | None = None,
+    elapsed_secs: float | None,
+    output_summary: str | None,
+    signal: dict | None,
+    impl_name: str | None,
+    repo_root: str | None,
 ) -> None:
     run_folder = Path(run_folder)
     plan_path = run_folder / "plan.md"
     css_class = _STATUS_CLASS.get(status, "pending")
 
-    if not plan_path.exists():
+    graph = load_graph(run_folder)
+    if graph is None or not plan_path.exists():
+        # Minimal bootstrap so downstream callers can keep stamping status without an init.
+        graph = graph or Graph()
+        if stage not in graph.nodes:
+            graph.add_node(
+                Node(
+                    id=stage,
+                    display=stage.replace("_", " ").title(),
+                    status=status,
+                    elapsed_secs=elapsed_secs,
+                    css_class=css_class,
+                )
+            )
+        save_graph(run_folder, graph)
         plan_path.parent.mkdir(parents=True, exist_ok=True)
-        classdefs = "\n".join(_CLASSDEFS)
-        plan_path.write_text(f"```mermaid\nflowchart TD\n{classdefs}\n    class {stage} {css_class}\n```\n")
+        plan_path.write_text(render_block(graph))
         return
 
-    content = plan_path.read_text()
-
-    class_pattern = rf"class {re.escape(stage)} \w+"
-    if re.search(class_pattern, content):
-        content = re.sub(class_pattern, f"class {stage} {css_class}", content)
-    else:
-        last_fence = content.rfind("```")
-        if last_fence >= 0:
-            content = content[:last_fence] + f"    class {stage} {css_class}\n" + content[last_fence:]
-        else:
-            content += f"\nclass {stage} {css_class}"
-
-    node_pattern = rf'    {re.escape(stage)}\["([^"]*)"\]'
-    m = re.search(node_pattern, content)
-    if m:
-        parts = m.group(1).split("\\n")
-        display = re.sub(r"\s+(?:✅|⏳|🔴|-)\s*$", "", parts[0]).strip()
-        impl = parts[1] if len(parts) > 1 else ""
-        new_label = _node_label(display, impl, status=status, elapsed_secs=elapsed_secs)
-        content = content[: m.start()] + f'    {stage}["{new_label}"]' + content[m.end() :]
-
-    plan_path.write_text(content)
+    node = graph.nodes.get(stage)
+    if node is not None:
+        node.status = status
+        node.css_class = css_class
+        if elapsed_secs is not None:
+            node.elapsed_secs = elapsed_secs
+        save_graph(run_folder, graph)
+        replace_mermaid_block(plan_path, graph)
 
     if elapsed_secs is not None:
         state_mod.save_stage_elapsed(run_folder, stage, elapsed_secs)
 
     if status == "passed" and signal is not None:
-        _append_stage_section(plan_path, stage, output_summary, signal, run_folder, elapsed_secs, impl_name, repo_root)
+        display = node.display if node is not None else stage.replace("_", " ").title()
+        _append_stage_section(
+            plan_path, display, output_summary, signal, run_folder, elapsed_secs, impl_name, repo_root
+        )
     if status == "passed":
         _update_run_summary(plan_path, run_folder)
         _update_run_files_table(plan_path, run_folder)
@@ -93,7 +91,7 @@ def _update_plan_md(
 
 def _append_stage_section(
     plan_path: Path,
-    stage: str,
+    display: str,
     summary: str | None,
     signal: dict,
     run_folder: Path,
@@ -103,16 +101,6 @@ def _append_stage_section(
 ) -> None:
     """Append a stage-completion section below the mermaid block."""
     content = plan_path.read_text()
-
-    node_pattern = rf'    {re.escape(stage)}\["([^"]*)"\]'
-    m = re.search(node_pattern, content)
-    if m:
-        parts = m.group(1).split("\\n")
-        display = re.sub(r"\s+(?:✅|⏳|🔴|-)\s*$", "", parts[0]).strip()
-        display = re.sub(r"\s*-\s*$", "", display)
-    else:
-        display = stage.replace("_", " ").title()
-
     heading = f"{display} ({impl_name.title()})" if impl_name else display
 
     now = datetime.datetime.now()

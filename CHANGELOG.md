@@ -8,6 +8,7 @@ Format: [Unreleased] at the top, dated releases below, newest first.
 ## [Unreleased]
 
 ### Changed
+- 2026-05-14: `orchestrator/plan/` now models the workflow diagram as an in-memory graph (`_graph.py`) rendered to mermaid by a dedicated renderer (`_render.py`). Init, expand, fix-cycle, and status updates all mutate the typed graph and re-render, replacing the regex rewrites that previously parsed mermaid text. See ADR-016. The graph is persisted as `_plan_graph.yaml` inside each run folder.
 - Specification prompt: ADRs now default to zero per run; only required when a decision is non-obvious *and* hard to reverse (multi-module migration cost). Replaces the prior 2–4 ADR-per-run target; covers issue #57 item 11.
 - Decomposition prompt: slice quality checklist now enforces a reviewability budget (≤ 400 diff lines, ≤ 10 files, ≤ 1 primary concept) and an independently-mergeable check; covers issue #57 item 9.
 - Review prompts (architecture, implementation, tests): added a Triage and scope section capping each round at 5 blocking + 5 non-blocking findings, with explicit guidance against blocking on style/naming/speculative concerns; covers issue #57 item 7.

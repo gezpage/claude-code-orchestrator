@@ -1,8 +1,15 @@
 from pathlib import Path
 
-from orchestrator.plan._constants import _CLASSDEFS
-from orchestrator.plan._helpers import _node_label, _run_header
+from orchestrator.plan._graph import Edge, Graph, Node, Subgraph, save_graph
+from orchestrator.plan._helpers import _run_header
+from orchestrator.plan._render import write_plan_md
 from orchestrator.profile import ExpansionKind, Profile
+
+_INIT_DIRECTIVE = (
+    "%%{init: {'theme': 'base', 'themeVariables': "
+    "{'fontSize': '14px', 'lineColor': '#6b7280', "
+    "'clusterBkg': 'transparent', 'clusterBorder': 'transparent'}}}%%"
+)
 
 
 def init_plan_md(run_folder: Path, profile: Profile) -> None:
@@ -11,88 +18,87 @@ def init_plan_md(run_folder: Path, profile: Profile) -> None:
     if plan_path.exists():
         return
 
-    lines = [
-        _run_header(run_folder),
-        "",
-        "## Orchestration Flow",
-        "",
-        "```mermaid",
-        "%%{init: {'theme': 'base', 'themeVariables': {'fontSize': '14px', 'lineColor': '#6b7280', 'clusterBkg': 'transparent', 'clusterBorder': 'transparent'}}}%%",
-        "flowchart TD",
-        '    Start(["▶ Start"])',
-    ]
+    graph = build_initial_graph(profile)
+    save_graph(run_folder, graph)
+    write_plan_md(plan_path, _run_header(run_folder), graph)
+
+
+def build_initial_graph(profile: Profile) -> Graph:
+    graph = Graph(init_directive=_INIT_DIRECTIVE)
+    graph.add_node(Node(id="Start", shape="stadium", raw_label="▶ Start", css_class="startend"))
 
     chain_ids: list[str] = []
-    review_sub_ids: list[tuple[str, str]] = []
-    class_assignments: list[str] = []
+    parents: dict[str, list[str]] = {}
 
     for stage in profile.stages:
         name = stage.name
         display_name = name.replace("_", " ").title()
+        graph.add_subgraph(Subgraph(id=f"sg_{name}", display=display_name))
 
         if stage.mode == "interactive":
-            lines.append(f'    subgraph sg_{name}["{display_name}"]')
-            lines.append(f'    {name}{{{{"✋ {name.title()}"}}}}')
-            lines.append("    end")
+            graph.add_node(
+                Node(
+                    id=name,
+                    shape="hex",
+                    raw_label=f"✋ {name.title()}",
+                    css_class="gate",
+                    subgraph=f"sg_{name}",
+                )
+            )
             chain_ids.append(name)
-            class_assignments.append(f"    class {name} gate")
 
         elif stage.expansion == ExpansionKind.PROMPTS:
-            lines.append(f'    subgraph sg_{name}["{display_name}"]')
-            lines.append(f'    {name}["{name.title()}"]')
+            graph.add_node(
+                Node(
+                    id=name,
+                    display=name.title(),
+                    css_class="pending",
+                    subgraph=f"sg_{name}",
+                )
+            )
             for reviewer, prompt_path in stage.prompts.items():
                 reviewer_impl = Path(prompt_path).stem
                 sub_id = f"{name}_{reviewer}"
-                label = _node_label(reviewer.title(), reviewer_impl)
-                lines.append(f'    {sub_id}["{label}"]')
-                review_sub_ids.append((name, sub_id))
-                class_assignments.append(f"    class {sub_id} pending")
-            lines.append("    end")
+                graph.add_node(
+                    Node(
+                        id=sub_id,
+                        display=reviewer.title(),
+                        impl=reviewer_impl,
+                        css_class="pending",
+                        subgraph=f"sg_{name}",
+                    )
+                )
+                parents.setdefault(name, []).append(sub_id)
             chain_ids.append(name)
-            class_assignments.append(f"    class {name} pending")
 
         else:
-            # NONE, TRACKS, SLICES — all render as a standard single node initially
             prompt = stage.prompt or f"prompts/{name}/default.md"
             impl = Path(prompt).stem
-            label = _node_label(name.title(), impl)
-            lines.append(f'    subgraph sg_{name}["{display_name}"]')
-            lines.append(f'    {name}["{label}"]')
-            lines.append("    end")
+            graph.add_node(
+                Node(
+                    id=name,
+                    display=name.title(),
+                    impl=impl,
+                    css_class="pending",
+                    subgraph=f"sg_{name}",
+                )
+            )
             chain_ids.append(name)
-            class_assignments.append(f"    class {name} pending")
 
-    lines.append('    Done(["■ Done"])')
+    graph.add_node(Node(id="Done", shape="stadium", raw_label="■ Done", css_class="startend"))
 
-    # Group PROMPTS sub-nodes by parent for fan-out/fan-in chain building
-    parents: dict[str, list[str]] = {}
-    for parent_id, sub_id in review_sub_ids:
-        parents.setdefault(parent_id, []).append(sub_id)
+    if not chain_ids:
+        graph.edges.append(Edge(steps=[["Start"], ["Done"]]))
+        return graph
 
-    if chain_ids:
-        lines.append(f"    Start --> {chain_ids[0]}")
-        i = 0
-        while i < len(chain_ids):
-            cur = chain_ids[i]
-            nxt = chain_ids[i + 1] if i + 1 < len(chain_ids) else None
-            if cur in parents:
-                sub_ids = parents[cur]
-                lines.append(f"    {cur} --> {' & '.join(sub_ids)}")
-                fanin_target = nxt if nxt else "Done"
-                lines.append(f"    {' & '.join(sub_ids)} --> {fanin_target}")
-                i += 1
-            else:
-                lines.append(f"    {cur} --> {nxt}" if nxt else f"    {cur} --> Done")
-                i += 1
-    else:
-        lines.append("    Start --> Done")
+    graph.edges.append(Edge(steps=[["Start"], [chain_ids[0]]]))
+    for i, cur in enumerate(chain_ids):
+        nxt = chain_ids[i + 1] if i + 1 < len(chain_ids) else "Done"
+        if cur in parents:
+            sub_ids = parents[cur]
+            graph.edges.append(Edge(steps=[[cur], list(sub_ids)]))
+            graph.edges.append(Edge(steps=[list(sub_ids), [nxt]]))
+        else:
+            graph.edges.append(Edge(steps=[[cur], [nxt]]))
 
-    lines.extend(_CLASSDEFS)
-    lines.extend(class_assignments)
-    lines.append("    class Start startend")
-    lines.append("    class Done startend")
-    lines.append("```")
-    lines.append("")
-
-    plan_path.parent.mkdir(parents=True, exist_ok=True)
-    plan_path.write_text("\n".join(lines))
+    return graph
