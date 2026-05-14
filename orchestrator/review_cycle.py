@@ -87,6 +87,28 @@ def _write_round_diff(run_folder: Path, repo_root: str, commit_hashes: list[str]
     return str(diff_path)
 
 
+def is_valid_diff_file(path: str) -> bool:
+    """Return True if `path` is a usable git-diff file for a reviewer.
+
+    Used at the orchestrator level to fail review stages deterministically when the
+    diff input is missing, unreadable, empty, or a prose summary rather than a real
+    git diff. Prompt-level rejection alone is unreliable: an LLM reviewer may still
+    attempt a speculative review on an invalid input. This check runs before the
+    reviewer is dispatched so it cannot."""
+    if not path:
+        return False
+    p = Path(path)
+    if not p.is_file():
+        return False
+    try:
+        head = p.read_text(errors="replace")[:4096]
+    except OSError:
+        return False
+    if not head.strip():
+        return False
+    return "diff --git" in head
+
+
 def _inject_fix_divider(review_md_path: Path, cycle_num: int, commit_messages: list[str]) -> None:
     """Insert a fix-cycle commit marker into review-log.md before the next review round."""
     if not review_md_path.exists():
@@ -222,6 +244,24 @@ def run(run_folder, docs_root, project, branch, review_signal, project_log_path,
         _inject_fix_divider(review_md_path, cycle, commit_messages)
 
         diff_path = _write_round_diff(run_folder, repo_root, commit_hashes, round_num)
+
+        # Deterministic gate: if the fix cycle produced no usable diff, fail the cycle here
+        # rather than dispatch reviewers against an empty or non-diff input.
+        if not is_valid_diff_file(diff_path):
+            msg = (
+                f"review-cycle round {round_num} aborted: no valid git diff at {diff_path!r} "
+                f"(fix-implementation commits={commit_hashes!r})"
+            )
+            logger.log("review-cycle", "ERROR", msg)
+            append_findings_summary(
+                run_folder / "plan.md", findings_map, reviewer_statuses, accepted_risks=accepted_risks
+            )
+            return {
+                "all_passed": False,
+                "blocked": True,
+                "reviewers": changes_requested,
+                "message": msg,
+            }
 
         for reviewer in list(changes_requested):
             review_vars = {

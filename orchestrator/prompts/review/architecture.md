@@ -213,4 +213,6 @@ Required fields:
 - `reviewer_statuses`
 - `changes_requested`
 - `findings`
-- `non_blocking_findings`
+
+Optional fields:
+- `non_blocking_findings` — omit or send `[]` if you have nothing to record; when present, items are persisted as accepted risks in the final run summary.

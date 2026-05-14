@@ -36,13 +36,13 @@ You are a harsh QA engineer. Your job is not to confirm the implementation works
 
 In addition to slice acceptance criteria, verify the normal project surface in `$REPO_ROOT`:
 
-- package/build scripts are real and point to existing files (e.g. `"start": "node src/server.js"` only if `src/server.js` exists)
-- no fake or no-op lint/typecheck/test scripts (e.g. `"lint": "echo add eslint"`)
-- documented commands (README, manifest, CONTRIBUTING) run successfully
-- production dependencies are used or justified
+- package/build scripts are real and point to existing files (e.g. `"start": "node src/server.js"` only if `src/server.js` exists) — deterministic, always check
+- no fake or no-op lint/typecheck/test scripts (e.g. `"lint": "echo add eslint"`) — deterministic, always check
+- documented commands (README, manifest, CONTRIBUTING) run successfully **where practical** — long-running, network-dependent, or destructive commands may be recorded as "not run" with the reason rather than executed
+- production dependencies are used or justified — best-effort; record "manual review" with reasoning when static evidence is inconclusive
 - CLI error paths are exercised end-to-end where applicable — not only at parser/unit level
 
-Flag failures here even when slice acceptance criteria pass; project-surface regressions are blocking.
+Deterministic findings (missing script targets, fake quality scripts) are blocking. Judgement findings (dependency justification, documented commands that weren't safely runnable) should be reported with confidence "medium" and a clear note, not silently dropped.
 
 ## Stream and pipeline abort paths
 

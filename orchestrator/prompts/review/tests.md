@@ -134,6 +134,6 @@ If changes are required, populate `findings` with one short sentence per blockin
 SIGNAL_JSON: {"stage": "review", "status": "passed", "reviewer_statuses": {"tests": "changes-requested"}, "changes_requested": ["tests"], "findings": ["Async onDeadLetter await contract is completely untested", "withRetry has no direct unit tests"], "non_blocking_findings": ["Test names could describe scenarios more specifically"]}
 ```
 
-`non_blocking_findings` are persisted as accepted risks in the final run summary — only list issues you would file as follow-ups, not stylistic drive-bys.
+`non_blocking_findings` is optional — omit or send `[]` if you have nothing to record. When present, items are persisted as accepted risks in the final run summary, so only list issues you would file as follow-ups, not stylistic drive-bys.
 
-Required fields: `stage`, `status`, `reviewer_statuses`, `changes_requested`, `findings`, `non_blocking_findings`.
+Required fields: `stage`, `status`, `reviewer_statuses`, `changes_requested`, `findings`. Optional: `non_blocking_findings`.

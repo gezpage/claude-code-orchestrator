@@ -159,6 +159,6 @@ If changes are required, populate `findings` with one short sentence per blockin
 SIGNAL_JSON: {"stage": "review", "status": "passed", "reviewer_statuses": {"implementation": "changes-requested"}, "changes_requested": ["implementation"], "findings": ["Retry delay formula applies wrong exponent base", "Dead-letter callback errors are silently swallowed"], "non_blocking_findings": ["Backoff jitter coefficient could be tunable"]}
 ```
 
-`non_blocking_findings` are persisted as accepted risks in the final run summary — only list issues you would file as follow-ups, not stylistic drive-bys.
+`non_blocking_findings` is optional — omit or send `[]` if you have nothing to record. When present, items are persisted as accepted risks in the final run summary, so only list issues you would file as follow-ups, not stylistic drive-bys.
 
-Required fields: `stage`, `status`, `reviewer_statuses`, `changes_requested`, `findings`, `non_blocking_findings`.
+Required fields: `stage`, `status`, `reviewer_statuses`, `changes_requested`, `findings`. Optional: `non_blocking_findings`.
