@@ -5,6 +5,7 @@ from unittest.mock import MagicMock, patch
 
 from orchestrator import orchestrate
 from orchestrator._github import GhError
+from orchestrator.agent_runner import AgentConfig, ClaudeCodePrintRunner, CodexCliRunner
 
 
 def _make_run_folder(tmp_path):
@@ -16,8 +17,8 @@ def _make_run_folder(tmp_path):
     return rf
 
 
-def _ctx_agent_metadata():
-    return {"pr_draft": {"backend": "claude_code_print", "model": "test"}}
+def _claude_agent_config():
+    return AgentConfig(backend="claude_code_print", model="test")
 
 
 def test_finalize_pr_happy_path(tmp_path):
@@ -30,7 +31,7 @@ def test_finalize_pr_happy_path(tmp_path):
     pr_sig = {"stage": "pr_draft", "status": "passed", "title": "feat: x", "body": "Body"}
 
     with (
-        patch("orchestrator.orchestrate.run_stage", return_value=pr_sig),
+        patch("orchestrator.orchestrate.run_stage", return_value=pr_sig) as mock_run_stage,
         patch("orchestrator.orchestrate.git_state.push_branch") as mock_push,
         patch(
             "orchestrator.orchestrate._github.create_draft_pr",
@@ -48,14 +49,55 @@ def test_finalize_pr_happy_path(tmp_path):
             base_branch="main",
             gh_repo="me/r",
             logger=logger,
-            agent_metadata=_ctx_agent_metadata(),
+            agent_config=_claude_agent_config(),
         )
 
     mock_push.assert_called_once_with("/tmp/repo", "feat/x", "origin", set_upstream=True)
     mock_pr.assert_called_once_with("me/r", "main", "feat/x", "feat: x", "Body")
+    # The configured backend's runner must be threaded into run_stage so the
+    # finalisation phase honours the profile, not the run_stage default.
+    runner_arg = mock_run_stage.call_args.kwargs.get("runner")
+    assert isinstance(runner_arg, ClaudeCodePrintRunner)
     plan_text = (rf / "plan.md").read_text()
     assert "https://github.com/me/r/pull/7" in plan_text
     assert "will be created on completion" not in plan_text
+
+
+def test_finalize_pr_honours_codex_backend(tmp_path):
+    rf = _make_run_folder(tmp_path)
+    docs = tmp_path
+    overview = docs / "feature" / "overview.md"
+    overview.parent.mkdir(parents=True)
+    overview.write_text("# Feature\n")
+    logger = MagicMock()
+    pr_sig = {"stage": "pr_draft", "status": "passed", "title": "feat: x", "body": "Body"}
+
+    with (
+        patch("orchestrator.orchestrate.run_stage", return_value=pr_sig) as mock_run_stage,
+        patch("orchestrator.orchestrate.git_state.push_branch"),
+        patch(
+            "orchestrator.orchestrate._github.create_draft_pr",
+            return_value="https://github.com/me/r/pull/7",
+        ),
+        patch("orchestrator.orchestrate.state_mod.save_stage_agent") as mock_save_agent,
+    ):
+        orchestrate._finalize_pr(
+            run_folder=rf,
+            docs_root=str(docs),
+            project="p",
+            project_log_path=str(docs / "projects" / "p"),
+            feature_path="feature",
+            repo_root="/tmp/repo",
+            impl_branch="feat/x",
+            base_branch="main",
+            gh_repo="me/r",
+            logger=logger,
+            agent_config=AgentConfig(backend="codex_cli", model="gpt-5"),
+        )
+
+    runner_arg = mock_run_stage.call_args.kwargs.get("runner")
+    assert isinstance(runner_arg, CodexCliRunner)
+    mock_save_agent.assert_called_once_with(rf, "pr_draft", "codex_cli", "gpt-5")
 
 
 def test_finalize_pr_handles_pr_draft_failure(tmp_path):
@@ -79,7 +121,7 @@ def test_finalize_pr_handles_pr_draft_failure(tmp_path):
             base_branch="main",
             gh_repo="me/r",
             logger=logger,
-            agent_metadata=_ctx_agent_metadata(),
+            agent_config=_claude_agent_config(),
         )
     mock_push.assert_not_called()
     mock_pr.assert_not_called()
@@ -112,7 +154,7 @@ def test_finalize_pr_handles_gh_failure(tmp_path):
             base_branch="main",
             gh_repo="me/r",
             logger=logger,
-            agent_metadata=_ctx_agent_metadata(),
+            agent_config=_claude_agent_config(),
         )
     plan_text = Path(rf / "plan.md").read_text()
     assert "PR creation failed" in plan_text

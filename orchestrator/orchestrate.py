@@ -15,7 +15,7 @@ from orchestrator import _git as git_state
 from orchestrator import _git_setup, _github, paths
 from orchestrator import state as state_mod
 from orchestrator._git import GitStateError
-from orchestrator.agent_runner import AgentRunner, build_runner, resolve_agent_config
+from orchestrator.agent_runner import AgentConfig, AgentRunner, build_runner, resolve_agent_config
 from orchestrator.logger import OrchestratorLogger
 from orchestrator.plan import expand_nodes, init_plan_md, set_pr_notice, update_plan_md
 from orchestrator.profile import ExpansionKind, Profile, StageConfig, load_profile
@@ -980,6 +980,10 @@ def run_pipeline(
     logger.log("pipeline", "INFO", "pipeline completed successfully")
 
     if preflight.create_pr and preflight.origin.is_github and preflight.origin.gh_repo:
+        # pr_draft is not a profile stage, so _build_stage_runners does not produce a
+        # runner for it. Resolve one from the profile-level agent config so the
+        # finalisation phase honours the configured backend (e.g. codex_cli) instead
+        # of silently falling back to the default ClaudeCodePrintRunner. See ADR-019.
         _finalize_pr(
             run_folder=run_folder,
             docs_root=docs_root,
@@ -991,7 +995,7 @@ def run_pipeline(
             base_branch=preflight.base_branch,
             gh_repo=preflight.origin.gh_repo,
             logger=logger,
-            agent_metadata=agent_metadata,
+            agent_config=resolve_agent_config(profile.agent, None),
         )
 
 
@@ -1006,7 +1010,7 @@ def _finalize_pr(
     base_branch: str,
     gh_repo: str,
     logger: OrchestratorLogger,
-    agent_metadata: dict[str, dict[str, str | None]],
+    agent_config: AgentConfig,
 ) -> None:
     """Push the implementation branch and open a draft PR.
 
@@ -1046,6 +1050,7 @@ def _finalize_pr(
             docs_root,
             project,
             project_log_path,
+            runner=build_runner(agent_config),
         )
     except Exception as exc:
         _fail(f"pr_draft stage error: {exc}")
@@ -1059,9 +1064,8 @@ def _finalize_pr(
     body = str(sig["body"]).strip()
 
     # Record metadata for the post-pipeline stage so _state.yaml stays truthful.
-    meta = agent_metadata.get("pr_draft", {"backend": "claude_code_print", "model": None})
     state_mod.save_stage_signal(run_folder, "pr_draft", sig)
-    state_mod.save_stage_agent(run_folder, "pr_draft", meta.get("backend", "claude_code_print"), meta.get("model"))
+    state_mod.save_stage_agent(run_folder, "pr_draft", agent_config.backend, agent_config.model)
 
     try:
         git_state.push_branch(repo_root, impl_branch, "origin", set_upstream=True)
