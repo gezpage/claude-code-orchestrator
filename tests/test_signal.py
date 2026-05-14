@@ -10,6 +10,7 @@ def test_valid_sentinel():
 def test_sentinel_buried_in_prose():
     stdout = 'Some reasoning here\nMore text\nSIGNAL_JSON: {"stage": "qa", "status": "passed"}\nTrailing text'
     result = extract_signal(stdout)
+    assert result is not None
     assert result["stage"] == "qa"
     assert result["status"] == "passed"
 

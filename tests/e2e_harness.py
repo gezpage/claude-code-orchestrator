@@ -37,7 +37,7 @@ import os
 import shutil
 import sys
 from collections import defaultdict
-from collections.abc import Iterator, Mapping
+from collections.abc import Callable, Iterator, Mapping
 from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock, patch
@@ -87,7 +87,8 @@ def pre_create_alignment(run_folder: Path) -> None:
 
 
 def _load_schema(name: str) -> dict[str, Any]:
-    return json.loads((_SCHEMA_DIR / f"{name}.json").read_text())
+    data: dict[str, Any] = json.loads((_SCHEMA_DIR / f"{name}.json").read_text())
+    return data
 
 
 def _route_key(stage: str, implementation: str, schema_name: str | None, variables: Mapping[str, Any]) -> str:
@@ -167,7 +168,10 @@ def _synthesise(
     return sig
 
 
-def _apply_override(default: dict[str, Any], override: Any, ctx: dict[str, Any]) -> dict[str, Any]:
+Override = dict[str, Any] | Callable[[dict[str, Any], dict[str, Any]], dict[str, Any]]
+
+
+def _apply_override(default: dict[str, Any], override: Override, ctx: dict[str, Any]) -> dict[str, Any]:
     if callable(override):
         return override(default, ctx)
     out = dict(default)

@@ -501,7 +501,7 @@ def test_append_findings_summary_else_branch_no_markers(tmp_path):
 
     plan_md = tmp_path / "plan.md"
     plan_md.write_text("# Project\n")
-    findings_map = {"tests": [("Some issue", None)]}
+    findings_map: dict[str, list[tuple[str, int | None]]] = {"tests": [("Some issue", None)]}
     _append_findings_summary(plan_md, findings_map, {"tests": "changes-requested"})
 
     content = plan_md.read_text()
