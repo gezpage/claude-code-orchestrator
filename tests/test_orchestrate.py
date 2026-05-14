@@ -353,7 +353,7 @@ def test_branch_created_at_implementation_start(tmp_path):
     run_folder_path = tmp_path / "projects" / "myproject" / "workflow" / "runs" / "feat" / "2026-01-01-run-1"
     run_folder_path.mkdir(parents=True)
 
-    call_order = []
+    call_order: list[tuple[str, ...]] = []
     git_cmds = []
     sig_iter = iter([DISCOVERY_PLANNING_SIGNAL, DISCOVERY_TRACK_SIGNAL, DECOMP_SIGNAL, IMPL_SIGNAL, IMPL_SIGNAL])
 
