@@ -27,10 +27,10 @@ You are addressing reviewer feedback on branch `{{ branch }}` in `$REPO_ROOT`. Y
 
 ## Output
 
-Emit exactly one `SIGNAL_JSON:` line at the end of your output:
+Emit exactly one `SIGNAL_JSON:` line at the end of your output. Report only commit hashes — the orchestrator generates the diff file for the next review round from these commits.
 
 ```
-SIGNAL_JSON: {"stage": "fix-implementation", "status": "passed", "commit_hashes": ["<sha>"], "diff": "<summary of changes>"}
+SIGNAL_JSON: {"stage": "fix-implementation", "status": "passed", "commit_hashes": ["<sha>", "<sha>"]}
 ```
 
 If you cannot apply the fixes, or if reviewers conflict:

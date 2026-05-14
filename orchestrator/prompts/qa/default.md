@@ -32,6 +32,30 @@ You are a harsh QA engineer. Your job is not to confirm the implementation works
 6. Write a QA report at `$RUN_FOLDER/qa/qa-report.md` using the structure below.
 {% endif %}
 
+## Project surface verification
+
+In addition to slice acceptance criteria, verify the normal project surface in `$REPO_ROOT`:
+
+- package/build scripts are real and point to existing files (e.g. `"start": "node src/server.js"` only if `src/server.js` exists)
+- no fake or no-op lint/typecheck/test scripts (e.g. `"lint": "echo add eslint"`)
+- documented commands (README, manifest, CONTRIBUTING) run successfully
+- production dependencies are used or justified
+- CLI error paths are exercised end-to-end where applicable — not only at parser/unit level
+
+Flag failures here even when slice acceptance criteria pass; project-surface regressions are blocking.
+
+## Stream and pipeline abort paths
+
+For stream/pipeline code (anything with backpressure, max-rows, max-bytes, source/sink chaining), explicitly exercise abort/error paths:
+
+- max-rows abort
+- max-bytes abort
+- malformed structural input (e.g. missing required header, broken framing)
+- source error mid-stream
+- downstream error mid-stream
+
+Verify the source stream is closed/destroyed on abort, or that the lifecycle limitation is explicitly documented. Resource leaks on abort are a blocking finding unless the limitation is documented.
+
 ## Confidence levels
 
 - `high` — all criteria verified by running the code; all tests pass

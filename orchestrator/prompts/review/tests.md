@@ -38,6 +38,11 @@ You have read access to the full repository at `$REPO_ROOT`. Use this to substan
 Explore only what is needed to confirm or rule out a concern identified from the diff.
 {% endif %}
 
+If the diff path is missing, unreadable, or not a full git diff file:
+- mark the review as `changes-requested`
+- emit a blocking finding that the review input is invalid
+- do not continue with speculative review
+
 ## Review Dimensions
 
 **Coverage mapping**
@@ -45,6 +50,19 @@ Explore only what is needed to confirm or rule out a concern identified from the
 - Are error paths tested, not just the happy path? A test suite that is 80%+ happy-path is under-tested.
 - Are boundary values tested (empty input, zero, maximum, just-over-maximum, nil/null)?
 - Are invalid inputs tested (wrong type, malformed data, unexpected structure)?
+
+**Invariant coverage**
+
+Do not only map tests to generated acceptance criteria. Generated criteria can be narrower than the underlying design intent — e.g. an acceptance criterion that only checks array mutation when the invariant is "defensive copy" of arbitrary container contents.
+
+Also verify tests cover the semantic invariants implied by the design:
+- defensive copy / immutability (container **and** element mutation)
+- state isolation (no module-level mutable state, no shared references across instances)
+- public API callback and event contracts (callbacks cannot corrupt retained state)
+- error propagation across integration boundaries
+- documented CLI/package commands run end-to-end, not only at unit level
+
+A missing test is blocking if it would expose a confirmed bug or protect a documented invariant — even if no acceptance criterion explicitly names it.
 
 **Missing test enumeration**
 - List every missing test case by name and scenario. Do not say "more edge cases needed" — name them.
@@ -107,13 +125,15 @@ Write your findings under `## Tests Review — Round {{ round }}` in `{{ review_
 Emit exactly one line:
 
 ```
-SIGNAL_JSON: {"stage": "review", "status": "passed", "reviewer_statuses": {"tests": "approved"}, "changes_requested": [], "findings": []}
+SIGNAL_JSON: {"stage": "review", "status": "passed", "reviewer_statuses": {"tests": "approved"}, "changes_requested": [], "findings": [], "non_blocking_findings": []}
 ```
 
-If changes are required, populate `findings` with one short sentence per blocking issue (the issue only — no file paths, no fix instructions):
+If changes are required, populate `findings` with one short sentence per blocking issue and `non_blocking_findings` with one short sentence per non-blocking issue (the issue only — no file paths, no fix instructions):
 
 ```
-SIGNAL_JSON: {"stage": "review", "status": "passed", "reviewer_statuses": {"tests": "changes-requested"}, "changes_requested": ["tests"], "findings": ["Async onDeadLetter await contract is completely untested", "withRetry has no direct unit tests"]}
+SIGNAL_JSON: {"stage": "review", "status": "passed", "reviewer_statuses": {"tests": "changes-requested"}, "changes_requested": ["tests"], "findings": ["Async onDeadLetter await contract is completely untested", "withRetry has no direct unit tests"], "non_blocking_findings": ["Test names could describe scenarios more specifically"]}
 ```
 
-Required fields: `stage`, `status`, `reviewer_statuses`, `changes_requested`, `findings`.
+`non_blocking_findings` are persisted as accepted risks in the final run summary — only list issues you would file as follow-ups, not stylistic drive-bys.
+
+Required fields: `stage`, `status`, `reviewer_statuses`, `changes_requested`, `findings`, `non_blocking_findings`.

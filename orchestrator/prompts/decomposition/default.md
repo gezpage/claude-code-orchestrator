@@ -25,6 +25,19 @@ You are a decomposition agent. Your task is to break the PRD into implementation
 
 4. Prefer many thin slices over few thick ones. Each slice must be independently committable and verifiable.
 5. For every acceptance criterion that covers a config field, env-var, or error path: enumerate all instances explicitly by name. Do not write a catch-all such as "invalid values → error". Write "Invalid `READ_TIMEOUT`, `WRITE_TIMEOUT`, `IDLE_TIMEOUT` → `Load()` returns non-nil error." An incomplete enumeration becomes a test gap.
+
+   ### Semantic invariant preservation
+
+   When converting requirements into acceptance criteria, preserve the strongest meaningful interpretation of the invariant. Do not weaken it to whatever happens to be easy to test.
+
+   Examples:
+   - "defensive copy" means callers cannot mutate internal state through returned containers **or** returned elements. Tests must cover both container mutation (push, splice, assign) and element mutation (mutate a field on a returned object).
+   - "isolated state" means no module-level mutable state and no shared mutable references across instances.
+   - "structured error contract" means consistent machine-readable error codes from a central source, not just any error message.
+   - "streaming" means no full-file read and no unbounded accumulation unless explicitly documented.
+   - "safe callback/event API" means user callbacks cannot corrupt retained internal state — emitted objects must be immutable, frozen, or copied.
+
+   Acceptance criteria must include tests for the failure modes that would violate the invariant — not only the happy path.
 6. Write each slice to `$RUN_FOLDER/decomposition/S-NN-slug.md` using the template below.
 7. Order slices by dependency. A slice may depend on prior slices but must not create circular dependencies.
 8. Write a dependency graph in Mermaid format at `$RUN_FOLDER/decomposition/dependency-graph.md`.

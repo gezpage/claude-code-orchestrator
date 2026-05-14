@@ -496,6 +496,124 @@ def test_append_findings_summary_else_branch_no_markers(tmp_path):
     assert content.index("# Project") < content.index("## Review Findings")
 
 
+def test_write_round_diff_persists_real_patch(tmp_path):
+    """The orchestrator writes a real git diff to review/diff-round-N.patch after fix cycles —
+    reviewers must not see a prose summary masquerading as a diff."""
+    import subprocess as sp
+
+    from orchestrator.review_cycle import _write_round_diff
+
+    # Build a tiny git repo with two commits so the diff command produces output.
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    sp.run(["git", "-C", str(repo), "init", "-q"], check=True)
+    sp.run(["git", "-C", str(repo), "config", "user.email", "t@t"], check=True)
+    sp.run(["git", "-C", str(repo), "config", "user.name", "t"], check=True)
+    (repo / "f.txt").write_text("a\n")
+    sp.run(["git", "-C", str(repo), "add", "f.txt"], check=True)
+    sp.run(["git", "-C", str(repo), "commit", "-q", "-m", "base"], check=True)
+    (repo / "f.txt").write_text("a\nb\n")
+    sp.run(["git", "-C", str(repo), "commit", "-q", "-am", "change"], check=True)
+    sha = sp.run(
+        ["git", "-C", str(repo), "rev-parse", "HEAD"], check=True, capture_output=True, text=True
+    ).stdout.strip()
+
+    run_folder = tmp_path / "run"
+    run_folder.mkdir()
+    diff_path = _write_round_diff(run_folder, str(repo), [sha], 2)
+
+    assert diff_path == str(run_folder / "review" / "diff-round-2.patch")
+    written = (run_folder / "review" / "diff-round-2.patch").read_text()
+    assert "+b" in written
+    assert "diff --git" in written
+
+
+def test_write_round_diff_no_commits_returns_empty(tmp_path):
+    from orchestrator.review_cycle import _write_round_diff
+
+    assert _write_round_diff(tmp_path, "/tmp/anywhere", [], 2) == ""
+    assert _write_round_diff(tmp_path, "", ["abc123"], 2) == ""
+
+
+def test_accepted_risks_written_when_cycle_runs(tmp_path):
+    """Non-blocking findings from round 1 are persisted as accepted risks even when
+    a fix cycle resolves the blocking findings."""
+    run_folder, log_path = _setup(tmp_path)
+    plan_md = run_folder / "plan.md"
+    plan_md.write_text("# Project\n")
+
+    signal = {
+        "stage": "review",
+        "status": "passed",
+        "reviewer_statuses": {"tests": "changes-requested"},
+        "reviewer_findings": {"tests": ["Blocking gap"]},
+        "reviewer_non_blocking_findings": {"tests": ["Names could be clearer", "Helper duplicates fixture"]},
+        "changes_requested": ["tests"],
+    }
+    stage_returns = [_fix_sig(), _reviewer_sig("tests", "approved")]
+    ret_iter = iter(stage_returns)
+
+    with patch("orchestrator.review_cycle.run_stage", side_effect=lambda *a, **kw: next(ret_iter)):
+        review_cycle.run(run_folder, "/docs", "proj", "feat/x", signal, log_path)
+
+    content = plan_md.read_text()
+    assert "Accepted Risks (non-blocking)" in content
+    assert "Names could be clearer" in content
+    assert "Helper duplicates fixture" in content
+
+
+def test_accepted_risks_merge_from_later_round(tmp_path):
+    """Non-blocking findings raised by a reviewer in a later round are merged into accepted risks."""
+    run_folder, log_path = _setup(tmp_path)
+    plan_md = run_folder / "plan.md"
+    plan_md.write_text("# Project\n")
+
+    signal = {
+        "stage": "review",
+        "status": "passed",
+        "reviewer_statuses": {"tests": "changes-requested"},
+        "reviewer_findings": {"tests": ["Blocking gap"]},
+        "reviewer_non_blocking_findings": {},
+        "changes_requested": ["tests"],
+    }
+
+    round_2_sig = {
+        "stage": "review",
+        "status": "passed",
+        "reviewer_statuses": {"tests": "approved"},
+        "non_blocking_findings": ["Late-surfacing risk worth noting"],
+    }
+    stage_returns = [_fix_sig(), round_2_sig]
+    ret_iter = iter(stage_returns)
+
+    with patch("orchestrator.review_cycle.run_stage", side_effect=lambda *a, **kw: next(ret_iter)):
+        review_cycle.run(run_folder, "/docs", "proj", "feat/x", signal, log_path)
+
+    content = plan_md.read_text()
+    assert "Accepted Risks (non-blocking)" in content
+    assert "Late-surfacing risk worth noting" in content
+
+
+def test_append_findings_summary_with_only_accepted_risks(tmp_path):
+    """append_findings_summary writes an Accepted Risks section when given no blocking findings."""
+    from orchestrator.review_cycle import append_findings_summary
+
+    plan_md = tmp_path / "plan.md"
+    plan_md.write_text("# Project\n")
+    append_findings_summary(
+        plan_md,
+        findings_map={},
+        reviewer_statuses={"tests": "approved"},
+        accepted_risks={"tests": ["Risk one", "Risk two"]},
+    )
+
+    content = plan_md.read_text()
+    assert "## Review Findings" in content
+    assert "Accepted Risks (non-blocking)" in content
+    assert "Risk one" in content
+    assert "Risk two" in content
+
+
 def test_findings_summary_inserted_before_file_manifest(tmp_path):
     """Findings section is inserted before the File Manifest marker when present."""
     run_folder, log_path = _setup(tmp_path)
