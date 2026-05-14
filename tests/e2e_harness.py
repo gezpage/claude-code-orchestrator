@@ -25,10 +25,17 @@ to specify the keys that diverge from the happy path.
 
 # Signal values
 
-Each `signals` value may be:
-  - a dict  — returned every time the key is hit
-  - a list[dict] — returned in order; raises if exhausted
-  - a callable(prompt, call_idx) -> dict — full control
+Each `signals` value may be a dict, a list, or a callable. A dict is returned
+every time the key is hit; a list yields one element per call in order
+(exhaustion raises); a callable receives `(prompt, call_idx)` for full control.
+
+Each of those forms may be either a bare signal dict OR a `StageOutput` —
+
+  StageOutput(signal={...}, artifacts={Path("..."): "body", ...})
+
+When a `StageOutput` is yielded, the harness writes each artifact file (creating
+parent directories) before returning the signal, mirroring a real stage that
+produces files on disk in addition to emitting SIGNAL_JSON.
 
 # Output dir override
 
@@ -44,11 +51,36 @@ import re
 import shutil
 import sys
 from collections.abc import Callable, Mapping
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock
 
 _OUTPUT_DIR_ENV = "ORCH_E2E_OUTPUT_DIR"
+
+
+@dataclass
+class StageOutput:
+    """A signal dict paired with files to materialise before the signal is returned.
+
+    Use this when a test wants the fake stage to leave real files on disk
+    (the way a real Claude run would), e.g. `prd.md`, `findings-track-a.md`,
+    or slice files. `artifacts` maps each path to the body to write.
+    """
+
+    signal: dict[str, Any]
+    artifacts: dict[str | Path, str] = field(default_factory=dict)
+
+
+def _materialise(spec: Any) -> dict[str, Any]:
+    """Unwrap `spec` into a signal dict, writing any declared artifact files."""
+    if isinstance(spec, StageOutput):
+        for path, content in spec.artifacts.items():
+            p = Path(path)
+            p.parent.mkdir(parents=True, exist_ok=True)
+            p.write_text(content)
+        return dict(spec.signal)
+    return dict(spec)
 
 
 def resolve_output_dir(tmp_path: Path) -> Path:
@@ -150,19 +182,28 @@ def default_signals(out_dir: Path, track_prompt: Path) -> dict[str, Any]:
                 {"name": "track-a", "prompt_file": str(track_prompt), "focus": "primary modules"},
             ],
         },
-        "discovery-track": {
-            "stage": "discovery",
-            "status": "passed",
-            "findings_file": str(out_dir / "findings-track-a.md"),
-            "summary": "found three entry points",
-        },
-        "specification": {
-            "stage": "specification",
-            "status": "passed",
-            "prd_path": str(out_dir / "prd.md"),
-            "context_path": str(out_dir / "context.md"),
-            "adr_paths": [],
-        },
+        "discovery-track": StageOutput(
+            signal={
+                "stage": "discovery",
+                "status": "passed",
+                "findings_file": str(out_dir / "findings-track-a.md"),
+                "summary": "found three entry points",
+            },
+            artifacts={out_dir / "findings-track-a.md": "# Findings — track-a\n"},
+        ),
+        "specification": StageOutput(
+            signal={
+                "stage": "specification",
+                "status": "passed",
+                "prd_path": str(out_dir / "prd.md"),
+                "context_path": str(out_dir / "context.md"),
+                "adr_paths": [],
+            },
+            artifacts={
+                out_dir / "prd.md": "# PRD\n",
+                out_dir / "context.md": "# Context\n",
+            },
+        ),
         "decomposition": {
             "stage": "decomposition",
             "status": "passed",
@@ -213,14 +254,15 @@ def make_fake_run_claude(signals: Mapping[str, Any]) -> Callable[[str, str | Non
         call_counts[key] = idx + 1
 
         if callable(spec):
-            sig = spec(prompt, idx)
+            result = spec(prompt, idx)
         elif isinstance(spec, list):
             if idx >= len(spec):
                 raise AssertionError(f"stage key {key!r} called {idx + 1} times but only {len(spec)} signals provided")
-            sig = dict(spec[idx])
+            result = spec[idx]
         else:
-            sig = dict(spec)
+            result = spec
 
+        sig = _materialise(result)
         return f"SIGNAL_JSON: {json.dumps(sig)}\n"
 
     fake.call_counts = call_counts  # type: ignore[attr-defined]
