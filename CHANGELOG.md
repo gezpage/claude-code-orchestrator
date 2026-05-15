@@ -8,14 +8,10 @@ Format: [Unreleased] at the top, dated releases below, newest first.
 ## [Unreleased]
 
 ### Fixed
-
-## [2026-05-15]
-
-### Fixed
-
-- `_create_branch` now checks working-tree cleanliness even when already on the target branch, closing the gap where resumed runs could dispatch QA against uncommitted implementation output.
-
-- `_create_branch` no longer checks `is_clean` when the repo is already on the target branch, preventing spurious "working tree not clean" failures at the start of stages that follow implementation (2026-05-15)
+- 2026-05-15: `_create_branch` now checks working-tree cleanliness even when already on the target branch, closing the gap where resumed runs could dispatch QA against uncommitted implementation output.
+- 2026-05-15: QA stage no longer blocks on project-surface findings (e.g. fake lint scripts) that pre-existed on the base branch and were not introduced by the feature branch; the check now uses `git show <base>:<file>` to verify the specific offending content rather than file-level diff
+- 2026-05-15: `base_branch` is now propagated to all stage prompt templates via `_build_variables`, replacing the hard-coded `main` in QA surface verification
+- 2026-05-15: `_create_branch` no longer checks `is_clean` when the repo is already on the target branch, preventing spurious "working tree not clean" failures at the start of stages that follow implementation (2026-05-15)
 
 ### Changed
 - 2026-05-15: Plan mermaid renderer now materialises a `Prompt` input parallelogram and a `JSON`-style panel around every stage, plus a single `Overview` input between `Start` and the first stage. The panel folds the previous Output parallelogram into a bold header, embeds a status-derived JSON stub, and surfaces other stage artefacts as pill-style buttons. Stage labels are slimmed to a prominent title and a compact `impl · Mode · ⏱` sub-line. Subgraph wrappers are no longer rendered. Edges are rewritten through the materialised partners (`A_panel --> B_prompt`). See ADR-020.

@@ -107,6 +107,7 @@ def _build_variables(
     stage_name: str,
     signals: dict,
     branch: str,
+    base_branch: str,
     feature_path: str,
     docs_root: str,
     project: str,
@@ -120,6 +121,7 @@ def _build_variables(
         "docs_root": docs_root,
         "project": project,
         "branch": branch,
+        "base_branch": base_branch,
         "feature_path": feature_path,
         "project_context_path": str(Path(docs_root) / "projects" / project / "context.md"),
     }
@@ -900,6 +902,7 @@ def run_pipeline(
             stage_name,
             signals,
             branch,
+            preflight.base_branch,
             feature_path,
             docs_root,
             project,
