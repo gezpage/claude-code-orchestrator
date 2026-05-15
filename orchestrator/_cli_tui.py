@@ -29,7 +29,13 @@ class RunInputs:
     create_pr: bool | None = None
 
 
-_BUNDLED_PROFILES = ("full", "full-interactive", "minimal", "minimal-codex", "spike")
+_BUNDLED_PROFILES_DIR = Path(__file__).parent / "profiles"
+
+
+def _bundled_profiles() -> list[str]:
+    if not _BUNDLED_PROFILES_DIR.is_dir():
+        return []
+    return sorted(p.stem for p in _BUNDLED_PROFILES_DIR.glob("*.yaml"))
 
 
 def _missing(value: str | None) -> bool:
@@ -67,7 +73,7 @@ def _list_profiles(docs_root: str, project: str) -> list[str]:
     extras: list[str] = []
     if project_profiles.is_dir():
         extras = sorted(p.stem for p in project_profiles.glob("*.yaml"))
-    seen = list(_BUNDLED_PROFILES)
+    seen = _bundled_profiles()
     for name in extras:
         if name not in seen:
             seen.append(name)
