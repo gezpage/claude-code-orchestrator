@@ -81,7 +81,8 @@ def test_fix_verification_succeeds_returns_new_signal(tmp_path):
     ):
         result = orchestrate._run_fix_verification_cycle(verify_sig, run_folder, variables, ctx)
 
-    assert result == new_verify_sig
+    assert result["verification_status"] == "passed"
+    assert result["commit_hashes"] == ["abc123"]
     mock_rs.assert_called_once()
     assert mock_rs.call_args.args[0] == "fix-verification"
     assert mock_rs.call_args.args[1] == "default"
@@ -257,3 +258,75 @@ def test_pipeline_skips_fix_cycle_when_verification_passes(tmp_path):
     # verification returns verification_status=skipped (no toolchain in tmp_path),
     # so _run_fix_verification_cycle must never fire.
     assert mock_fvc.call_count == 0, "fix-verification cycle must not fire when verification_status != 'failed'"
+
+
+# ── commit hash propagation to review ─────────────────────────────────────────
+
+
+def test_fix_verification_cycle_puts_actual_hashes_in_returned_signal(tmp_path):
+    """_run_fix_verification_cycle must attach actual_hashes to the returned signal
+    so _dispatch_prompts can include them in the review diff range."""
+    run_folder = tmp_path / "run-1"
+    run_folder.mkdir()
+    ctx = _make_ctx(tmp_path)
+    variables = {"repo_root": str(tmp_path / "repo")}
+    verify_sig = _verify_failed_sig(run_folder)
+    new_verify_sig = _verify_passed_sig(run_folder)
+    fix_hashes = ["fix1", "fix2"]
+
+    with (
+        patch("orchestrator.orchestrate.run_stage", return_value=_fix_sig(hashes=fix_hashes)),
+        patch("orchestrator.orchestrate.run_deterministic_stage", return_value=new_verify_sig),
+        patch("orchestrator.orchestrate.review_cycle_mod._head_sha", return_value="deadbeef"),
+        patch("orchestrator.orchestrate.review_cycle_mod._commits_since", return_value=fix_hashes),
+    ):
+        result = orchestrate._run_fix_verification_cycle(verify_sig, run_folder, variables, ctx)
+
+    assert result["commit_hashes"] == fix_hashes
+
+
+def test_dispatch_prompts_diff_spans_implementation_and_fix_verification_commits(tmp_path):
+    """When signals include commit_hashes from both implementation and verification
+    (set by _run_fix_verification_cycle), the review diff range must span all commits."""
+    from unittest.mock import MagicMock
+
+    from orchestrator.orchestrate import _dispatch_prompts
+    from orchestrator.profile import ExpansionKind, StageConfig
+
+    stage = StageConfig(
+        name="review",
+        expansion=ExpansionKind.PROMPTS,
+        prompts={"architecture": "prompts/review/architecture.md"},
+    )
+    ctx = _make_ctx(tmp_path)
+    run_folder = tmp_path / "run-1"
+    run_folder.mkdir()
+
+    signals = {
+        "implementation": {"commit_hashes": ["impl1", "impl2"]},
+        "verification": {"commit_hashes": ["fix1"]},
+    }
+    review_sig = {"status": "passed", "reviewer_statuses": {"architecture": "passed"}, "changes_requested": []}
+
+    git_diff = MagicMock()
+    git_diff.returncode = 0
+    git_diff.stdout = "diff --git a/f b/f\nindex 0..1 100644\n--- a/f\n+++ b/f\n@@ -1 +1 @@\n-old\n+new\n"
+    git_diff.stderr = ""
+
+    captured_diff_args: list[list[str]] = []
+
+    def fake_run(args, **kw):
+        if len(args) >= 4 and args[3] == "diff":
+            captured_diff_args.append(args)
+        return git_diff
+
+    with (
+        patch("orchestrator.orchestrate.run_stage", return_value=review_sig),
+        patch("orchestrator.orchestrate.update_plan_md"),
+        patch("orchestrator.orchestrate.subprocess.run", side_effect=fake_run),
+    ):
+        _dispatch_prompts(stage, {"repo_root": "/tmp"}, run_folder, ctx, signals)
+
+    assert len(captured_diff_args) == 1
+    range_arg = captured_diff_args[0][-1]
+    assert range_arg == "impl1^..fix1", f"expected impl1^..fix1, got {range_arg!r}"

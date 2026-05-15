@@ -675,14 +675,10 @@ def _dispatch_prompts(
     variables["review_md"] = str(review_md_path)
     variables["round"] = "1"
 
-    commit_hashes: list[str] = next(
-        (
-            sig.get("commit_hashes", [])
-            for sig in signals.values()
-            if isinstance(sig, dict) and sig.get("commit_hashes")
-        ),
-        [],
-    )
+    commit_hashes: list[str] = []
+    for sig in signals.values():
+        if isinstance(sig, dict):
+            commit_hashes.extend(sig.get("commit_hashes", []))
     if commit_hashes and "repo_root" in variables:
         first, last = commit_hashes[0], commit_hashes[-1]
         diff_result = subprocess.run(
@@ -849,6 +845,7 @@ def _run_fix_verification_cycle(
         ctx.logger.log("verification", "ERROR", msg)
         return {"stage": "verification", "status": "blocked", "message": msg}
 
+    new_verify_sig["commit_hashes"] = actual_hashes
     return new_verify_sig
 
 
