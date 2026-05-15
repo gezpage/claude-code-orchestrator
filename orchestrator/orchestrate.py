@@ -4,6 +4,7 @@ import re
 import subprocess
 import sys
 import time
+import traceback
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -904,7 +905,11 @@ def run_pipeline(
 
         if stage.mode == "interactive":
             t0 = time.monotonic()
-            sig = _dispatch_interactive(stage, variables, run_folder, ctx)
+            try:
+                sig = _dispatch_interactive(stage, variables, run_folder, ctx)
+            except Exception:
+                logger.log(stage_name, "ERROR", f"unhandled exception in '{stage_name}':\n{traceback.format_exc()}")
+                raise
             elapsed = time.monotonic() - t0
             if sig.get("status") != "passed":
                 st = state_mod.load_state(run_folder)
@@ -929,10 +934,14 @@ def run_pipeline(
 
         update_plan_md(run_folder, stage_name, "in_progress")
         t0 = time.monotonic()
-        if stage.mode == "deterministic":
-            sig = run_deterministic_stage(stage_name, variables["repo_root"], run_folder, ctx.project_log_path)
-        else:
-            sig = _DISPATCHERS[stage.expansion](stage, variables, run_folder, ctx, signals)
+        try:
+            if stage.mode == "deterministic":
+                sig = run_deterministic_stage(stage_name, variables["repo_root"], run_folder, ctx.project_log_path)
+            else:
+                sig = _DISPATCHERS[stage.expansion](stage, variables, run_folder, ctx, signals)
+        except Exception:
+            logger.log(stage_name, "ERROR", f"unhandled exception in '{stage_name}':\n{traceback.format_exc()}")
+            raise
         elapsed = time.monotonic() - t0
 
         signals[stage_name] = sig
