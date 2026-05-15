@@ -1067,6 +1067,7 @@ def test_default_dispatcher_blocks_on_git_state_error(tmp_path):
     run_folder = _make_run_folder(tmp_path)
 
     with (
+        patch("orchestrator.orchestrate.git_state.branch_exists", return_value=False),
         patch("orchestrator.orchestrate.git_state.is_clean", return_value=False),
         patch("orchestrator.orchestrate.run_stage") as mock_rs,
     ):
@@ -1786,11 +1787,27 @@ def test_prompts_blocks_when_diff_file_is_prose_summary(tmp_path):
 # ── git state hardening (issue #79) ───────────────────────────────────────────
 
 
-def test_create_branch_refuses_when_working_tree_dirty(tmp_path):
-    """A dirty repo blocks branch creation/switching with a clear GitStateError."""
+def test_create_branch_refuses_when_working_tree_dirty_and_branch_missing(tmp_path):
+    """Dirty repo blocks new branch creation with a clear GitStateError."""
     from orchestrator.orchestrate import _create_branch
 
-    with patch("orchestrator.orchestrate.git_state.is_clean", return_value=False):
+    with (
+        patch("orchestrator.orchestrate.git_state.branch_exists", return_value=False),
+        patch("orchestrator.orchestrate.git_state.is_clean", return_value=False),
+    ):
+        with pytest.raises(GitStateError, match="working tree not clean"):
+            _create_branch("feat/x", "/repo", MagicMock(), "implementation")
+
+
+def test_create_branch_refuses_when_working_tree_dirty_and_need_switch(tmp_path):
+    """Dirty repo blocks switching to an existing branch with a clear GitStateError."""
+    from orchestrator.orchestrate import _create_branch
+
+    with (
+        patch("orchestrator.orchestrate.git_state.branch_exists", return_value=True),
+        patch("orchestrator.orchestrate.git_state.current_branch", return_value="main"),
+        patch("orchestrator.orchestrate.git_state.is_clean", return_value=False),
+    ):
         with pytest.raises(GitStateError, match="working tree not clean"):
             _create_branch("feat/x", "/repo", MagicMock(), "implementation")
 
@@ -1813,15 +1830,31 @@ def test_create_branch_switches_to_existing_branch_when_not_on_it(tmp_path):
 
 
 def test_create_branch_noop_when_already_on_target(tmp_path):
-    """Resume case: already on the feature branch with clean tree → just log and return."""
+    """Resume case: already on the feature branch → return early without checking is_clean."""
     from orchestrator.orchestrate import _create_branch
 
     with (
-        patch("orchestrator.orchestrate.git_state.is_clean", return_value=True),
+        patch("orchestrator.orchestrate.git_state.branch_exists", return_value=True),
+        patch("orchestrator.orchestrate.git_state.current_branch", return_value="feat/x"),
+        patch("orchestrator.orchestrate.git_state.is_clean") as mock_clean,
+        patch("orchestrator.orchestrate.subprocess.run") as mock_run,
+    ):
+        _create_branch("feat/x", "/repo", MagicMock(), "implementation")
+    mock_run.assert_not_called()
+    mock_clean.assert_not_called()
+
+
+def test_create_branch_noop_when_already_on_target_and_dirty(tmp_path):
+    """Already on target branch with dirty tree (e.g. untracked files from prior stage) → no error."""
+    from orchestrator.orchestrate import _create_branch
+
+    with (
         patch("orchestrator.orchestrate.git_state.branch_exists", return_value=True),
         patch("orchestrator.orchestrate.git_state.current_branch", return_value="feat/x"),
         patch("orchestrator.orchestrate.subprocess.run") as mock_run,
     ):
+        # is_clean is NOT patched — if _create_branch calls it, it would hit real git and
+        # either error or return a real value; the point is it must not be called at all.
         _create_branch("feat/x", "/repo", MagicMock(), "implementation")
     mock_run.assert_not_called()
 
@@ -1881,6 +1914,7 @@ def test_slices_dispatcher_returns_blocked_on_dirty_tree(tmp_path):
     signals = {"decomposition": {"slice_files": ["S-01-a.md"], "slice_groups": [["S-01-a.md"]]}}
 
     with (
+        patch("orchestrator.orchestrate.git_state.branch_exists", return_value=False),
         patch("orchestrator.orchestrate.git_state.is_clean", return_value=False),
         patch("orchestrator.orchestrate.run_stage") as mock_rs,
         patch("orchestrator.orchestrate.update_plan_md"),

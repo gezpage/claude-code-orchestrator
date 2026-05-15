@@ -182,17 +182,19 @@ def _merge_worktree_branch(repo_root: str, temp_branch: str, logger, stage_name:
 
 
 def _create_branch(branch: str, repo_root: str, logger, stage_name: str) -> None:
-    if not git_state.is_clean(repo_root):
-        raise GitStateError(f"working tree not clean in {repo_root} — refuse to create or switch to '{branch}'")
     if git_state.branch_exists(repo_root, branch):
         if git_state.current_branch(repo_root) == branch:
             logger.log(stage_name, "INFO", f"already on branch '{branch}' — continuing")
             return
+        if not git_state.is_clean(repo_root):
+            raise GitStateError(f"working tree not clean in {repo_root} — refuse to switch to '{branch}'")
         result = subprocess.run(["git", "-C", repo_root, "checkout", branch], capture_output=True, text=True)
         if result.returncode != 0:
             raise GitStateError(f"git checkout {branch} failed: {result.stderr.strip()}")
         logger.log(stage_name, "INFO", f"checked out existing branch '{branch}'")
         return
+    if not git_state.is_clean(repo_root):
+        raise GitStateError(f"working tree not clean in {repo_root} — refuse to create branch '{branch}'")
     result = subprocess.run(
         ["git", "-C", repo_root, "checkout", "-b", branch],
         capture_output=True,

@@ -7,6 +7,10 @@ Format: [Unreleased] at the top, dated releases below, newest first.
 
 ## [Unreleased]
 
+### Fixed
+
+- `_create_branch` no longer checks `is_clean` when the repo is already on the target branch, preventing spurious "working tree not clean" failures at the start of stages that follow implementation (2026-05-15)
+
 ### Changed
 - 2026-05-15: Plan mermaid renderer now materialises a `Prompt` input parallelogram and a `JSON`-style panel around every stage, plus a single `Overview` input between `Start` and the first stage. The panel folds the previous Output parallelogram into a bold header, embeds a status-derived JSON stub, and surfaces other stage artefacts as pill-style buttons. Stage labels are slimmed to a prominent title and a compact `impl · Mode · ⏱` sub-line. Subgraph wrappers are no longer rendered. Edges are rewritten through the materialised partners (`A_panel --> B_prompt`). See ADR-020.
 - 2026-05-15: The bundled `full` profile now runs alignment autonomously by default via `prompts/alignment/autonomous.md`, and the previous interactive alignment flow is available as the new `full-interactive` profile.
