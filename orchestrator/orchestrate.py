@@ -755,6 +755,8 @@ def _dispatch_prompts(
             review_signal,
             ctx.project_log_path,
             repo_root=variables.get("repo_root", ""),
+            implementation_runner=ctx.runner_for("implementation"),
+            review_runner=ctx.runner_for(stage.name),
         )
         if not result.get("all_passed"):
             ctx.logger.log(

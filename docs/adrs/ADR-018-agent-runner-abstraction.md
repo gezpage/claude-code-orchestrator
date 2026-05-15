@@ -119,11 +119,9 @@ abstraction.
   selected. The runner does not pre-check availability — a missing `codex`
   binary surfaces as a subprocess error at dispatch time. (Pre-check could
   land in a follow-up.)
-- Per-stage backend choice is wired through `orchestrate.run_pipeline`.
-  Fix-cycle dispatches inside `review_cycle.py` currently use the default
-  runner (no per-stage override propagated through the cycle); resolving
-  that requires threading the runners dict into `review_cycle.run` and is
-  deferred to a follow-up.
+- Per-stage backend choice is wired through `orchestrate.run_pipeline`,
+  including fix cycles. `fix-implementation` reuses the implementation
+  stage runner, and review reruns reuse the review stage runner.
 - Run artifacts (`_state.yaml`) now record `agent.{stage}.{backend, model}`
   so the run is reproducible without re-deriving config from the profile.
 - The full agent surface is one small package (`orchestrator/agent_runner/`);

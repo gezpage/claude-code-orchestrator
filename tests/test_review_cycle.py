@@ -3,6 +3,7 @@ from unittest.mock import patch
 import pytest
 
 from orchestrator import review_cycle
+from orchestrator.agent_runner import FakeRunner
 
 # ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -89,6 +90,35 @@ def test_one_cycle_resolves(tmp_path):
     reviewer_call = mock_rs.call_args_list[1]
     assert reviewer_call.args[0] == "review"
     assert reviewer_call.args[1] == "implementation"
+
+
+def test_fix_cycle_reuses_supplied_stage_runners(tmp_path):
+    run_folder, log_path = _setup(tmp_path)
+    signal = _review_signal({"implementation": "changes-requested"})
+    implementation_runner = FakeRunner()
+    review_runner = FakeRunner()
+
+    stage_returns = [
+        _fix_sig(),
+        _reviewer_sig("implementation", "approved"),
+    ]
+    ret_iter = iter(stage_returns)
+
+    with patch("orchestrator.review_cycle.run_stage", side_effect=lambda *a, **kw: next(ret_iter)) as mock_rs:
+        result = review_cycle.run(
+            run_folder,
+            "/docs",
+            "proj",
+            "feat/x",
+            signal,
+            log_path,
+            implementation_runner=implementation_runner,
+            review_runner=review_runner,
+        )
+
+    assert result == {"all_passed": True}
+    assert mock_rs.call_args_list[0].kwargs["runner"] is implementation_runner
+    assert mock_rs.call_args_list[1].kwargs["runner"] is review_runner
 
 
 # ── two cycles resolve ────────────────────────────────────────────────────────
