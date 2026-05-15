@@ -186,6 +186,8 @@ def _merge_worktree_branch(repo_root: str, temp_branch: str, logger, stage_name:
 def _create_branch(branch: str, repo_root: str, logger, stage_name: str) -> None:
     if git_state.branch_exists(repo_root, branch):
         if git_state.current_branch(repo_root) == branch:
+            if not git_state.is_clean(repo_root):
+                raise GitStateError(f"working tree not clean in {repo_root} — refuse to continue on '{branch}'")
             logger.log(stage_name, "INFO", f"already on branch '{branch}' — continuing")
             return
         if not git_state.is_clean(repo_root):
