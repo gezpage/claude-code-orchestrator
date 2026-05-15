@@ -20,7 +20,6 @@ def test_fix_cycle_resolves_architecture_changes(tmp_path):
     docs_root, feature_path = h.setup_docs(out_dir)
 
     run_folder = out_dir / "projects" / "myproject" / "workflow" / "runs" / "demo" / "2026-05-14-run-1"
-    h.pre_create_alignment(run_folder)
 
     overrides = {
         "review:architecture:r1": {
@@ -61,8 +60,8 @@ def test_fix_cycle_resolves_architecture_changes(tmp_path):
     # reviewers re-enter the cycle.
     assert "review:implementation:r2" not in counts
 
-    # Happy-path 11 + 1 fix-impl + 1 arch-r2 = 13.
-    assert fake.call_count == 13
+    # Happy-path 12 + 1 fix-impl + 1 arch-r2 = 14.
+    assert fake.call_count == 14
 
     # Fix-cycle artefacts exist.
     fix_outputs = sorted((run_folder / "fix-implementation").glob("fix-implementation-*-output.md"))

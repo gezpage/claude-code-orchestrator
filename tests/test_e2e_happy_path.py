@@ -18,7 +18,6 @@ def test_full_profile_e2e_happy_path(tmp_path):
     docs_root, feature_path = h.setup_docs(out_dir)
 
     run_folder = out_dir / "projects" / "myproject" / "workflow" / "runs" / "demo" / "2026-05-14-run-1"
-    h.pre_create_alignment(run_folder)
 
     with (
         h.patch_run_stage() as fake,
@@ -61,9 +60,8 @@ def test_full_profile_e2e_happy_path(tmp_path):
     }
     assert signals["review"]["changes_requested"] == []
 
-    # planning + 1 track + spec + decomp + 2 impl + qa + 3 reviewers + harvest = 11.
-    # alignment is interactive and pre-skipped, so it does not invoke run_stage.
-    assert fake.call_count == 11
+    # planning + 1 track + alignment + spec + decomp + 2 impl + qa + 3 reviewers + harvest = 12.
+    assert fake.call_count == 12
 
     assert (run_folder / "plan.md").exists()
     plan_md = (run_folder / "plan.md").read_text().lower()

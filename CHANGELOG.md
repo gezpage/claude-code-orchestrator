@@ -7,6 +7,9 @@ Format: [Unreleased] at the top, dated releases below, newest first.
 
 ## [Unreleased]
 
+### Changed
+- 2026-05-15: The bundled `full` profile now runs alignment autonomously by default via `prompts/alignment/autonomous.md`, and the previous interactive alignment flow is available as the new `full-interactive` profile.
+
 ### Fixed
 - 2026-05-15: Review-cycle re-review prompts now receive the deterministic verification signal context (`verify_md_path` and `verification_status`) from `_state.yaml`, and review prompts tolerate runs without verification context. This fixes the `minimal-codex` round-2 render failure where `verify_md_path` was undefined.
 - 2026-05-15: Review cycles now detect commits made by `fix-implementation` via `git rev-list` rather than trusting the agent's `commit_hashes` self-report, so a stage that commits but under-reports its SHAs (observed with the Codex backend emitting `commit_hashes: []` despite the work being done) no longer aborts the re-review with a misleading "no valid git diff" error. When the agent genuinely makes no commits, the abort message now points at the fix-implementation output file so the operator can see why. When `review-log.md` is missing the expected reviewer sections, the fix prompt's `changes_brief` falls back to a brief rendered from the in-memory findings so the agent still has actionable input.
