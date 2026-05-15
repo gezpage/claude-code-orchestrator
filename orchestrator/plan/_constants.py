@@ -25,6 +25,8 @@ _CLASSDEFS = [
     "    classDef gate fill:#92400e,color:#fff,stroke:#d97706,stroke-width:2px",
     "    classDef fannode fill:#374151,color:#9ca3af,stroke:#1f2937,stroke-width:1px",
     "    classDef startend fill:#4f46e5,color:#fff,stroke:none",
+    "    classDef input fill:#1e3a8a,color:#dbeafe,stroke:#3b82f6,stroke-width:1px",
+    "    classDef json fill:#111827,color:#d1d5db,stroke:#374151,stroke-width:1px",
 ]
 
 _DURATION_COLORS: list[tuple[int | None, str]] = [

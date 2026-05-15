@@ -5,11 +5,7 @@ from orchestrator.plan._helpers import _run_header
 from orchestrator.plan._render import write_plan_md
 from orchestrator.profile import ExpansionKind, Profile
 
-_INIT_DIRECTIVE = (
-    "%%{init: {'theme': 'base', 'themeVariables': "
-    "{'fontSize': '14px', 'lineColor': '#6b7280', "
-    "'clusterBkg': 'transparent', 'clusterBorder': 'transparent'}}}%%"
-)
+_INIT_DIRECTIVE = "%%{init: {'theme': 'base', 'themeVariables': {'fontSize': '14px', 'lineColor': '#6b7280'}}}%%"
 
 
 def init_plan_md(run_folder: Path, profile: Profile, pr_notice: str | None = None) -> None:
