@@ -334,7 +334,18 @@ def _extract_output_prose(output_path: Path) -> str:
 
 
 def _escape_mermaid_label(text: str) -> str:
-    return text.replace("&", "&amp;").replace('"', "&quot;").replace("\n", "<br/>")
+    # `&` first so we don't double-escape entities we introduce. `<`/`>` matter
+    # because the panel label is rendered as HTML inside the mermaid node — an
+    # unescaped `<tag>` in agent prose would otherwise be parsed as markup and
+    # silently swallow surrounding text. `"` matters because the node label is
+    # itself a `"..."`-quoted string in the mermaid source.
+    return (
+        text.replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+        .replace('"', "&quot;")
+        .replace("\n", "<br/>")
+    )
 
 
 # --- legend & file matching -------------------------------------------------

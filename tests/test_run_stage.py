@@ -187,6 +187,30 @@ def test_non_zero_exit_blocks_signal_extraction(tmp_path):
     assert "exit code 1" in result["message"]
 
 
+def test_output_md_preserves_noisy_stream_on_runner_failure(tmp_path):
+    """When the runner fails noisily (no clean final message), the noisy raw
+    stdout must land in *-output.md so the failure remains diagnosable. With
+    *-stream.log removed, output.md is the only on-disk evidence — losing this
+    would make codex sandbox/auth/timeout failures debug-blind."""
+    run_folder, log_path = _setup_run_folder(tmp_path)
+    noisy_stream = (
+        "codex banner\n"
+        "workdir: /tmp/repo\n"
+        "model: gpt-5\n"
+        "ERROR: invalid model / sandbox failure / auth declined\n"
+        "(no final agent message emitted)\n"
+    )
+    runner = FakeRunner(noisy_stream, exit_code=1)
+    result = run_stage(
+        "discovery", "default", VARS, run_folder, str(tmp_path), "myproject", str(log_path), runner=runner
+    )
+    assert result["status"] == "blocked"
+    output_md = (run_folder / "discovery" / "discovery-output.md").read_text()
+    assert "codex banner" in output_md
+    assert "ERROR: invalid model / sandbox failure / auth declined" in output_md
+    assert "(no final agent message emitted)" in output_md
+
+
 def test_timed_out_blocks_signal_extraction(tmp_path):
     run_folder, log_path = _setup_run_folder(tmp_path)
     runner = FakeRunner(f"SIGNAL_JSON: {GOOD_SIGNAL}", timed_out=True)

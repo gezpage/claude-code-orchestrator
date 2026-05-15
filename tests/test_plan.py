@@ -821,6 +821,71 @@ def test_panel_butted_to_stage_with_invisible_link(tmp_path):
     assert "specification --> specification_panel" not in content
 
 
+def test_panel_prose_escapes_html_and_mermaid_breaking_chars(tmp_path):
+    """Agent prose with awkward but realistic characters must not break the
+    mermaid block. Specifically:
+    - `&` becomes `&amp;` first, so subsequent entity insertions are not
+      re-escaped into `&amp;lt;` etc.
+    - `<` / `>` become `&lt;` / `&gt;` so HTML-looking text doesn't get parsed
+      as markup, and stray `-->` in prose can't be mistaken for a mermaid edge.
+    - `"` becomes `&quot;` because the panel label is itself wrapped in `"..."`.
+    - Newlines become `<br/>` so multi-line prose stays on one logical label.
+    - Square brackets and backticks pass through verbatim — no mermaid meaning
+      inside a quoted label.
+    """
+    run_folder = _make_run_folder(tmp_path)
+    profile = _simple_profile("specification")
+    init_plan_md(run_folder, profile)
+    spec = run_folder / "specification"
+    spec.mkdir()
+    (spec / "specification-prompt.md").write_text("p")
+    gnarly = (
+        "Reviewed `auth/login.ts` & flagged the `<script>` injection at line 42, "
+        'plus a "double-quoted" comment.\n'
+        "Diagram sketch: A --> B [optional].\n"
+        '\n```json\n{"status": "passed"}\n```\n'
+    )
+    (spec / "specification-output.md").write_text(gnarly)
+    update_plan_md(run_folder, "specification", "passed", elapsed_secs=10)
+    content = (run_folder / "plan.md").read_text()
+
+    # Entities are escaped — diagram survives.
+    assert "&amp;" in content
+    assert "&lt;script&gt;" in content
+    assert "&quot;double-quoted&quot;" in content
+    # Newline inside the paragraph collapses to <br/>.
+    assert "comment.<br/>Diagram sketch:" in content
+    # A literal `-->` arrow in prose is neutralised so mermaid can't read it
+    # as an edge token.
+    assert "A --&gt; B [optional]." in content
+    # Square brackets and backticks pass through unescaped.
+    assert "`auth/login.ts`" in content
+    assert "[optional]." in content
+    # Raw, unescaped versions of the HTML-looking text must not appear anywhere.
+    assert "<script>" not in content
+    # No double-encoded entities introduced by the &-first replacement order.
+    assert "&amp;amp;" not in content
+    assert "&amp;lt;" not in content
+
+
+def test_panel_prose_truncates_very_long_first_paragraph(tmp_path):
+    """Prose longer than the panel cap is truncated with an ellipsis so the
+    diagram stays readable; the full text remains reachable via the Output link."""
+    run_folder = _make_run_folder(tmp_path)
+    profile = _simple_profile("specification")
+    init_plan_md(run_folder, profile)
+    spec = run_folder / "specification"
+    spec.mkdir()
+    (spec / "specification-prompt.md").write_text("p")
+    long_para = "word " * 200  # ~1000 chars
+    (spec / "specification-output.md").write_text(f'{long_para}\n\n```json\n{{"status": "passed"}}\n```\n')
+    update_plan_md(run_folder, "specification", "passed", elapsed_secs=10)
+    content = (run_folder / "plan.md").read_text()
+    # Ellipsis marker is present, full 1000-char paragraph is not.
+    assert "…" in content
+    assert long_para.strip() not in content
+
+
 # --- set_pr_node ---
 
 
@@ -850,3 +915,39 @@ def test_set_pr_node_idempotent_on_refresh(tmp_path):
     assert content.count("pr([") == 1
     assert "/pull/99" in content
     assert "/pull/42" not in content
+
+
+def test_set_pr_node_splices_after_fix_cycle_predecessor(tmp_path):
+    """When the predecessor of Done is a re-review node from a fix cycle (not
+    the profile's last regular stage), set_pr_node must still splice the PR
+    box between *that* re-review node and Done — not between the original
+    last stage and Done. Edge rewriting around fan-in / fan-out is where this
+    historically gets weird."""
+    run_folder = _make_run_folder(tmp_path)
+    # Review is the final stage so Done's predecessor will become the re-review
+    # node after the fix cycle.
+    profile = Profile(
+        name="test",
+        stages=(
+            StageConfig(name="implementation", prompt="prompts/implementation/default.md"),
+            StageConfig(
+                name="review",
+                expansion=ExpansionKind.PROMPTS,
+                prompts={"tests": "prompts/review/tests.md"},
+            ),
+        ),
+    )
+    init_plan_md(run_folder, profile)
+    add_fix_cycle_node(run_folder, cycle_num=1, reviewers=["tests"])
+    set_pr_node(run_folder, "https://github.com/example/repo/pull/77")
+    content = (run_folder / "plan.md").read_text()
+
+    # PR node exists and links to the supplied URL.
+    assert "pr([" in content
+    assert "/pull/77" in content
+    # The re-review node from the fix cycle is the predecessor of pr (not Done).
+    assert "review_tests_2_panel --> pr" in content
+    assert "pr --> Done" in content
+    # Nothing else should still point directly at Done.
+    assert "review_tests_2_panel --> Done" not in content
+    assert "review_tests_panel --> Done" not in content
