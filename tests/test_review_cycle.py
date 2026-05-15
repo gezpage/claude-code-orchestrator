@@ -3,6 +3,7 @@ from unittest.mock import patch
 import pytest
 
 from orchestrator import review_cycle
+from orchestrator import state as state_mod
 from orchestrator.agent_runner import FakeRunner
 
 # ── helpers ───────────────────────────────────────────────────────────────────
@@ -366,6 +367,57 @@ def test_reviewer_vars_include_repo_root(tmp_path):
         )
 
     assert reviewer_vars_seen == ["/path/to/repo"]
+
+
+def test_reviewer_vars_include_verification_context_from_signal_state(tmp_path):
+    run_folder, log_path = _setup(tmp_path)
+    signal = _review_signal({"implementation": "changes-requested"})
+    verify_md = str(run_folder / "verification" / "VERIFY.md")
+    state_mod.save_stage_signal(
+        run_folder,
+        "verification",
+        {
+            "stage": "verification",
+            "status": "passed",
+            "verification_status": "failed",
+            "verify_md_path": verify_md,
+        },
+    )
+
+    stage_returns = [_fix_sig(), _reviewer_sig("implementation", "approved")]
+    ret_iter = iter(stage_returns)
+    reviewer_vars_seen = []
+
+    def tracking_stage(stage, impl, variables, run_folder, docs_root, project, log_path, cwd=None, **kwargs):
+        if stage == "review":
+            reviewer_vars_seen.append(dict(variables))
+        return next(ret_iter)
+
+    with patch("orchestrator.review_cycle.run_stage", side_effect=tracking_stage):
+        review_cycle.run(run_folder, "/docs", "proj", "feat/x", signal, log_path)
+
+    assert reviewer_vars_seen[0]["verify_md_path"] == verify_md
+    assert reviewer_vars_seen[0]["verification_status"] == "failed"
+
+
+def test_reviewer_vars_default_empty_verification_context_when_signal_absent(tmp_path):
+    run_folder, log_path = _setup(tmp_path)
+    signal = _review_signal({"implementation": "changes-requested"})
+
+    stage_returns = [_fix_sig(), _reviewer_sig("implementation", "approved")]
+    ret_iter = iter(stage_returns)
+    reviewer_vars_seen = []
+
+    def tracking_stage(stage, impl, variables, run_folder, docs_root, project, log_path, cwd=None, **kwargs):
+        if stage == "review":
+            reviewer_vars_seen.append(dict(variables))
+        return next(ret_iter)
+
+    with patch("orchestrator.review_cycle.run_stage", side_effect=tracking_stage):
+        review_cycle.run(run_folder, "/docs", "proj", "feat/x", signal, log_path)
+
+    assert reviewer_vars_seen[0]["verify_md_path"] == ""
+    assert reviewer_vars_seen[0]["verification_status"] == ""
 
 
 def test_plan_update_called_for_fix_and_rerun_nodes(tmp_path):

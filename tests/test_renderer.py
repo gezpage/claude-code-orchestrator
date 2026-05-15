@@ -134,3 +134,18 @@ def test_signal_json_keeps_absolute_paths(tmp_path):
     # Agents emit absolute paths in SIGNAL_JSON, so those examples remain Jinja-expanded.
     result = render_prompt("discovery", "default", VARS, str(tmp_path), "myproject")
     assert '"findings_files": ["/tmp/run/discovery/findings.md"]' in result
+
+
+@pytest.mark.parametrize("reviewer", ["architecture", "implementation", "tests"])
+def test_review_prompts_render_without_verification_context(tmp_path, reviewer):
+    review_vars = {
+        **VARS,
+        "review_md": "/tmp/run/review/review-log.md",
+        "diff": "/tmp/run/review/diff-round-1.patch",
+        "round": "1",
+        "context_path": "",
+    }
+
+    result = render_prompt("review", reviewer, review_vars, str(tmp_path), "myproject")
+
+    assert "Deterministic verification context" not in result
