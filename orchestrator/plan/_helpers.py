@@ -24,32 +24,50 @@ def _format_elapsed(secs: float) -> str:
 
 def _node_label(
     display: str,
-    impl: str,
+    impl: str = "",
     status: str = "pending",
     elapsed_secs: float | None = None,
     output_summary: str | None = None,
     mode: str = "",
     file_links: list[tuple[str, str]] | None = None,
+    backend: str = "",
+    model: str = "",
 ) -> str:
-    # Stage nodes have a prominent first line (stage name + status icon) and a
-    # compact second line joining impl / mode / elapsed with ` · ` separators.
-    # File links no longer live inside the stage label — they belong to the
-    # adjacent prompt and panel nodes the renderer materialises around each stage.
-    # file_links and output_summary are kept on the signature for backward
-    # compatibility but are intentionally ignored.
-    del file_links, output_summary
+    # Stage nodes show a prominent title line and a multi-line sub-section
+    # (one fact per line) so the diagram stays scannable.
+    del file_links, output_summary, impl
     icon = _STATUS_ICON.get(status, "-")
     title = f"<span style='font-size:18px;font-weight:bold;'>{display} {icon}</span>"
-    sub_parts: list[str] = []
-    if impl:
-        sub_parts.append(impl)
+    sub_lines: list[str] = []
+    runner_line = _runner_line(backend, model)
+    if runner_line:
+        sub_lines.append(runner_line)
     if mode:
-        sub_parts.append(f"Mode: {mode}")
+        sub_lines.append(f"Mode: {mode}")
     if elapsed_secs is not None:
-        sub_parts.append(f"⏱ {_format_elapsed(elapsed_secs)}")
-    if sub_parts:
-        return f"{title}<br/>{' · '.join(sub_parts)}"
+        sub_lines.append(f"⏱ {_format_elapsed(elapsed_secs)}")
+    if sub_lines:
+        return title + "<br/>" + "<br/>".join(sub_lines)
     return title
+
+
+_BACKEND_DISPLAY = {
+    "claude_code_print": "claude",
+    "claude_code_auto": "claude",
+    "codex_cli": "codex",
+    "deterministic": "deterministic",
+    "interactive": "interactive",
+    "fake": "fake",
+}
+
+
+def _runner_line(backend: str, model: str) -> str:
+    if not backend and not model:
+        return ""
+    label = _BACKEND_DISPLAY.get(backend, backend)
+    if backend and model:
+        return f"{label} · {model}"
+    return label or model
 
 
 def _track_node_id(stage_name: str, track_name: str) -> str:

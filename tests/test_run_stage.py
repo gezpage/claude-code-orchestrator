@@ -1,5 +1,3 @@
-import pytest
-
 from orchestrator.agent_runner import FakeRunner
 from orchestrator.run_stage import run_stage
 
@@ -166,17 +164,13 @@ def test_output_files_in_stage_subfolder(tmp_path):
     assert not (run_folder / "stages").exists()
 
 
-def test_stream_log_path_passed_to_runner(tmp_path):
-    """run_stage must hand the runner a stream_log_path inside the per-stage folder.
-    Backends own stream-log persistence — orchestration only specifies destination."""
+def test_no_stream_log_written(tmp_path):
+    """Stream logs were dropped as redundant with output.md. Stages should leave
+    nothing matching *-stream.log behind."""
     run_folder, log_path = _setup_run_folder(tmp_path)
     runner = FakeRunner(f"SIGNAL_JSON: {GOOD_SIGNAL}")
     run_stage("discovery", "default", VARS, run_folder, str(tmp_path), "myproject", str(log_path), runner=runner)
-    req = runner.requests[0]
-    assert req.stream_log_path is not None
-    assert req.stream_log_path.parent == run_folder / "discovery"
-    assert req.stream_log_path.name.endswith("-stream.log")
-    assert req.stream_log_path.exists()
+    assert list((run_folder / "discovery").glob("*-stream.log")) == []
 
 
 def test_non_zero_exit_blocks_signal_extraction(tmp_path):
@@ -191,6 +185,30 @@ def test_non_zero_exit_blocks_signal_extraction(tmp_path):
     )
     assert result["status"] == "blocked"
     assert "exit code 1" in result["message"]
+
+
+def test_output_md_preserves_noisy_stream_on_runner_failure(tmp_path):
+    """When the runner fails noisily (no clean final message), the noisy raw
+    stdout must land in *-output.md so the failure remains diagnosable. With
+    *-stream.log removed, output.md is the only on-disk evidence — losing this
+    would make codex sandbox/auth/timeout failures debug-blind."""
+    run_folder, log_path = _setup_run_folder(tmp_path)
+    noisy_stream = (
+        "codex banner\n"
+        "workdir: /tmp/repo\n"
+        "model: gpt-5\n"
+        "ERROR: invalid model / sandbox failure / auth declined\n"
+        "(no final agent message emitted)\n"
+    )
+    runner = FakeRunner(noisy_stream, exit_code=1)
+    result = run_stage(
+        "discovery", "default", VARS, run_folder, str(tmp_path), "myproject", str(log_path), runner=runner
+    )
+    assert result["status"] == "blocked"
+    output_md = (run_folder / "discovery" / "discovery-output.md").read_text()
+    assert "codex banner" in output_md
+    assert "ERROR: invalid model / sandbox failure / auth declined" in output_md
+    assert "(no final agent message emitted)" in output_md
 
 
 def test_timed_out_blocks_signal_extraction(tmp_path):
@@ -274,23 +292,3 @@ def test_grace_retry_blocks_on_timeout(tmp_path):
     )
     assert result["status"] == "blocked"
     assert "timed out" in result["message"]
-
-
-@pytest.mark.parametrize("suffix", ["", "planning", "architecture"])
-def test_stream_log_filename_includes_output_suffix(tmp_path, suffix):
-    run_folder, log_path = _setup_run_folder(tmp_path)
-    runner = FakeRunner(f"SIGNAL_JSON: {GOOD_SIGNAL}")
-    run_stage(
-        "discovery",
-        "default",
-        VARS,
-        run_folder,
-        str(tmp_path),
-        "myproject",
-        str(log_path),
-        output_suffix=suffix,
-        runner=runner,
-    )
-    tag = f"-{suffix}" if suffix else ""
-    expected = run_folder / "discovery" / f"discovery{tag}-stream.log"
-    assert runner.requests[0].stream_log_path == expected

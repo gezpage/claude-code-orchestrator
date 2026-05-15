@@ -8,28 +8,41 @@ from orchestrator.profile import ExpansionKind, Profile
 _INIT_DIRECTIVE = "%%{init: {'theme': 'base', 'themeVariables': {'fontSize': '14px', 'lineColor': '#6b7280'}}}%%"
 
 
-def init_plan_md(run_folder: Path, profile: Profile, pr_notice: str | None = None) -> None:
+def init_plan_md(
+    run_folder: Path,
+    profile: Profile,
+    pr_notice: str | None = None,
+    agent_metadata: dict[str, dict[str, str | None]] | None = None,
+) -> None:
     run_folder = Path(run_folder)
     plan_path = run_folder / "plan.md"
     if plan_path.exists():
         return
 
-    graph = build_initial_graph(profile)
+    graph = build_initial_graph(profile, agent_metadata=agent_metadata)
     save_graph(run_folder, graph)
     write_plan_md(plan_path, _run_header(run_folder, pr_notice=pr_notice), graph)
 
 
-def build_initial_graph(profile: Profile) -> Graph:
+def build_initial_graph(
+    profile: Profile,
+    agent_metadata: dict[str, dict[str, str | None]] | None = None,
+) -> Graph:
     graph = Graph(init_directive=_INIT_DIRECTIVE)
     graph.add_node(Node(id="Start", shape="stadium", raw_label="▶ Start", css_class="startend"))
 
     chain_ids: list[str] = []
     parents: dict[str, list[str]] = {}
 
+    def _meta(stage_name: str) -> tuple[str, str]:
+        info = (agent_metadata or {}).get(stage_name) or {}
+        return (info.get("backend") or "", info.get("model") or "")
+
     for stage in profile.stages:
         name = stage.name
         display_name = name.replace("_", " ").title()
         graph.add_subgraph(Subgraph(id=f"sg_{name}", display=display_name))
+        backend, model = _meta(name)
 
         if stage.mode == "interactive":
             graph.add_node(
@@ -41,6 +54,8 @@ def build_initial_graph(profile: Profile) -> Graph:
                     subgraph=f"sg_{name}",
                     mode=stage.mode,
                     stage_dir=name,
+                    backend=backend,
+                    model=model,
                 )
             )
             chain_ids.append(name)
@@ -54,6 +69,8 @@ def build_initial_graph(profile: Profile) -> Graph:
                     subgraph=f"sg_{name}",
                     mode=stage.mode,
                     stage_dir=name,
+                    backend=backend,
+                    model=model,
                 )
             )
             for reviewer, prompt_path in stage.prompts.items():
@@ -73,6 +90,8 @@ def build_initial_graph(profile: Profile) -> Graph:
                         mode=stage.mode,
                         stage_dir=name,
                         file_suffix=reviewer,
+                        backend=backend,
+                        model=model,
                     )
                 )
                 parents.setdefault(name, []).append(sub_id)
@@ -90,6 +109,8 @@ def build_initial_graph(profile: Profile) -> Graph:
                     subgraph=f"sg_{name}",
                     mode=stage.mode,
                     stage_dir=name,
+                    backend=backend,
+                    model=model,
                 )
             )
             chain_ids.append(name)

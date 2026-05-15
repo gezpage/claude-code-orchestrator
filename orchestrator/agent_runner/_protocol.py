@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass, field
-from pathlib import Path
 from typing import Protocol
 
 
@@ -18,10 +17,6 @@ class AgentRunRequest:
     model: str | None = None
     permission_mode: str | None = None
     output_mode: str = "text"
-    # If set, the runner writes the raw agent CLI stdout stream here. run_stage
-    # computes the path so stream logs land in the existing per-stage folder
-    # convention.
-    stream_log_path: Path | None = None
 
 
 @dataclass(frozen=True)
@@ -32,7 +27,6 @@ class AgentRunResult:
     exit_code: int | None
     duration_seconds: float
     timed_out: bool
-    stream_log_path: Path | None = None
     command: list[str] | None = field(default=None)
 
 
