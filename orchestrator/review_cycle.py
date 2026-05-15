@@ -8,6 +8,7 @@ import yaml
 
 from orchestrator import plan as plan_mod
 from orchestrator import state as state_mod
+from orchestrator.agent_runner import AgentRunner
 from orchestrator.logger import OrchestratorLogger
 from orchestrator.run_stage import run_stage
 
@@ -177,7 +178,18 @@ def append_findings_summary(
 _append_findings_summary = append_findings_summary
 
 
-def run(run_folder, docs_root, project, branch, review_signal, project_log_path, repo_root: str = "") -> dict:
+def run(
+    run_folder,
+    docs_root,
+    project,
+    branch,
+    review_signal,
+    project_log_path,
+    repo_root: str = "",
+    *,
+    implementation_runner: AgentRunner | None = None,
+    review_runner: AgentRunner | None = None,
+) -> dict:
     run_folder = Path(run_folder)
     logger = OrchestratorLogger(run_folder, str(project_log_path))
 
@@ -226,6 +238,7 @@ def run(run_folder, docs_root, project, branch, review_signal, project_log_path,
             str(project_log_path),
             output_suffix=str(cycle),
             cwd=repo_root or None,
+            runner=implementation_runner,
         )
         fix_elapsed = time.monotonic() - fix_t0
         fix_status = fix_sig.get("status", "unknown")
@@ -284,6 +297,7 @@ def run(run_folder, docs_root, project, branch, review_signal, project_log_path,
                 str(project_log_path),
                 output_suffix=f"{reviewer}-round{round_num}",
                 cwd=repo_root or None,
+                runner=review_runner,
             )
             review_elapsed = time.monotonic() - review_t0
             verdict = sig.get("reviewer_statuses", {}).get(reviewer, sig.get("status", "unknown"))

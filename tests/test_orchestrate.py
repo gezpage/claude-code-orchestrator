@@ -1602,6 +1602,42 @@ def test_prompts_fix_cycle_triggered_automatically_when_reviewer_requests_change
     assert result["status"] == "passed"
 
 
+def test_prompts_passes_stage_runners_to_review_cycle(tmp_path):
+    """Fix cycles should keep using the implementation and review runners selected by the profile."""
+    from orchestrator.orchestrate import _dispatch_prompts
+
+    stage = StageConfig(
+        name="review",
+        expansion=ExpansionKind.PROMPTS,
+        prompts={"implementation": "prompts/review/implementation.md"},
+    )
+    implementation_runner = object()
+    review_runner = object()
+    ctx = _make_ctx(tmp_path)
+    ctx.runners.update({"implementation": implementation_runner, "review": review_runner})
+    run_folder = _make_run_folder(tmp_path)
+    review_sig = {
+        "status": "passed",
+        "reviewer_statuses": {"implementation": "changes-requested"},
+        "changes_requested": ["implementation"],
+    }
+
+    with (
+        patch("orchestrator.orchestrate.run_stage", return_value=review_sig),
+        patch("orchestrator.orchestrate.update_plan_md"),
+        patch("orchestrator.orchestrate.subprocess.run", return_value=_git_ok()),
+        patch("orchestrator.orchestrate.review_cycle_mod.is_valid_diff_file", return_value=True),
+        patch(
+            "orchestrator.orchestrate.review_cycle_mod.run", return_value={"all_passed": True, "reviewers": []}
+        ) as mock_cycle,
+    ):
+        result = _dispatch_prompts(stage, {"repo_root": "/tmp"}, run_folder, ctx, {})
+
+    assert result["status"] == "passed"
+    assert mock_cycle.call_args.kwargs["implementation_runner"] is implementation_runner
+    assert mock_cycle.call_args.kwargs["review_runner"] is review_runner
+
+
 def test_prompts_review_cycle_failure_returns_blocked_signal(tmp_path):
     """When review_cycle.run returns all_passed=False, the dispatcher returns blocked."""
     from orchestrator.orchestrate import _dispatch_prompts
