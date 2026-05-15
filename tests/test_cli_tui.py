@@ -78,6 +78,13 @@ def test_suggested_branch_uses_feature_slug():
     assert _cli_tui._suggested_branch("") == "feat/change"
 
 
+def test_list_profiles_includes_all_bundled(tmp_path):
+    """Bundled profiles are discovered from the profiles/ directory, not hardcoded."""
+    profiles = _cli_tui._list_profiles(str(tmp_path), "nonexistent")
+    for expected in ("full", "full-interactive", "minimal", "minimal-codex", "minimal-claude", "spike"):
+        assert expected in profiles, f"missing bundled profile {expected!r} in {profiles}"
+
+
 def test_resolve_prompts_for_project_when_none_listed(tmp_path):
     """No projects on disk → fall back to free-text rather than offering an empty list."""
     inputs = RunInputs(
