@@ -42,7 +42,9 @@ In addition to slice acceptance criteria, verify the normal project surface in `
 - production dependencies are used or justified — best-effort; record "manual review" with reasoning when static evidence is inconclusive
 - CLI error paths are exercised end-to-end where applicable — not only at parser/unit level
 
-Deterministic findings (missing script targets, fake quality scripts) are blocking. Judgement findings (dependency justification, documented commands that weren't safely runnable) should be reported with confidence "medium" and a clear note, not silently dropped.
+For each project-surface finding, determine whether it was **introduced or worsened by the feature branch** by running `git -C $REPO_ROOT diff main...HEAD -- <file>`. A finding that pre-existed on `main` and was not touched by the branch is reported in the QA report but is **non-blocking** — note it as "pre-existing, not introduced by this branch". Only findings introduced or worsened by the feature branch are blocking.
+
+Deterministic findings introduced by the branch (missing script targets, fake quality scripts added or changed by the branch) are blocking. Judgement findings (dependency justification, documented commands that weren't safely runnable) should be reported with confidence "medium" and a clear note, not silently dropped.
 
 ## Stream and pipeline abort paths
 

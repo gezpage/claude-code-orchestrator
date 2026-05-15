@@ -9,6 +9,12 @@ Format: [Unreleased] at the top, dated releases below, newest first.
 
 ### Fixed
 
+## 2026-05-15
+
+### Fixed
+
+- QA stage no longer blocks on project-surface findings (e.g. fake lint scripts) that pre-existed on `main` and were not introduced by the feature branch
+
 - `_create_branch` no longer checks `is_clean` when the repo is already on the target branch, preventing spurious "working tree not clean" failures at the start of stages that follow implementation (2026-05-15)
 
 ### Changed
