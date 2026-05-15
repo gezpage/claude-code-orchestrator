@@ -7,6 +7,9 @@ Format: [Unreleased] at the top, dated releases below, newest first.
 
 ## [Unreleased]
 
+### Changed
+- 2026-05-15: Moved the Python package into `src/orchestrator/` and hardened the uv-based quality/release gates with dependency auditing and build artifact inspection.
+
 ### Fixed
 - 2026-05-15: Plan mermaid file links now prepend `/#` to the docs-root-anchored href (e.g. `/#projects/foo/workflow/runs/.../specification-prompt.md`) so the team-hub-style hash-routed docs site resolves them via its SPA router. Without the `#` the browser URL-encoded the slashes into a single absolute path segment and the link 404'd.
 - 2026-05-15: `minimal-codex` implementation stage now overrides the profile-level `workspace-write` sandbox with `permission_mode: danger-full-access` so Codex can write `.git/` and commit. The non-committing stages (specification, decomposition, review) keep the sandboxed `workspace-write` default, so Codex's filesystem isolation still protects planning and review work — only the stage that has to commit is granted full repo write access.

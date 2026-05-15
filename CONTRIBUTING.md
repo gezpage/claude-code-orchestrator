@@ -5,9 +5,11 @@
 ```bash
 git clone https://github.com/gezpage/claude-code-orchestrator
 cd claude-code-orchestrator
-uv sync
+uv sync --group dev
 uv run pytest tests/
 ```
+
+The package uses a `src/` layout: runtime code lives in `src/orchestrator/`, tests live in `tests/`, and all commands are run from the repository root through `uv`.
 
 ## Making changes
 
@@ -16,7 +18,7 @@ Read `CLAUDE.md` before touching any code — it documents the architectural inv
 The short version:
 
 1. Branch from `main`: `git checkout -b <type>/<description> origin/main`
-2. Make your change and run `uv run pytest tests/`
+2. Make your change and run the quality checks below
 3. Commit with a conventional message: `fix:`, `feat:`, `chore:`, `docs:`
 4. Open a PR — describe *why* the change was made, not what changed (the diff covers that)
 
@@ -29,7 +31,11 @@ Decisions that do **not** need an ADR: bug fixes, naming changes, adding tests, 
 ## Tests
 
 ```bash
+uv run ruff check .
+uv run ruff format --check .
+uv run mypy .
 uv run pytest tests/
+uv run python -m pip_audit
 ```
 
 All PRs must keep tests green.

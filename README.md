@@ -63,10 +63,10 @@ Stages with `tracks` expansion run a planning agent first, then fan out to N par
 
 ## Install
 
-Requires Python 3.11+ and [pipx](https://pipx.pypa.io/).
+Requires Python 3.11+ and [uv](https://docs.astral.sh/uv/).
 
 ```bash
-pipx install -e /path/to/orchestrator
+uv tool install --editable /path/to/orchestrator
 ```
 
 ## Concepts
@@ -211,7 +211,7 @@ Deterministic stages use `mode: deterministic` — they run pure Python in-proce
 
 ## Verification config
 
-The deterministic `verification` stage detects the repo's toolchain by looking for marker files (e.g. `package.json`, `go.mod`) and runs the matching bundled recipe under `orchestrator/verifiers/recipes/`. Repos without a recognised toolchain produce a benign `skipped` report — verification is not a hard gate.
+The deterministic `verification` stage detects the repo's toolchain by looking for marker files (e.g. `package.json`, `go.mod`) and runs the matching bundled recipe under `src/orchestrator/verifiers/recipes/`. Repos without a recognised toolchain produce a benign `skipped` report — verification is not a hard gate.
 
 To override the bundled behaviour, drop a `.cco.yaml` at the **code repo root** (the `repo-root` from `project.yaml`, not the docs root):
 
@@ -232,7 +232,7 @@ verification:
     - node_manifest_sanity
 ```
 
-Overrides replace rather than merge — predictable beats clever. Bundled recipes ship for `node` and `go`; probes ship as `node_manifest_sanity` and `go_module_sanity`. Adding a new toolchain means adding a recipe YAML (and any probes it needs) under `orchestrator/verifiers/`, not editing orchestration code. See [ADR-017](docs/adrs/ADR-017-deterministic-verification-stage.md).
+Overrides replace rather than merge — predictable beats clever. Bundled recipes ship for `node` and `go`; probes ship as `node_manifest_sanity` and `go_module_sanity`. Adding a new toolchain means adding a recipe YAML (and any probes it needs) under `src/orchestrator/verifiers/`, not editing orchestration code. See [ADR-017](docs/adrs/ADR-017-deterministic-verification-stage.md).
 
 ## Commands
 
@@ -345,6 +345,8 @@ Exits `0` on success, `1` on failure. Prints the stage signal JSON to stdout.
 
 See [CONTRIBUTING.md](CONTRIBUTING.md). Read `CLAUDE.md` before making code changes — it documents the architectural invariants every contributor must follow.
 
+The Python package uses a `src/` layout. Runtime code lives under `src/orchestrator/`; tests and repository tooling are run from the repository root with `uv`.
+
 ## Releasing
 
 Releases are cut manually by a maintainer. Merges to `main` do not auto-tag; the act of releasing is a deliberate workflow dispatch. See [ADR-014](docs/adrs/ADR-014-explicit-release-workflow.md) for the rationale.
@@ -359,7 +361,7 @@ The workflow:
 
 - scans every commit between the last `vX.Y.Z` tag and `HEAD` for conventional-commit prefixes;
 - computes the next version (`feat!:`/`BREAKING CHANGE` → major, `feat:` → minor, `fix:` → patch — strongest signal in the range wins);
-- re-runs lint, format check, type check, tests, builds the wheel and sdist with `uv build`, installs the wheel, and runs `orchestrator --help` as a smoke test;
+- re-runs lint, format check, type check, tests, dependency audit, builds the wheel and sdist with `uv build`, inspects the artifacts, installs the wheel, and runs `orchestrator --help` as a smoke test;
 - pushes the new tag and creates a GitHub Release with auto-generated notes covering the released range.
 
 If the range contains no `feat:`/`fix:`/`feat!:`/`BREAKING CHANGE` commits, the workflow fails with a clear message — "nothing to release" is a real error worth surfacing rather than silently no-op'ing.
@@ -367,5 +369,9 @@ If the range contains no `feat:`/`fix:`/`feat!:`/`BREAKING CHANGE` commits, the 
 ## Tests
 
 ```bash
+uv run ruff check .
+uv run ruff format --check .
+uv run mypy .
 uv run pytest tests/
+uv run python -m pip_audit
 ```

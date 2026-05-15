@@ -74,13 +74,22 @@ jobs:
         run: uv run ruff format --check .
 
       - name: Type check
-        run: uv run mypy orchestrator/
+        run: uv run mypy .
 
       - name: Test
         run: uv run pytest tests/
 
+      - name: Dependency audit
+        run: uv run python -m pip_audit
+
       - name: Build wheel and sdist
         run: uv build
+
+      - name: Inspect source distribution
+        run: tar -tf dist/*.tar.gz
+
+      - name: Inspect wheel
+        run: unzip -l dist/*.whl
 
       - name: Install wheel
         run: pip install dist/*.whl

@@ -252,7 +252,7 @@ def test_resume_reads_state_and_calls_orchestrate(tmp_path):
 def test_full_yaml_stage_order():
     import yaml
 
-    profiles_dir = Path(__file__).parent.parent / "orchestrator" / "profiles"
+    profiles_dir = Path(__file__).parent.parent / "src" / "orchestrator" / "profiles"
     full = yaml.safe_load((profiles_dir / "full.yaml").read_text())
     names = [s["stage"] for s in full["stages"]]
     expected = [

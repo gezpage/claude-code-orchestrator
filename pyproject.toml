@@ -7,13 +7,12 @@ name = "orchestrator"
 dynamic = ["version"]
 description = "Pipeline sequencer for feature development with Claude Code"
 readme = "README.md"
-license = {text = "MIT"}
+license = "MIT"
 authors = [{name = "Gez Page"}]
 requires-python = ">=3.11"
 classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
-    "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
@@ -34,16 +33,20 @@ orchestrator = "orchestrator.cli:main"
 
 [tool.setuptools_scm]
 
+[tool.setuptools]
+package-dir = {"" = "src"}
+
 [tool.setuptools.packages.find]
-where = ["."]
+where = ["src"]
 include = ["orchestrator*"]
 
 [tool.setuptools.package-data]
-orchestrator = ["prompts/**/*.md", "schemas/*.json", "profiles/*.yaml"]
+orchestrator = ["prompts/**/*.md", "schemas/*.json", "profiles/*.yaml", "verifiers/recipes/*.yaml"]
 
 [dependency-groups]
 dev = [
     "mypy>=1.14",
+    "pip-audit>=2.7",
     "pytest-cov>=6.0",
     "ruff>=0.9",
     "types-jsonschema>=4.23",
@@ -67,8 +70,6 @@ check_untyped_defs = true
 warn_return_any = true
 warn_unused_ignores = true
 strict_equality = true
-# Stale wheel-build artefacts at ./build/lib/orchestrator collide with the source package
-# and produce "Duplicate module named 'orchestrator'" when running `mypy .`.
 exclude = ["^build/", "^dist/"]
 
 [tool.pytest.ini_options]

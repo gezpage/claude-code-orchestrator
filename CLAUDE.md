@@ -119,7 +119,6 @@ The release workflow scans all commits between the last `vX.Y.Z` tag and `HEAD` 
 
 If the range contains no `feat!:`/`feat:`/`fix:`/`BREAKING CHANGE` commits, the workflow fails with a clear message — a dispatch is an assertion that there is something to release.
 
-The workflow re-runs the full quality gate (lint, format, type, test, build wheel/sdist, install, `orchestrator --help` smoke) before tagging. On success it pushes the tag and creates a GitHub Release with auto-generated notes.
+The workflow re-runs the full quality gate (lint, format, type, test, dependency audit, build wheel/sdist, artifact inspection, install, `orchestrator --help` smoke) before tagging. On success it pushes the tag and creates a GitHub Release with auto-generated notes.
 
 The lockfile (`uv.lock`) must be committed by developers — CI does not commit it.
-
