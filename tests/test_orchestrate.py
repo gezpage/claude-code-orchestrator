@@ -1784,6 +1784,39 @@ def test_prompts_blocks_when_diff_file_is_prose_summary(tmp_path):
     mock_rs.assert_not_called()
 
 
+def test_prompts_blocks_when_reviewer_substage_does_not_pass(tmp_path):
+    """A reviewer sub-stage that fails to pass (runner crash, missing signal, etc.)
+    must propagate as a blocked review stage rather than be silently treated as approval.
+
+    Reproduces the codex/Claude-model cross-backend failure where the sub-stage signal
+    was {status: blocked, message: 'Agent runner failed...'} and the review stage
+    previously hardcoded status=passed regardless."""
+    from orchestrator.orchestrate import _dispatch_prompts
+
+    stage = StageConfig(
+        name="review",
+        expansion=ExpansionKind.PROMPTS,
+        prompts={"implementation": "prompts/review/implementation.md"},
+    )
+    ctx = _make_ctx(tmp_path)
+    run_folder = _make_run_folder(tmp_path)
+    blocked_sig = {"stage": "review", "status": "blocked", "message": "Agent runner failed with exit code 1"}
+
+    with (
+        patch("orchestrator.orchestrate.run_stage", return_value=blocked_sig),
+        patch("orchestrator.orchestrate.update_plan_md"),
+        patch("orchestrator.orchestrate.subprocess.run", return_value=_git_ok()),
+        patch("orchestrator.orchestrate.review_cycle_mod.is_valid_diff_file", return_value=True),
+        patch("orchestrator.orchestrate.review_cycle_mod.run") as mock_cycle,
+    ):
+        result = _dispatch_prompts(stage, {"repo_root": "/tmp"}, run_folder, ctx, {})
+
+    assert result["status"] == "blocked"
+    assert "implementation" in result["message"]
+    assert "Agent runner failed with exit code 1" in result["message"]
+    mock_cycle.assert_not_called()
+
+
 # ── git state hardening (issue #79) ───────────────────────────────────────────
 
 
