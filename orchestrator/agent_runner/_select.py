@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from orchestrator.agent_runner._claude import ClaudeCodePrintRunner
+from orchestrator.agent_runner._claude_auto import ClaudeCodeAutoRunner
 from orchestrator.agent_runner._codex import CodexCliRunner
 from orchestrator.agent_runner._protocol import AgentRunner
 
@@ -17,7 +18,7 @@ class AgentConfig:
     output_mode: str = "text"
 
 
-_KNOWN_BACKENDS = frozenset({"claude_code_print", "codex_cli"})
+_KNOWN_BACKENDS = frozenset({"claude_code_print", "claude_code_auto", "codex_cli"})
 
 
 def resolve_agent_config(profile_agent: dict | None, stage_agent: dict | None) -> AgentConfig:
@@ -40,6 +41,13 @@ def build_runner(config: AgentConfig) -> AgentRunner:
         raise ValueError(f"Unknown agent backend {config.backend!r}; supported: {sorted(_KNOWN_BACKENDS)}")
     if config.backend == "claude_code_print":
         return ClaudeCodePrintRunner(
+            sterile_context=config.sterile_context,
+            model=config.model,
+            timeout_seconds=config.timeout_seconds,
+            output_mode=config.output_mode,
+        )
+    if config.backend == "claude_code_auto":
+        return ClaudeCodeAutoRunner(
             sterile_context=config.sterile_context,
             model=config.model,
             timeout_seconds=config.timeout_seconds,

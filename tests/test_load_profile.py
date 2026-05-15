@@ -141,6 +141,60 @@ def test_minimal_codex_implementation_overrides_permission_mode():
         assert stage.agent is None
 
 
+def test_minimal_claude_profile_loads():
+    """minimal-claude uses claude_code_auto for non-review stages, codex_cli for review."""
+    profile = load_profile("minimal-claude")
+    assert profile.name == "minimal-claude"
+    assert profile.agent == {"backend": "claude_code_auto", "model": "claude-opus-4-7"}
+    assert [s.name for s in profile.stages] == [
+        "specification",
+        "decomposition",
+        "implementation",
+        "verification",
+        "review",
+    ]
+    review = next(s for s in profile.stages if s.name == "review")
+    assert review.agent == {"backend": "codex_cli", "permission_mode": "read-only"}
+    # Non-review stages inherit profile-level claude_code_auto.
+    for stage_name in ("specification", "decomposition", "implementation"):
+        stage = next(s for s in profile.stages if s.name == stage_name)
+        assert stage.agent is None
+
+
+def test_minimal_claude_build_stage_runners_picks_correct_classes():
+    """Smoke test the full path: load_profile → _build_stage_runners returns the
+    right runner class per stage. Catches regressions in the registry wiring."""
+    from orchestrator.agent_runner import ClaudeCodeAutoRunner, CodexCliRunner
+    from orchestrator.orchestrate import _build_stage_runners
+
+    profile = load_profile("minimal-claude")
+    runners, metadata = _build_stage_runners(profile)
+    assert isinstance(runners["implementation"], ClaudeCodeAutoRunner)
+    assert isinstance(runners["specification"], ClaudeCodeAutoRunner)
+    assert isinstance(runners["decomposition"], ClaudeCodeAutoRunner)
+    assert isinstance(runners["review"], CodexCliRunner)
+    assert "verification" not in runners  # deterministic
+    assert metadata["verification"]["backend"] == "deterministic"
+    assert metadata["implementation"]["backend"] == "claude_code_auto"
+    assert metadata["review"]["backend"] == "codex_cli"
+
+
+def test_minimal_claude_review_resolves_to_codex():
+    """Resolved agent config for the review stage flips backend to codex_cli."""
+    from orchestrator.agent_runner import resolve_agent_config
+
+    profile = load_profile("minimal-claude")
+    review = next(s for s in profile.stages if s.name == "review")
+    cfg = resolve_agent_config(profile.agent, review.agent)
+    assert cfg.backend == "codex_cli"
+    assert cfg.permission_mode == "read-only"
+    # Non-review stage inherits the profile-level backend.
+    impl = next(s for s in profile.stages if s.name == "implementation")
+    impl_cfg = resolve_agent_config(profile.agent, impl.agent)
+    assert impl_cfg.backend == "claude_code_auto"
+    assert impl_cfg.model == "claude-opus-4-7"
+
+
 def test_profile_level_agent_parsed(tmp_path):
     p = tmp_path / "p.yaml"
     p.write_text(

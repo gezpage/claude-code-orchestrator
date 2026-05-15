@@ -109,6 +109,7 @@ Built-in profiles ship with the package:
 | `full` *(default)* | discovery → alignment → specification → decomposition → implementation → QA → verification → review → harvest |
 | `minimal` | specification → decomposition → implementation → verification → review (single reviewer) — no discovery, alignment, QA, or harvest |
 | `minimal-codex` | Same stages as `minimal`, but dispatches autonomous stages through the `codex_cli` backend (`--sandbox workspace-write`) using the user's Codex CLI default model. The implementation stage overrides to `--sandbox danger-full-access` so it can write `.git` and commit. Intended for fast local runs when Claude Code print-mode is unavailable. |
+| `minimal-claude` | Same stages as `minimal`, but dispatches non-review stages through the `claude_code_auto` backend (`claude -p --permission-mode auto`, model `claude-opus-4-7`) and routes the review stage through `codex_cli` (read-only). Intended for local Claude subscription / OAuth use where `--bare` is unavailable (it forces `ANTHROPIC_API_KEY`-only auth); isolation is weaker than `minimal`, so prefer `minimal` for reproducibility-sensitive work. |
 | `spike` | discovery only — research and findings, no implementation |
 
 To use a custom profile, pass a path to any YAML file:
@@ -191,7 +192,8 @@ stages:
 
 | Backend | Selector | Command shape | Notes |
 |---------|----------|---------------|-------|
-| Claude Code (print mode) | `claude_code_print` *(default)* | `claude -p <prompt> --bare --dangerously-skip-permissions [--model <m>]` | `sterile_context: true` (default) sets `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1` to suppress ambient auto-memory injection. The `--bare` and `--dangerously-skip-permissions` flags are mandatory invariants of this runner. |
+| Claude Code (print mode) | `claude_code_print` *(default)* | `claude -p <prompt> --bare --dangerously-skip-permissions [--model <m>]` | `sterile_context: true` (default) sets `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1` to suppress ambient auto-memory injection. The `--bare` and `--dangerously-skip-permissions` flags are mandatory invariants of this runner. Requires `ANTHROPIC_API_KEY` (the `--bare` flag rejects OAuth / keychain auth). |
+| Claude Code (auto mode) | `claude_code_auto` | `claude -p <prompt> --permission-mode auto [--model <m>]` | Transitional backend for local use with Claude subscription / OAuth auth. `--bare` is **intentionally absent** — it would force `ANTHROPIC_API_KEY`-only auth, defeating the point. `--dangerously-skip-permissions` is also absent so Claude's permission gating stays engaged (`auto` is the next-most-permissive mode short of `bypassPermissions`). `sterile_context: true` (default) still sets `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1`, but the runner cannot block hooks, LSP, plugin sync, keychain reads or repo-root `CLAUDE.md` auto-discovery — isolation is strictly weaker than `claude_code_print`. Reproducibility-sensitive runs should prefer `claude_code_print` (with API key) or `codex_cli`. |
 | Codex CLI | `codex_cli` | `codex exec <prompt> --sandbox <mode> [-m <model>]` | `permission_mode` accepts `read-only`, `workspace-write` *(default)*, `danger-full-access` (lifts the FS sandbox so e.g. `.git` writes work), and the explicit `full-auto` alias (maps to `--dangerously-bypass-approvals-and-sandbox` — no sandbox and no approvals). Requires the `codex` binary on PATH. |
 
 Current limitations:
