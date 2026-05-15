@@ -20,15 +20,32 @@ class AgentConfig:
 
 _KNOWN_BACKENDS = frozenset({"claude_code_print", "claude_code_auto", "codex_cli"})
 
+# Keys whose values are interpreted by the backend's own CLI and cannot be assumed
+# portable across backends. When a stage switches backend, profile-level values for
+# these keys are dropped so e.g. a Claude model name is never passed to `codex exec`.
+_BACKEND_SPECIFIC_KEYS = frozenset({"model", "permission_mode"})
+
 
 def resolve_agent_config(profile_agent: dict | None, stage_agent: dict | None) -> AgentConfig:
     """Shallow-merge profile-level defaults with stage-level overrides.
 
     Stage keys win over profile keys. Unknown keys raise so typos fail loudly
     rather than silently using defaults.
+
+    When the stage declares a backend different from the profile's, backend-specific
+    keys (model, permission_mode) are dropped from profile inheritance — their values
+    are CLI-specific and cannot cross backends.
     """
+    profile_agent = profile_agent or {}
+    stage_agent = stage_agent or {}
+
+    profile_backend = profile_agent.get("backend")
+    stage_backend = stage_agent.get("backend")
+    if stage_backend is not None and profile_backend is not None and stage_backend != profile_backend:
+        profile_agent = {k: v for k, v in profile_agent.items() if k not in _BACKEND_SPECIFIC_KEYS}
+
     merged: dict = {}
-    for src in (profile_agent or {}, stage_agent or {}):
+    for src in (profile_agent, stage_agent):
         for k, v in src.items():
             if k not in AgentConfig.__dataclass_fields__:
                 raise ValueError(f"Unknown agent config key: {k!r}")

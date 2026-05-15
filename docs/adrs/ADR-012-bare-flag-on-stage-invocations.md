@@ -1,18 +1,20 @@
 ---
 status: superseded
-superseded_by: ADR-018
+superseded_by: ADR-022
 date: 2026-05-09
 affects: [run_stage.py]
 ---
 
 # ADR-012: `--bare` Flag on All Stage Subprocess Invocations
 
-**Status:** Superseded by [ADR-018](ADR-018-agent-runner-abstraction.md)
+**Status:** Superseded by [ADR-022](ADR-022-claude-runners-oauth-only.md) (originally moved into `ClaudeCodePrintRunner` by [ADR-018](ADR-018-agent-runner-abstraction.md))
 **Date:** 2026-05-09
 
-> **Note.** The invariant from this ADR now lives inside `ClaudeCodePrintRunner`
-> (see ADR-018). `--bare` is still mandatory for the Claude Code print backend,
-> but it is enforced by the runner rather than by every `run_stage()` call site.
+> **Note.** ADR-018 moved this invariant from every `run_stage()` call site
+> into `ClaudeCodePrintRunner`. ADR-022 then removed the flag entirely:
+> `--bare` forces `ANTHROPIC_API_KEY`-only auth, which is incompatible with
+> the OAuth/keychain logins most contributors now use. The reasoning below
+> is preserved for historical context but no longer reflects current code.
 
 ## Context
 

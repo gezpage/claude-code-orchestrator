@@ -725,7 +725,20 @@ def _dispatch_prompts(
             runner=ctx.runner_for(stage.name),
         )
         elapsed = time.monotonic() - t0
-        verdict = sig.get("reviewer_statuses", {}).get(reviewer, sig.get("status", "unknown"))
+        # A reviewer sub-stage that did not pass (runner failure, missing signal,
+        # declared-artifact missing, etc.) never produced an informed verdict —
+        # propagate the failure upward instead of silently treating a missing
+        # verdict as approval.
+        if sig.get("status") != "passed":
+            sub_msg = sig.get("message", "reviewer sub-stage did not pass")
+            update_plan_md(run_folder, sub_id, "blocked", elapsed_secs=elapsed, output_summary=sub_msg, impl_name=impl)
+            ctx.logger.log(stage.name, "ERROR", f"reviewer '{reviewer}' blocked: {sub_msg}")
+            return {
+                "stage": stage.name,
+                "status": "blocked",
+                "message": f"reviewer '{reviewer}' did not produce a verdict: {sub_msg}",
+            }
+        verdict = sig.get("reviewer_statuses", {}).get(reviewer, "unknown")
         reviewer_statuses[reviewer] = verdict
         findings = sig.get("findings", [])
         if isinstance(findings, list) and findings:
