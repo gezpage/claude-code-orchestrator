@@ -76,9 +76,9 @@ class ClaudeCodePrintRunner(AgentRunner):
             duration = time.monotonic() - t0
 
         stdout = "".join(chunks)
-        if request.transcript_path is not None:
-            request.transcript_path.parent.mkdir(parents=True, exist_ok=True)
-            request.transcript_path.write_text(stdout)
+        if request.stream_log_path is not None:
+            request.stream_log_path.parent.mkdir(parents=True, exist_ok=True)
+            request.stream_log_path.write_text(stdout)
 
         return AgentRunResult(
             backend=self.backend_name,
@@ -87,6 +87,6 @@ class ClaudeCodePrintRunner(AgentRunner):
             exit_code=exit_code,
             duration_seconds=duration,
             timed_out=timed_out,
-            transcript_path=request.transcript_path,
+            stream_log_path=request.stream_log_path,
             command=cmd,
         )

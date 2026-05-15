@@ -111,14 +111,16 @@ class CodexCliRunner(AgentRunner):
             except FileNotFoundError:
                 pass
 
-        # Prefer the clean final agent message captured by --output-last-message.
-        # The full terminal stream contains the Codex banner, workdir/model/sandbox
-        # metadata, prompt echo, command logs, diffs and token accounting which
-        # are not useful run artefacts and balloon the transcript.
+        # Prefer the clean final agent message captured by --output-last-message
+        # for in-memory result.stdout (signal-JSON parsing consumes this) — it
+        # strips the Codex banner, workdir/model/sandbox metadata, prompt echo,
+        # command logs, diffs and token accounting. The on-disk stream log keeps
+        # the full raw stream so failures (no last-message, crashes) remain
+        # debuggable.
         result_stdout = last_message if last_message.strip() else stdout
-        if request.transcript_path is not None:
-            request.transcript_path.parent.mkdir(parents=True, exist_ok=True)
-            request.transcript_path.write_text(result_stdout)
+        if request.stream_log_path is not None:
+            request.stream_log_path.parent.mkdir(parents=True, exist_ok=True)
+            request.stream_log_path.write_text(stdout)
 
         return AgentRunResult(
             backend=self.backend_name,
@@ -127,6 +129,6 @@ class CodexCliRunner(AgentRunner):
             exit_code=exit_code,
             duration_seconds=duration,
             timed_out=timed_out,
-            transcript_path=request.transcript_path,
+            stream_log_path=request.stream_log_path,
             command=cmd,
         )

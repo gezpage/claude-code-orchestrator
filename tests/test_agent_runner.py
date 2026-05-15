@@ -93,15 +93,15 @@ def test_claude_runner_model_flag(monkeypatch):
     assert "sonnet" in cmd
 
 
-def test_claude_runner_writes_transcript(monkeypatch, tmp_path):
+def test_claude_runner_writes_stream_log(monkeypatch, tmp_path):
     from orchestrator.agent_runner import _claude as claude_mod
 
-    _stub_popen(monkeypatch, claude_mod, stdout="transcript body")
-    transcript_path = tmp_path / "stage" / "stage-transcript.md"
+    _stub_popen(monkeypatch, claude_mod, stdout="stream body")
+    stream_log_path = tmp_path / "stage" / "stage-stream.log"
     runner = ClaudeCodePrintRunner()
-    result = runner.run(AgentRunRequest(prompt="x", transcript_path=transcript_path))
-    assert transcript_path.read_text() == "transcript body"
-    assert result.transcript_path == transcript_path
+    result = runner.run(AgentRunRequest(prompt="x", stream_log_path=stream_log_path))
+    assert stream_log_path.read_text() == "stream body"
+    assert result.stream_log_path == stream_log_path
 
 
 def test_claude_runner_timeout_marks_result(monkeypatch):
@@ -192,15 +192,15 @@ def test_claude_code_auto_runner_model_flag(monkeypatch):
     assert "sonnet" in cmd
 
 
-def test_claude_code_auto_runner_writes_transcript(monkeypatch, tmp_path):
+def test_claude_code_auto_runner_writes_stream_log(monkeypatch, tmp_path):
     from orchestrator.agent_runner import _claude_auto as auto_mod
 
-    _stub_popen(monkeypatch, auto_mod, stdout="transcript body")
-    transcript_path = tmp_path / "stage" / "stage-transcript.md"
+    _stub_popen(monkeypatch, auto_mod, stdout="stream body")
+    stream_log_path = tmp_path / "stage" / "stage-stream.log"
     runner = ClaudeCodeAutoRunner()
-    result = runner.run(AgentRunRequest(prompt="x", transcript_path=transcript_path))
-    assert transcript_path.read_text() == "transcript body"
-    assert result.transcript_path == transcript_path
+    result = runner.run(AgentRunRequest(prompt="x", stream_log_path=stream_log_path))
+    assert stream_log_path.read_text() == "stream body"
+    assert result.stream_log_path == stream_log_path
 
 
 def test_claude_code_auto_runner_timeout_marks_result(monkeypatch):
@@ -349,7 +349,7 @@ def test_codex_runner_workspace_roots_and_last_message(monkeypatch, tmp_path):
     assert result.stdout == 'SIGNAL_JSON: {"stage":"x","status":"passed"}'
 
 
-def test_codex_runner_transcript_holds_clean_last_message(monkeypatch, tmp_path):
+def test_codex_runner_stream_log_holds_raw_stream_result_stdout_clean(monkeypatch, tmp_path):
     from orchestrator.agent_runner import _codex as codex_mod
 
     class _FakePopen:
@@ -368,24 +368,28 @@ def test_codex_runner_transcript_holds_clean_last_message(monkeypatch, tmp_path)
             pass
 
     monkeypatch.setattr(codex_mod.subprocess, "Popen", _FakePopen)
-    transcript = tmp_path / "stage" / "stage-transcript.md"
+    stream_log = tmp_path / "stage" / "stage-stream.log"
     runner = CodexCliRunner()
-    result = runner.run(AgentRunRequest(prompt="x", transcript_path=transcript))
-    written = transcript.read_text()
-    assert written == "clean final message\nSIGNAL_JSON: {}"
-    assert "codex banner" not in written
-    assert "workdir:" not in written
-    assert result.stdout == written
+    result = runner.run(AgentRunRequest(prompt="x", stream_log_path=stream_log))
+    # On-disk stream log preserves the full raw stream for forensics.
+    written = stream_log.read_text()
+    assert "codex banner" in written
+    assert "workdir: /tmp" in written
+    assert "(noisy stream)" in written
+    # In-memory result.stdout still gets the clean final message — signal parsing
+    # downstream depends on this being terse.
+    assert result.stdout == "clean final message\nSIGNAL_JSON: {}"
 
 
-def test_codex_runner_transcript_falls_back_to_stream_when_no_last_message(monkeypatch, tmp_path):
+def test_codex_runner_stream_log_falls_back_to_stream_when_no_last_message(monkeypatch, tmp_path):
     from orchestrator.agent_runner import _codex as codex_mod
 
     class _FakePopen:
         def __init__(self, cmd, **kwargs):
             # Simulate a Codex run that did not produce --output-last-message content
-            # (e.g. the binary crashed before writing). The transcript should still
-            # capture the raw stream so the failure is debuggable.
+            # (e.g. the binary crashed before writing). result.stdout falls back to
+            # the raw stream so the failure is debuggable; the stream log holds the
+            # same raw stream by definition.
             self.stdout = iter(["partial stream output\n"])
 
         def wait(self, timeout=None):
@@ -395,10 +399,10 @@ def test_codex_runner_transcript_falls_back_to_stream_when_no_last_message(monke
             pass
 
     monkeypatch.setattr(codex_mod.subprocess, "Popen", _FakePopen)
-    transcript = tmp_path / "stage" / "stage-transcript.md"
+    stream_log = tmp_path / "stage" / "stage-stream.log"
     runner = CodexCliRunner()
-    result = runner.run(AgentRunRequest(prompt="x", transcript_path=transcript))
-    assert transcript.read_text() == "partial stream output\n"
+    result = runner.run(AgentRunRequest(prompt="x", stream_log_path=stream_log))
+    assert stream_log.read_text() == "partial stream output\n"
     assert result.stdout == "partial stream output\n"
 
 

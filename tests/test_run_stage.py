@@ -166,17 +166,17 @@ def test_output_files_in_stage_subfolder(tmp_path):
     assert not (run_folder / "stages").exists()
 
 
-def test_transcript_path_passed_to_runner(tmp_path):
-    """run_stage must hand the runner a transcript_path inside the per-stage folder.
-    Backends own transcript persistence — orchestration only specifies destination."""
+def test_stream_log_path_passed_to_runner(tmp_path):
+    """run_stage must hand the runner a stream_log_path inside the per-stage folder.
+    Backends own stream-log persistence — orchestration only specifies destination."""
     run_folder, log_path = _setup_run_folder(tmp_path)
     runner = FakeRunner(f"SIGNAL_JSON: {GOOD_SIGNAL}")
     run_stage("discovery", "default", VARS, run_folder, str(tmp_path), "myproject", str(log_path), runner=runner)
     req = runner.requests[0]
-    assert req.transcript_path is not None
-    assert req.transcript_path.parent == run_folder / "discovery"
-    assert req.transcript_path.name.endswith("-transcript.md")
-    assert req.transcript_path.exists()
+    assert req.stream_log_path is not None
+    assert req.stream_log_path.parent == run_folder / "discovery"
+    assert req.stream_log_path.name.endswith("-stream.log")
+    assert req.stream_log_path.exists()
 
 
 def test_non_zero_exit_blocks_signal_extraction(tmp_path):
@@ -277,7 +277,7 @@ def test_grace_retry_blocks_on_timeout(tmp_path):
 
 
 @pytest.mark.parametrize("suffix", ["", "planning", "architecture"])
-def test_transcript_filename_includes_output_suffix(tmp_path, suffix):
+def test_stream_log_filename_includes_output_suffix(tmp_path, suffix):
     run_folder, log_path = _setup_run_folder(tmp_path)
     runner = FakeRunner(f"SIGNAL_JSON: {GOOD_SIGNAL}")
     run_stage(
@@ -292,5 +292,5 @@ def test_transcript_filename_includes_output_suffix(tmp_path, suffix):
         runner=runner,
     )
     tag = f"-{suffix}" if suffix else ""
-    expected = run_folder / "discovery" / f"discovery{tag}-transcript.md"
-    assert runner.requests[0].transcript_path == expected
+    expected = run_folder / "discovery" / f"discovery{tag}-stream.log"
+    assert runner.requests[0].stream_log_path == expected
