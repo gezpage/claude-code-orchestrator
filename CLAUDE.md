@@ -34,6 +34,8 @@ Developer-facing reference. Read before touching any orchestrator code.
 
 - **Toolchain-specific verification logic lives in `orchestrator/verifiers/recipes/` (data) and `orchestrator/verifiers/probes/` (Python).** Orchestration code (`orchestrate.py`, `run_stage.py`, profile parsing) must contain no `if node` / `if go` / `if python` branches. Adding a new ecosystem means adding a recipe and any probes it needs — nothing else. See ADR-017.
 
+- **`verification_status: "failed"` triggers a fix-verification cycle before review.** When a deterministic verification stage returns `verification_status: "failed"`, `orchestrate.py` dispatches a `fix-verification` agent (using the profile's implementation runner) then re-runs verification. If the fix makes no commits or re-verification still fails, the pipeline blocks. Probe failures are resolved here — not in the review fix cycles. See ADR-021.
+
 - **PR creation is a post-pipeline finalisation step, not a profile stage.** It runs only when `create-pr` is true and origin is a recognised GitHub repo. The `pr_draft` Claude stage that produces title/body, plus the `gh pr create` call, execute after the stage loop completes. Failures in this phase log warnings and write a manual-command fallback into `plan.md`; they do not change the pipeline exit status. See ADR-019.
 
 ---

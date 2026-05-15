@@ -675,14 +675,10 @@ def _dispatch_prompts(
     variables["review_md"] = str(review_md_path)
     variables["round"] = "1"
 
-    commit_hashes: list[str] = next(
-        (
-            sig.get("commit_hashes", [])
-            for sig in signals.values()
-            if isinstance(sig, dict) and sig.get("commit_hashes")
-        ),
-        [],
-    )
+    commit_hashes: list[str] = []
+    for sig in signals.values():
+        if isinstance(sig, dict):
+            commit_hashes.extend(sig.get("commit_hashes", []))
     if commit_hashes and "repo_root" in variables:
         first, last = commit_hashes[0], commit_hashes[-1]
         diff_result = subprocess.run(
@@ -785,6 +781,72 @@ def _dispatch_prompts(
         )
 
     return review_signal
+
+
+def _run_fix_verification_cycle(
+    verify_sig: dict,
+    run_folder: Path,
+    variables: dict,
+    ctx: _PipelineContext,
+) -> dict:
+    """Run one fix→re-verify cycle when verification_status=failed.
+
+    Dispatches a fix-verification agent with the VERIFY.md report as its primary
+    input, then re-runs deterministic verification. Returns the updated verification
+    signal on success or a blocked signal if the fix makes no commits or re-verification
+    still fails. See ADR-021.
+    """
+    repo_root = variables.get("repo_root", "")
+    verify_md_path = verify_sig.get("verify_md_path", "")
+    verify_json_path = verify_sig.get("verify_json_path", "")
+
+    fix_vars = {
+        "run_folder": str(run_folder),
+        "docs_root": ctx.docs_root,
+        "branch": ctx.branch,
+        "verify_md_path": verify_md_path,
+        "verify_json_path": verify_json_path,
+        "repo_root": repo_root,
+    }
+
+    before_head = review_cycle_mod._head_sha(repo_root)
+    fix_t0 = time.monotonic()
+    fix_sig = run_stage(
+        "fix-verification",
+        "default",
+        fix_vars,
+        run_folder,
+        ctx.docs_root,
+        ctx.project,
+        ctx.project_log_path,
+        cwd=repo_root or None,
+        runner=ctx.runner_for("implementation"),
+    )
+    fix_elapsed = time.monotonic() - fix_t0
+    fix_status = fix_sig.get("status", "unknown")
+    actual_hashes = (
+        review_cycle_mod._commits_since(repo_root, before_head) if before_head else fix_sig.get("commit_hashes", [])
+    )
+
+    n = len(actual_hashes)
+    commit_summary = f"{n} commit{'s' if n != 1 else ''}" if actual_hashes else "no commits"
+    ctx.logger.log("fix-verification", "INFO", f"default {fix_status} ({_fmt_elapsed(fix_elapsed)}) — {commit_summary}")
+
+    if fix_status != "passed" or not actual_hashes:
+        msg = f"fix-verification made no commits (agent status={fix_status!r}, commits={actual_hashes!r})"
+        ctx.logger.log("fix-verification", "ERROR", msg)
+        return {"stage": "fix-verification", "status": "blocked", "message": msg}
+
+    ctx.logger.log("verification", "INFO", "re-running verification after fix-verification")
+    new_verify_sig = run_deterministic_stage("verification", repo_root, run_folder, ctx.project_log_path)
+
+    if new_verify_sig.get("verification_status") == "failed":
+        msg = "verification_status=failed after fix-verification cycle"
+        ctx.logger.log("verification", "ERROR", msg)
+        return {"stage": "verification", "status": "blocked", "message": msg}
+
+    new_verify_sig["commit_hashes"] = actual_hashes
+    return new_verify_sig
 
 
 _DISPATCHERS: dict[ExpansionKind, Callable] = {
@@ -944,6 +1006,8 @@ def run_pipeline(
         try:
             if stage.mode == "deterministic":
                 sig = run_deterministic_stage(stage_name, variables["repo_root"], run_folder, ctx.project_log_path)
+                if sig.get("verification_status") == "failed":
+                    sig = _run_fix_verification_cycle(sig, run_folder, variables, ctx)
             else:
                 sig = _DISPATCHERS[stage.expansion](stage, variables, run_folder, ctx, signals)
         except Exception:
