@@ -1,10 +1,12 @@
-name: full
+name: full-interactive
 stages:
   - stage: discovery
     expansion: tracks
 
   - stage: alignment
-    prompt: prompts/alignment/autonomous.md
+    mode: interactive
+    artifact: alignment-log.md
+    prompt: prompts/alignment/interactive.md
 
   - stage: specification
     prompt: prompts/specification/default.md
