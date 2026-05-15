@@ -48,10 +48,6 @@ class FakeRunner(AgentRunner):
         timed_out = self._timed_outs[min(i, len(self._timed_outs) - 1)]
         self._idx += 1
 
-        if request.stream_log_path is not None:
-            request.stream_log_path.parent.mkdir(parents=True, exist_ok=True)
-            request.stream_log_path.write_text(out)
-
         return AgentRunResult(
             backend=self.backend_name,
             stdout=out,
@@ -59,6 +55,5 @@ class FakeRunner(AgentRunner):
             exit_code=exit_code,
             duration_seconds=0.0,
             timed_out=timed_out,
-            stream_log_path=request.stream_log_path,
             command=None,
         )

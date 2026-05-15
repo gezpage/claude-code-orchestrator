@@ -54,10 +54,14 @@ def _add_fix_cycle_node(run_folder: Path, cycle_num: int, reviewers: list[str]) 
         )
     )
     for reviewer, rerun_id in zip(reviewers, rerun_ids, strict=True):
+        # Inherit the original sub-node's display so re-review nodes carry the same
+        # parent-stage suffix (e.g. "Implementation Review") without re-deriving it here.
+        original = graph.nodes.get(f"review_{reviewer}")
+        rerun_display = original.display if original is not None else reviewer.title()
         graph.add_node(
             Node(
                 id=rerun_id,
-                display=reviewer.title(),
+                display=rerun_display,
                 impl=reviewer,
                 status="pending",
                 css_class="pending",

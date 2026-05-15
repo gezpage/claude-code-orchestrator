@@ -88,9 +88,6 @@ class ClaudeCodeAutoRunner(AgentRunner):
             duration = time.monotonic() - t0
 
         stdout = "".join(chunks)
-        if request.stream_log_path is not None:
-            request.stream_log_path.parent.mkdir(parents=True, exist_ok=True)
-            request.stream_log_path.write_text(stdout)
 
         return AgentRunResult(
             backend=self.backend_name,
@@ -99,6 +96,5 @@ class ClaudeCodeAutoRunner(AgentRunner):
             exit_code=exit_code,
             duration_seconds=duration,
             timed_out=timed_out,
-            stream_log_path=request.stream_log_path,
             command=cmd,
         )

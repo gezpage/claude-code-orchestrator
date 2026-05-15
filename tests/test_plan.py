@@ -1,6 +1,13 @@
 from unittest.mock import patch
 
-from orchestrator.plan import add_fix_cycle_node, expand_nodes, init_plan_md, update_plan_md
+from orchestrator.plan import (
+    add_fix_cycle_node,
+    expand_nodes,
+    init_plan_md,
+    rerender_plan_md,
+    set_pr_node,
+    update_plan_md,
+)
 from orchestrator.profile import ExpansionKind, Profile, StageConfig
 
 
@@ -90,6 +97,34 @@ def test_init_plan_md_review_stage_with_prompts(tmp_path):
     assert "review_security[" in content
     # Renderer rewrites edge endpoints to the materialised prompt/panel partners.
     assert "review_panel --> review_arch_prompt & review_security_prompt" in content
+    # Sub-node display is suffixed with the parent stage's display so review agents
+    # read as "<Name> Review" rather than colliding with sibling stages of the same name.
+    assert "Arch Review" in content
+    assert "Security Review" in content
+
+
+def test_init_plan_md_review_sub_node_display_suffixed_with_parent(tmp_path):
+    """The 'implementation' reviewer must render as 'Implementation Review' so it is
+    visually distinct from the actual Implementation stage node."""
+    run_folder = _make_run_folder(tmp_path)
+    profile = Profile(
+        name="test",
+        stages=(
+            StageConfig(name="implementation", prompt="prompts/implementation/default.md"),
+            StageConfig(
+                name="review",
+                expansion=ExpansionKind.PROMPTS,
+                prompts={
+                    "implementation": "prompts/review/implementation.md",
+                    "tests": "prompts/review/tests.md",
+                },
+            ),
+        ),
+    )
+    init_plan_md(run_folder, profile)
+    content = (run_folder / "plan.md").read_text()
+    assert "Implementation Review" in content
+    assert "Tests Review" in content
 
 
 def test_init_plan_md_review_fan_in_to_next_stage(tmp_path):
@@ -160,6 +195,32 @@ def test_init_plan_md_start_done_with_review(tmp_path):
     assert "harvest_panel --> Done" in content
     assert "review --> Done" not in content
     assert "review_panel --> Done" not in content
+
+
+def test_rerender_plan_md_picks_up_new_prompt_file(tmp_path):
+    """A prompt file written between init and stage completion should appear in the
+    mermaid block after rerender_plan_md, without changing any node status."""
+    run_folder = _make_run_folder(tmp_path)
+    profile = _simple_profile("discovery")
+    init_plan_md(run_folder, profile)
+    before = (run_folder / "plan.md").read_text()
+    # No prompt link yet — the parallelogram should show the literal "Prompt" text.
+    assert "discovery-prompt.md" not in before
+
+    stage_dir = run_folder / "discovery"
+    stage_dir.mkdir()
+    (stage_dir / "discovery-prompt.md").write_text("prompt body")
+    rerender_plan_md(run_folder)
+
+    after = (run_folder / "plan.md").read_text()
+    assert "discovery-prompt.md" in after
+
+
+def test_rerender_plan_md_noop_when_no_plan(tmp_path):
+    run_folder = _make_run_folder(tmp_path)
+    # No plan.md exists yet — rerender should silently do nothing.
+    rerender_plan_md(run_folder)
+    assert not (run_folder / "plan.md").exists()
 
 
 def test_update_plan_md_run_summary_section(tmp_path):
@@ -416,6 +477,8 @@ def test_add_fix_cycle_node_cycle1_single_reviewer(tmp_path):
     assert "fix_impl_1_panel --> review_tests_2_prompt" in content
     assert "class fix_impl_1 active" in content
     assert "class review_tests_2 pending" in content
+    # Re-review nodes carry the same parent-stage suffix as the original review sub-nodes.
+    assert "Tests Review" in content
 
 
 def test_add_fix_cycle_node_cycle2_sources_previous_round(tmp_path):
@@ -573,7 +636,10 @@ def test_render_inlines_file_links_per_node(tmp_path):
     assert ">prd</a>" in content
 
 
-def test_render_legend_floats_after_main_flow(tmp_path):
+def test_other_files_buttons_rendered_outside_mermaid_fence(tmp_path):
+    """Unmatched files render as button-style links in a section directly below
+    the ``` mermaid fence, not as a node inside the diagram. The section is
+    wrapped in comment markers so subsequent renders can refresh it cleanly."""
     run_folder = _make_run_folder(tmp_path)
     profile = _simple_profile("specification")
     init_plan_md(run_folder, profile)
@@ -581,17 +647,31 @@ def test_render_legend_floats_after_main_flow(tmp_path):
     (run_folder / "stray.txt").write_text("stray")
     update_plan_md(run_folder, "specification", "passed", elapsed_secs=10)
     content = (run_folder / "plan.md").read_text()
-    # No more "Legend" subgraph wrapper — the bare node sits in the diagram body.
-    assert 'subgraph sg_legend["Legend"]' not in content
-    assert "Other files" in content
-    # Extensions are stripped from the link display.
+    # No legend node in the diagram any more.
+    assert "legend_files" not in content
+    assert "Other files" not in content
+    # Buttons live outside the mermaid fence.
+    fence_end = content.rfind("```")
+    assert "<!-- other-files-begin -->" in content
+    assert content.index("<!-- other-files-begin -->") > fence_end
     assert "<a href='run.log'" in content
     assert ">run</a>" in content
     assert "<a href='stray.txt'" in content
     assert ">stray</a>" in content
-    # Legend hangs off the predecessor of Done; that predecessor is now the
-    # last stage's materialised panel.
-    assert "specification_panel ~~~ legend_files" in content
+
+
+def test_other_files_section_refreshes_without_growing(tmp_path):
+    """Repeated renders must replace the prior other-files section in-place,
+    not append a new one each time."""
+    run_folder = _make_run_folder(tmp_path)
+    profile = _simple_profile("specification")
+    init_plan_md(run_folder, profile)
+    (run_folder / "run.log").write_text("log")
+    update_plan_md(run_folder, "specification", "passed", elapsed_secs=10)
+    update_plan_md(run_folder, "specification", "passed", elapsed_secs=11)
+    content = (run_folder / "plan.md").read_text()
+    assert content.count("<!-- other-files-begin -->") == 1
+    assert content.count("<!-- other-files-end -->") == 1
 
 
 def test_render_reviewer_subnode_links_to_per_reviewer_files(tmp_path):
@@ -665,3 +745,209 @@ def test_render_link_hrefs_when_docs_root_lives_under_projects_dir(tmp_path):
     expected_prefix = "/#projects/demo-project/workflow/runs/feature-x/2026-05-14-run-1/"
     assert f"<a href='{expected_prefix}specification/specification-prompt.md'" in content
     assert "projects/docs-root/" not in content
+
+
+# --- runner / model in stage labels ---
+
+
+def test_node_label_shows_runner_and_model_on_separate_lines(tmp_path):
+    """Each stage's sub-line shows the resolved runner + model on separate lines
+    (one fact per <br/>) instead of a single dot-separated string. The runner
+    backend is rendered with its friendly name (claude / codex)."""
+    run_folder = _make_run_folder(tmp_path)
+    profile = _simple_profile("specification")
+    init_plan_md(
+        run_folder,
+        profile,
+        agent_metadata={"specification": {"backend": "claude_code_print", "model": "claude-opus-4-7"}},
+    )
+    content = (run_folder / "plan.md").read_text()
+    assert "claude · claude-opus-4-7" in content
+    # Sub-line is multi-line — runner line and Mode line both present, joined by <br/>.
+    assert "claude · claude-opus-4-7<br/>Mode: auto" in content
+
+
+def test_node_label_no_minimal_impl_token(tmp_path):
+    """The legacy `impl` token (e.g. 'minimal' from prompt filename) is no longer
+    shown in the sub-line — it duplicated information already captured by the
+    runner/model fields."""
+    run_folder = _make_run_folder(tmp_path)
+    profile = Profile(
+        name="test",
+        stages=(StageConfig(name="implementation", prompt="prompts/implementation/minimal.md"),),
+    )
+    init_plan_md(
+        run_folder,
+        profile,
+        agent_metadata={"implementation": {"backend": "codex_cli", "model": "gpt-5"}},
+    )
+    content = (run_folder / "plan.md").read_text()
+    # The implementation node's sub-line should NOT contain the prompt-stem 'minimal'.
+    assert "minimal · Mode" not in content
+    assert "codex · gpt-5" in content
+
+
+# --- panel output text ---
+
+
+def test_panel_shows_prose_from_output_file(tmp_path):
+    """Once a stage's output file exists with prose above the SIGNAL_JSON code
+    block, the panel renders that prose in place of the prior {status: ok}
+    placeholder. The fenced ```json``` signal block is stripped."""
+    run_folder = _make_run_folder(tmp_path)
+    profile = _simple_profile("specification")
+    init_plan_md(run_folder, profile)
+    spec = run_folder / "specification"
+    spec.mkdir()
+    (spec / "specification-prompt.md").write_text("p")
+    (spec / "specification-output.md").write_text(
+        'Drafted the PRD covering the auth refactor.\n\n```json\n{\n  "status": "passed"\n}\n```\n'
+    )
+    update_plan_md(run_folder, "specification", "passed", elapsed_secs=10)
+    content = (run_folder / "plan.md").read_text()
+    assert "Drafted the PRD covering the auth refactor." in content
+    # The placeholder JSON is gone.
+    assert "&quot;status&quot;: &quot;ok&quot;" not in content
+
+
+def test_panel_butted_to_stage_with_invisible_link(tmp_path):
+    """The stage → panel chain edge is invisible (~~~) so they butt up visually,
+    not separated by an arrow."""
+    run_folder = _make_run_folder(tmp_path)
+    profile = _simple_profile("specification")
+    init_plan_md(run_folder, profile)
+    content = (run_folder / "plan.md").read_text()
+    assert "specification ~~~ specification_panel" in content
+    assert "specification --> specification_panel" not in content
+
+
+def test_panel_prose_escapes_html_and_mermaid_breaking_chars(tmp_path):
+    """Agent prose with awkward but realistic characters must not break the
+    mermaid block. Specifically:
+    - `&` becomes `&amp;` first, so subsequent entity insertions are not
+      re-escaped into `&amp;lt;` etc.
+    - `<` / `>` become `&lt;` / `&gt;` so HTML-looking text doesn't get parsed
+      as markup, and stray `-->` in prose can't be mistaken for a mermaid edge.
+    - `"` becomes `&quot;` because the panel label is itself wrapped in `"..."`.
+    - Newlines become `<br/>` so multi-line prose stays on one logical label.
+    - Square brackets and backticks pass through verbatim — no mermaid meaning
+      inside a quoted label.
+    """
+    run_folder = _make_run_folder(tmp_path)
+    profile = _simple_profile("specification")
+    init_plan_md(run_folder, profile)
+    spec = run_folder / "specification"
+    spec.mkdir()
+    (spec / "specification-prompt.md").write_text("p")
+    gnarly = (
+        "Reviewed `auth/login.ts` & flagged the `<script>` injection at line 42, "
+        'plus a "double-quoted" comment.\n'
+        "Diagram sketch: A --> B [optional].\n"
+        '\n```json\n{"status": "passed"}\n```\n'
+    )
+    (spec / "specification-output.md").write_text(gnarly)
+    update_plan_md(run_folder, "specification", "passed", elapsed_secs=10)
+    content = (run_folder / "plan.md").read_text()
+
+    # Entities are escaped — diagram survives.
+    assert "&amp;" in content
+    assert "&lt;script&gt;" in content
+    assert "&quot;double-quoted&quot;" in content
+    # Newline inside the paragraph collapses to <br/>.
+    assert "comment.<br/>Diagram sketch:" in content
+    # A literal `-->` arrow in prose is neutralised so mermaid can't read it
+    # as an edge token.
+    assert "A --&gt; B [optional]." in content
+    # Square brackets and backticks pass through unescaped.
+    assert "`auth/login.ts`" in content
+    assert "[optional]." in content
+    # Raw, unescaped versions of the HTML-looking text must not appear anywhere.
+    assert "<script>" not in content
+    # No double-encoded entities introduced by the &-first replacement order.
+    assert "&amp;amp;" not in content
+    assert "&amp;lt;" not in content
+
+
+def test_panel_prose_truncates_very_long_first_paragraph(tmp_path):
+    """Prose longer than the panel cap is truncated with an ellipsis so the
+    diagram stays readable; the full text remains reachable via the Output link."""
+    run_folder = _make_run_folder(tmp_path)
+    profile = _simple_profile("specification")
+    init_plan_md(run_folder, profile)
+    spec = run_folder / "specification"
+    spec.mkdir()
+    (spec / "specification-prompt.md").write_text("p")
+    long_para = "word " * 200  # ~1000 chars
+    (spec / "specification-output.md").write_text(f'{long_para}\n\n```json\n{{"status": "passed"}}\n```\n')
+    update_plan_md(run_folder, "specification", "passed", elapsed_secs=10)
+    content = (run_folder / "plan.md").read_text()
+    # Ellipsis marker is present, full 1000-char paragraph is not.
+    assert "…" in content
+    assert long_para.strip() not in content
+
+
+# --- set_pr_node ---
+
+
+def test_set_pr_node_splices_box_before_done(tmp_path):
+    run_folder = _make_run_folder(tmp_path)
+    profile = _simple_profile("specification")
+    init_plan_md(run_folder, profile)
+    set_pr_node(run_folder, "https://github.com/example/repo/pull/42")
+    content = (run_folder / "plan.md").read_text()
+    # PR node is a stadium with the URL as a large-text link.
+    assert "pr([" in content
+    assert "https://github.com/example/repo/pull/42" in content
+    assert "font-size:18px" in content
+    # Spliced into the edge graph: predecessor → pr → Done, with no direct → Done.
+    assert "pr --> Done" in content or "pr_panel --> Done" in content
+    assert "specification_panel --> Done" not in content
+
+
+def test_set_pr_node_idempotent_on_refresh(tmp_path):
+    run_folder = _make_run_folder(tmp_path)
+    profile = _simple_profile("specification")
+    init_plan_md(run_folder, profile)
+    set_pr_node(run_folder, "https://github.com/example/repo/pull/42")
+    set_pr_node(run_folder, "https://github.com/example/repo/pull/99")
+    content = (run_folder / "plan.md").read_text()
+    # Single PR node, refreshed label.
+    assert content.count("pr([") == 1
+    assert "/pull/99" in content
+    assert "/pull/42" not in content
+
+
+def test_set_pr_node_splices_after_fix_cycle_predecessor(tmp_path):
+    """When the predecessor of Done is a re-review node from a fix cycle (not
+    the profile's last regular stage), set_pr_node must still splice the PR
+    box between *that* re-review node and Done — not between the original
+    last stage and Done. Edge rewriting around fan-in / fan-out is where this
+    historically gets weird."""
+    run_folder = _make_run_folder(tmp_path)
+    # Review is the final stage so Done's predecessor will become the re-review
+    # node after the fix cycle.
+    profile = Profile(
+        name="test",
+        stages=(
+            StageConfig(name="implementation", prompt="prompts/implementation/default.md"),
+            StageConfig(
+                name="review",
+                expansion=ExpansionKind.PROMPTS,
+                prompts={"tests": "prompts/review/tests.md"},
+            ),
+        ),
+    )
+    init_plan_md(run_folder, profile)
+    add_fix_cycle_node(run_folder, cycle_num=1, reviewers=["tests"])
+    set_pr_node(run_folder, "https://github.com/example/repo/pull/77")
+    content = (run_folder / "plan.md").read_text()
+
+    # PR node exists and links to the supplied URL.
+    assert "pr([" in content
+    assert "/pull/77" in content
+    # The re-review node from the fix cycle is the predecessor of pr (not Done).
+    assert "review_tests_2_panel --> pr" in content
+    assert "pr --> Done" in content
+    # Nothing else should still point directly at Done.
+    assert "review_tests_2_panel --> Done" not in content
+    assert "review_tests_panel --> Done" not in content
