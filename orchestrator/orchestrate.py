@@ -137,7 +137,8 @@ def _create_worktree(repo_root: str, temp_branch: str, base_branch: str, logger,
 
     if git_state.branch_exists(repo_root, temp_branch):
         raise GitStateError(f"cannot create worktree on '{temp_branch}': branch already exists in {repo_root}")
-    wt_path = tempfile.mkdtemp(prefix=f"orch-wt-{temp_branch}-")
+    safe_prefix = temp_branch.replace("/", "-")
+    wt_path = tempfile.mkdtemp(prefix=f"orch-wt-{safe_prefix}-")
     result = subprocess.run(
         ["git", "-C", repo_root, "worktree", "add", wt_path, "-b", temp_branch, base_branch],
         capture_output=True,
