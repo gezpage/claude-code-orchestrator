@@ -8,20 +8,21 @@ from orchestrator.agent_runner._protocol import AgentRunner, AgentRunRequest, Ag
 
 
 class ClaudeCodeAutoRunner(AgentRunner):
-    """Dispatch via `claude -p` with `--permission-mode auto`.
+    """Dispatch via the `claude` CLI with `--permission-mode auto`.
 
-    Transitional backend for environments without `ANTHROPIC_API_KEY` (OAuth /
-    keychain auth only). Keeps Claude's permission system engaged — the
-    next-most-permissive choice short of `bypassPermissions` — while preserving
-    the `claude -p` transport so signal-JSON capture is unchanged.
+    Same OAuth/keychain auth path as `ClaudeCodePrintRunner` (see ADR-022):
+    `-p` and `--bare` are absent, and `ANTHROPIC_API_KEY` /
+    `ANTHROPIC_AUTH_TOKEN` are stripped from the forwarded env so a stale
+    external key cannot override keychain auth.
 
-    Isolation tradeoff vs `claude_code_print`: `--bare` is intentionally absent
-    because it forces `ANTHROPIC_API_KEY`-only auth. As a result, this runner
-    does NOT block hooks, LSP, plugin sync, keychain reads or repo-root
-    CLAUDE.md auto-discovery. `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1` is still set
-    by default (sterile_context) so ambient auto-memory is suppressed, but
-    callers needing strict reproducibility should prefer `claude_code_print`
-    (with API key) or `codex_cli`.
+    The only difference from `claude_code_print` is permission handling:
+    `--permission-mode auto` keeps Claude's permission system engaged
+    (next-most-permissive short of `bypassPermissions`) instead of using
+    `--dangerously-skip-permissions`. Both runners share the same isolation
+    profile — hooks, LSP, plugin sync, keychain reads and CLAUDE.md
+    auto-discovery are all active. `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1` is set
+    by default (sterile_context) so ambient auto-memory is suppressed; callers
+    needing strict reproducibility should prefer `codex_cli`.
     """
 
     backend_name = "claude_code_auto"
@@ -40,7 +41,7 @@ class ClaudeCodeAutoRunner(AgentRunner):
         self._output_mode = output_mode
 
     def run(self, request: AgentRunRequest) -> AgentRunResult:
-        cmd = ["claude", "-p", request.prompt, "--permission-mode", "auto"]
+        cmd = ["claude", request.prompt, "--permission-mode", "auto"]
         model = request.model or self._model
         output_mode = request.output_mode if request.output_mode != "text" else self._output_mode
         timeout_seconds = request.timeout_seconds if request.timeout_seconds is not None else self._timeout_seconds
@@ -50,6 +51,9 @@ class ClaudeCodeAutoRunner(AgentRunner):
             cmd += ["--output-format", output_mode]
 
         env = os.environ.copy()
+        # Force keychain/OAuth auth — see ADR-022.
+        env.pop("ANTHROPIC_API_KEY", None)
+        env.pop("ANTHROPIC_AUTH_TOKEN", None)
         if self._sterile_context:
             env["CLAUDE_CODE_DISABLE_AUTO_MEMORY"] = "1"
         if request.env:

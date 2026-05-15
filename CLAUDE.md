@@ -8,7 +8,7 @@ Developer-facing reference. Read before touching any orchestrator code.
 
 - **All autonomous stage dispatch goes through an `AgentRunner`.** `run_stage()` calls `runner.run(AgentRunRequest(...))` — it does not invoke `claude` or any CLI directly. New backends are added by implementing the Protocol in `orchestrator/agent_runner/`, not by editing call sites. See ADR-018.
 
-- **`ClaudeCodePrintRunner` always passes `--bare` and `--dangerously-skip-permissions`.** These were the ADR-003 and ADR-012 invariants; they are now invariants of the runner. Removing either flag from the runner breaks unattended stage dispatch and re-enables MCP/hook side effects. See ADR-018.
+- **`ClaudeCodePrintRunner` passes `--dangerously-skip-permissions` and never passes `--bare` or `-p`.** `--dangerously-skip-permissions` is the ADR-003 invariant — removing it would re-enable permission prompts and hang unattended dispatch. `--bare` and `-p` were the ADR-012 / ADR-018 invariants but have been **reversed** in ADR-022: `--bare` forces `ANTHROPIC_API_KEY`-only auth (excluding OAuth/keychain) and `-p` is redundant under piped stdout. Both Claude runners also strip `ANTHROPIC_API_KEY` and `ANTHROPIC_AUTH_TOKEN` from the forwarded env so a stale external key cannot override keychain auth. See ADR-022.
 
 - **Sterile context is the default for stage runners.** `ClaudeCodePrintRunner` sets `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1` unless a profile opts out with `agent.sterile_context: false`. Ambient auto-memory is not allowed to leak into pipeline runs by default. See ADR-018.
 

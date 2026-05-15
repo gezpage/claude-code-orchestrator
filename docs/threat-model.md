@@ -2,7 +2,7 @@
 
 This document describes the security model of Orchestrator: what it trusts, what it does not, where the boundaries are, and what it deliberately does not defend against. It complements [`SECURITY.md`](../SECURITY.md), which is operator-facing; this document is for security reviewers, contributors, and anyone embedding Orchestrator into a larger system.
 
-For the load-bearing architectural decisions referenced here, see the relevant ADRs in [`docs/adrs/`](adrs/) — particularly [ADR-003](adrs/ADR-003-dangerously-skip-permissions.md) (permission skip), [ADR-004](adrs/ADR-004-oblivious-orchestrator.md) (token-minimisation invariant), and [ADR-012](adrs/ADR-012-bare-flag-on-stage-invocations.md) (`--bare` invariant).
+For the load-bearing architectural decisions referenced here, see the relevant ADRs in [`docs/adrs/`](adrs/) — particularly [ADR-003](adrs/ADR-003-dangerously-skip-permissions.md) (permission skip), [ADR-004](adrs/ADR-004-oblivious-orchestrator.md) (token-minimisation invariant), and [ADR-022](adrs/ADR-022-claude-runners-oauth-only.md) (OAuth-only auth path; supersedes the earlier `--bare` invariant from ADR-012).
 
 ---
 
@@ -14,7 +14,7 @@ Orchestrator's runtime has four distinct trust zones:
 |------|------------|------------|--------|
 | **Operator** | the human running `orchestrator run` | — (root of trust) | everything below |
 | **Orchestrator process** | `orchestrate.py`, `run_stage.py`, CLI | Operator | stage subprocesses *to read/write files*, **not** to be honest about signal content (it is schema-validated) |
-| **Stage subprocess** | a `claude -p ... --dangerously-skip-permissions --bare` invocation | Orchestrator process | the model, the host filesystem, and the operator's credentials |
+| **Stage subprocess** | a `claude <prompt> --dangerously-skip-permissions` invocation (Claude runners; see ADR-022) | Orchestrator process | the model, the host filesystem, and the operator's credentials |
 | **Inputs** | `overview.md`, alignment logs, `findings.md`, prior signals, `project.yaml` | Stage subprocess | — |
 
 The single hard trust boundary the orchestrator enforces is the **signal interface**: a stage subprocess communicates with the orchestrator only via one `SIGNAL_JSON:` sentinel line and the schema-validated dict it carries (see [ADR-002](adrs/ADR-002-signal-json-sentinel-line.md)). The orchestrator does not read stage output files — that is the token-minimisation invariant in [ADR-004](adrs/ADR-004-oblivious-orchestrator.md).
@@ -50,14 +50,14 @@ Not enforced:
 
 Every stage is dispatched via `subprocess.Popen` (see `orchestrator/run_stage.py`) with:
 
-- `claude -p <rendered prompt> --dangerously-skip-permissions --bare`
+- For the Claude runners: `claude <rendered prompt> --dangerously-skip-permissions` (`ClaudeCodePrintRunner`) or `claude <rendered prompt> --permission-mode auto` (`ClaudeCodeAutoRunner`). Subprocess-piped stdout puts Claude Code into non-interactive mode automatically.
 - `stdout`, `stderr` merged and captured.
 - `cwd` set to either the run folder (default) or `repo-root` (when the profile sets `cwd_from_repo_root: true` for implementation/QA/review/fix-implementation stages).
-- The orchestrator process's environment inherited wholesale.
+- The orchestrator process's environment is inherited, **except** that the Claude runners strip `ANTHROPIC_API_KEY` and `ANTHROPIC_AUTH_TOKEN` so a stale external key cannot override the operator's keychain/OAuth auth (see [ADR-022](adrs/ADR-022-claude-runners-oauth-only.md)).
 
-`--dangerously-skip-permissions` removes the per-tool approval gate; `--bare` skips MCP server loading and startup hooks. The combination is intentional and load-bearing — see ADR-003 and ADR-012. Neither flag can be removed without breaking the unattended-pipeline contract.
+`--dangerously-skip-permissions` removes the per-tool approval gate (load-bearing — see ADR-003). `--bare` is **not** used by the Claude runners any more (see ADR-022): hooks, MCP servers, LSP, plugin sync, keychain reads, and `CLAUDE.md` auto-discovery are all active at stage time. Stage isolation now relies on `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1` (sterile context) only.
 
-Interactive stages (`mode: interactive`, see [ADR-007](adrs/ADR-007-alignment-pipeline-pause.md)) bypass `run_stage()` entirely; the orchestrator launches `claude` attached to the terminal, with **neither** flag, and waits for the human to exit.
+Interactive stages (`mode: interactive`, see [ADR-007](adrs/ADR-007-alignment-pipeline-pause.md)) bypass `run_stage()` entirely; the orchestrator launches `claude` attached to the terminal, with no `--dangerously-skip-permissions`, and waits for the human to exit.
 
 Implications:
 
@@ -73,7 +73,7 @@ Orchestrator itself makes no network calls. Network exposure comes from:
 
 - Claude Code's connection to `api.anthropic.com` for the model session.
 - Whatever URLs the stage agent decides to fetch (the implementation stage commonly runs `git fetch`, package installs, etc.).
-- Hooks and MCP servers — both **disabled** at stage time by `--bare`, but enabled in interactive stages such as alignment.
+- Hooks and MCP servers — **active** at stage time for the Claude runners (see [ADR-022](adrs/ADR-022-claude-runners-oauth-only.md)), and active in interactive stages such as alignment. Operators who need them suppressed must disable them in Claude Code's own settings or switch to `codex_cli`.
 
 Assumptions:
 
@@ -131,7 +131,7 @@ Modes that are documented as unsafe and have no in-tree mitigation:
 - **Auto-merging output PRs.** The pipeline ends with a PR open and a human gate. Wiring auto-merge defeats the design.
 - **Long-lived credentials in scope.** A run that goes wrong on hour 4 has had hours to do harm with whatever tokens were reachable.
 - **Running on a host with secrets in `$HOME` or the environment.** The stage agent can read both.
-- **Interactive alignment with hostile content** in the rendered prompt or in MCP-tool output. Interactive stages run **without** `--bare`, so any locally-configured hooks fire as well.
+- **Interactive alignment with hostile content** in the rendered prompt or in MCP-tool output. All stage runs (autonomous as well as interactive — see [ADR-022](adrs/ADR-022-claude-runners-oauth-only.md)) fire any locally-configured hooks.
 - **Trusting `_state.yaml`, `run.log`, or stage output files as a tamper-evident audit trail.** They are plain files.
 
 ---
