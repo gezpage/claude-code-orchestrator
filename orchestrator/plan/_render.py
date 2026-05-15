@@ -147,7 +147,7 @@ def _link_display(name: str) -> str:
 
 
 def _href_prefix(run_folder: Path) -> str:
-    """Return the path-from-docs-root for the run folder, with a trailing slash.
+    """Return the docs-site href prefix for the run folder, with a trailing slash.
 
     The orchestrator's path layout is ``{docs-root}/projects/{project}/workflow/runs/
     {feature-slug}/{run-name}/`` (see CLAUDE.md). We anchor on the trailing six
@@ -156,6 +156,11 @@ def _href_prefix(run_folder: Path) -> str:
     a directory called ``projects`` (e.g. ``~/Dev/projects/docs``) don't produce a
     prefix that includes the host path. Returns an empty string when the layout
     doesn't match, so the caller falls back to plain relative URLs.
+
+    The ``/#`` prefix targets the team-hub-style hash-routed docs site: the SPA
+    router reads the path after ``#`` and resolves it from the docs root. Without
+    the ``#`` the browser treats the encoded path as a single absolute segment
+    and the link 404s.
     """
     parts = Path(run_folder).resolve().parts
     if len(parts) < 6:
@@ -163,7 +168,7 @@ def _href_prefix(run_folder: Path) -> str:
     tail = parts[-6:]
     if tail[0] != "projects" or tail[2] != "workflow" or tail[3] != "runs":
         return ""
-    return "/".join(tail) + "/"
+    return "/#" + "/".join(tail) + "/"
 
 
 def _legend_anchor(graph: Graph) -> str | None:
