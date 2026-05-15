@@ -59,8 +59,12 @@ Introduce `orchestrator.agent_runner`, a small package exposing:
 default (when not injected) is `ClaudeCodePrintRunner(sterile_context=True)`.
 `orchestrate.run_pipeline` pre-builds one runner per stage from merged
 profile + stage `agent:` config and passes it through every dispatcher.
-Stage signal extraction stays in `run_stage` — the runner returns raw stdout
-and the orchestrator owns SIGNAL_JSON semantics.
+Stage signal extraction stays in `run_stage` — the runner returns its agent's
+final message as `result.stdout` (backends MUST strip CLI banners, command
+logs, diffs and other process chatter that isn't part of the agent's reply;
+the full raw stream belongs in `stream_log_path` for forensics, not in
+`result.stdout`) and the orchestrator owns SIGNAL_JSON semantics over that
+clean string.
 
 State recording: `_state.yaml` gains an `agent:` section mapping stage name
 to `{backend, model}` so run artifacts truthfully reflect what executed each
