@@ -9,6 +9,12 @@ Format: [Unreleased] at the top, dated releases below, newest first.
 
 ### Fixed
 
+## [2026-05-15]
+
+### Fixed
+
+- `_create_branch` now checks working-tree cleanliness even when already on the target branch, closing the gap where resumed runs could dispatch QA against uncommitted implementation output.
+
 - `_create_branch` no longer checks `is_clean` when the repo is already on the target branch, preventing spurious "working tree not clean" failures at the start of stages that follow implementation (2026-05-15)
 
 ### Changed
