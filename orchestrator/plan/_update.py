@@ -82,6 +82,22 @@ def update_plan_md(
         _update_plan_md(run_folder, stage, status, elapsed_secs, output_summary, signal, impl_name, repo_root)
 
 
+def rerender_plan_md(run_folder: Path) -> None:
+    """Re-render the mermaid block without changing any node status.
+
+    Used to surface files that appear in the run folder mid-stage (e.g. the
+    prompt file, written before the agent dispatches) so the diagram links to
+    them while the stage is still running, rather than only after it completes.
+    """
+    with _plan_lock:
+        run_folder = Path(run_folder)
+        plan_path = run_folder / "plan.md"
+        graph = load_graph(run_folder)
+        if graph is None or not plan_path.exists():
+            return
+        replace_mermaid_block(plan_path, graph)
+
+
 def _update_plan_md(
     run_folder: Path,
     stage: str,

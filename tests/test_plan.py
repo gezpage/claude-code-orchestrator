@@ -1,6 +1,6 @@
 from unittest.mock import patch
 
-from orchestrator.plan import add_fix_cycle_node, expand_nodes, init_plan_md, update_plan_md
+from orchestrator.plan import add_fix_cycle_node, expand_nodes, init_plan_md, rerender_plan_md, update_plan_md
 from orchestrator.profile import ExpansionKind, Profile, StageConfig
 
 
@@ -90,6 +90,34 @@ def test_init_plan_md_review_stage_with_prompts(tmp_path):
     assert "review_security[" in content
     # Renderer rewrites edge endpoints to the materialised prompt/panel partners.
     assert "review_panel --> review_arch_prompt & review_security_prompt" in content
+    # Sub-node display is suffixed with the parent stage's display so review agents
+    # read as "<Name> Review" rather than colliding with sibling stages of the same name.
+    assert "Arch Review" in content
+    assert "Security Review" in content
+
+
+def test_init_plan_md_review_sub_node_display_suffixed_with_parent(tmp_path):
+    """The 'implementation' reviewer must render as 'Implementation Review' so it is
+    visually distinct from the actual Implementation stage node."""
+    run_folder = _make_run_folder(tmp_path)
+    profile = Profile(
+        name="test",
+        stages=(
+            StageConfig(name="implementation", prompt="prompts/implementation/default.md"),
+            StageConfig(
+                name="review",
+                expansion=ExpansionKind.PROMPTS,
+                prompts={
+                    "implementation": "prompts/review/implementation.md",
+                    "tests": "prompts/review/tests.md",
+                },
+            ),
+        ),
+    )
+    init_plan_md(run_folder, profile)
+    content = (run_folder / "plan.md").read_text()
+    assert "Implementation Review" in content
+    assert "Tests Review" in content
 
 
 def test_init_plan_md_review_fan_in_to_next_stage(tmp_path):
@@ -160,6 +188,32 @@ def test_init_plan_md_start_done_with_review(tmp_path):
     assert "harvest_panel --> Done" in content
     assert "review --> Done" not in content
     assert "review_panel --> Done" not in content
+
+
+def test_rerender_plan_md_picks_up_new_prompt_file(tmp_path):
+    """A prompt file written between init and stage completion should appear in the
+    mermaid block after rerender_plan_md, without changing any node status."""
+    run_folder = _make_run_folder(tmp_path)
+    profile = _simple_profile("discovery")
+    init_plan_md(run_folder, profile)
+    before = (run_folder / "plan.md").read_text()
+    # No prompt link yet — the parallelogram should show the literal "Prompt" text.
+    assert "discovery-prompt.md" not in before
+
+    stage_dir = run_folder / "discovery"
+    stage_dir.mkdir()
+    (stage_dir / "discovery-prompt.md").write_text("prompt body")
+    rerender_plan_md(run_folder)
+
+    after = (run_folder / "plan.md").read_text()
+    assert "discovery-prompt.md" in after
+
+
+def test_rerender_plan_md_noop_when_no_plan(tmp_path):
+    run_folder = _make_run_folder(tmp_path)
+    # No plan.md exists yet — rerender should silently do nothing.
+    rerender_plan_md(run_folder)
+    assert not (run_folder / "plan.md").exists()
 
 
 def test_update_plan_md_run_summary_section(tmp_path):
@@ -416,6 +470,8 @@ def test_add_fix_cycle_node_cycle1_single_reviewer(tmp_path):
     assert "fix_impl_1_panel --> review_tests_2_prompt" in content
     assert "class fix_impl_1 active" in content
     assert "class review_tests_2 pending" in content
+    # Re-review nodes carry the same parent-stage suffix as the original review sub-nodes.
+    assert "Tests Review" in content
 
 
 def test_add_fix_cycle_node_cycle2_sources_previous_round(tmp_path):

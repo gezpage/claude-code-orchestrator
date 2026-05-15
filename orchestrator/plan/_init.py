@@ -59,10 +59,14 @@ def build_initial_graph(profile: Profile) -> Graph:
             for reviewer, prompt_path in stage.prompts.items():
                 reviewer_impl = Path(prompt_path).stem
                 sub_id = f"{name}_{reviewer}"
+                # Suffix sub-node labels with the parent stage display so review
+                # sub-nodes read as e.g. "Implementation Review", distinct from the
+                # actual Implementation stage. Derived (not enumerated) so newly
+                # added reviewers pick it up automatically.
                 graph.add_node(
                     Node(
                         id=sub_id,
-                        display=reviewer.title(),
+                        display=f"{reviewer.title()} {display_name}",
                         impl=reviewer_impl,
                         css_class="pending",
                         subgraph=f"sg_{name}",

@@ -13,6 +13,7 @@ from orchestrator.agent_runner import (
     ClaudeCodePrintRunner,
 )
 from orchestrator.logger import OrchestratorLogger
+from orchestrator.plan import rerender_plan_md
 
 
 def _fmt_elapsed(secs: float) -> str:
@@ -160,6 +161,9 @@ def run_stage(
     output_dir.mkdir(parents=True, exist_ok=True)
     tag = f"-{output_suffix}" if output_suffix else ""
     (output_dir / f"{stage}{tag}-prompt.md").write_text(prompt)
+    # Re-render so the prompt link surfaces in plan.md before the agent dispatches
+    # — otherwise it only appears after the stage finishes and update_plan_md re-renders.
+    rerender_plan_md(run_folder)
     stream_log_path = output_dir / f"{stage}{tag}-stream.log"
 
     t0 = time.monotonic()
@@ -308,6 +312,7 @@ def run_interactive_stage(
         output_dir = run_folder / stage
         output_dir.mkdir(parents=True, exist_ok=True)
         (output_dir / f"{stage}-prompt.md").write_text(rendered)
+        rerender_plan_md(run_folder)
         cmd = ["claude", rendered]
 
     subprocess.run(cmd, stdin=sys.stdin, stdout=sys.stdout, stderr=sys.stderr)
