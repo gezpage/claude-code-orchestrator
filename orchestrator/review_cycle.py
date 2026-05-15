@@ -88,6 +88,51 @@ def _write_round_diff(run_folder: Path, repo_root: str, commit_hashes: list[str]
     return str(diff_path)
 
 
+def _head_sha(repo_root: str) -> str:
+    """Return the current HEAD commit SHA, or '' if the call fails."""
+    if not repo_root:
+        return ""
+    result = subprocess.run(
+        ["git", "-C", repo_root, "rev-parse", "HEAD"],
+        capture_output=True,
+        text=True,
+    )
+    return result.stdout.strip() if result.returncode == 0 else ""
+
+
+def _commits_since(repo_root: str, before_sha: str) -> list[str]:
+    """Return commit SHAs reachable from HEAD but not from before_sha, in chronological order."""
+    if not repo_root or not before_sha:
+        return []
+    result = subprocess.run(
+        ["git", "-C", repo_root, "rev-list", "--reverse", f"{before_sha}..HEAD"],
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        return []
+    return [line.strip() for line in result.stdout.splitlines() if line.strip()]
+
+
+def _render_findings_brief(findings_map: _FindingsMap) -> str:
+    """Render unresolved findings as a markdown brief for the fix-implementation prompt.
+
+    Fallback for when review-log.md is missing the expected `## <Reviewer> Review — Round N`
+    headings (a fragile contract — reviewer agents sometimes write nothing or use a different
+    heading format). The in-memory findings_map is authoritative for round-1 findings, so
+    rendering from it guarantees the fix agent has something concrete to act on."""
+    sections: list[str] = []
+    for reviewer, findings in findings_map.items():
+        unresolved = [text for text, resolved in findings if resolved is None]
+        if not unresolved:
+            continue
+        sections.append(f"## {reviewer.title()} Review\n")
+        for text in unresolved:
+            sections.append(f"- {text}")
+        sections.append("")
+    return "\n".join(sections)
+
+
 def is_valid_diff_file(path: str) -> bool:
     """Return True if `path` is a usable git-diff file for a reviewer.
 
@@ -217,6 +262,10 @@ def run(
         changes_brief = ""
         if review_md_path.exists():
             changes_brief = _extract_changes_sections(review_md_path.read_text(), changes_requested)
+        if not changes_brief.strip():
+            # review-log.md was missing or had no matching reviewer sections — fall back to
+            # the in-memory findings so the fix agent still receives an actionable brief.
+            changes_brief = _render_findings_brief(findings_map)
 
         plan_mod.add_fix_cycle_node(run_folder, cycle, changes_requested)
 
@@ -227,6 +276,11 @@ def run(
             "changes_brief": changes_brief,
             "repo_root": repo_root,
         }
+        # Capture HEAD before the fix run so we can detect commits via git rather than trust
+        # the agent's commit_hashes self-report (which has been observed to be empty even
+        # when the agent should have produced commits — and could be wrong in the other
+        # direction too).
+        before_head = _head_sha(repo_root)
         fix_t0 = time.monotonic()
         fix_sig = run_stage(
             "fix-implementation",
@@ -242,12 +296,16 @@ def run(
         )
         fix_elapsed = time.monotonic() - fix_t0
         fix_status = fix_sig.get("status", "unknown")
-        commit_hashes = fix_sig.get("commit_hashes", [])
+        reported_hashes = fix_sig.get("commit_hashes", []) or []
+        actual_hashes = _commits_since(repo_root, before_head)
+        # Git is the source of truth. Prefer the actual list; only fall back to the agent's
+        # self-report if we couldn't query git (e.g. repo_root unavailable in unit tests).
+        commit_hashes = actual_hashes if before_head else reported_hashes
         fix_summary = f"{len(commit_hashes)} commit{'s' if len(commit_hashes) != 1 else ''}" if commit_hashes else None
         plan_mod.update_plan_md(
             run_folder,
             f"fix_impl_{cycle}",
-            "passed" if fix_status == "passed" else "blocked",
+            "passed" if fix_status == "passed" and commit_hashes else "blocked",
             elapsed_secs=fix_elapsed,
             output_summary=fix_summary,
         )
@@ -261,10 +319,18 @@ def run(
         # Deterministic gate: if the fix cycle produced no usable diff, fail the cycle here
         # rather than dispatch reviewers against an empty or non-diff input.
         if not is_valid_diff_file(diff_path):
-            msg = (
-                f"review-cycle round {round_num} aborted: no valid git diff at {diff_path!r} "
-                f"(fix-implementation commits={commit_hashes!r})"
-            )
+            if not commit_hashes:
+                msg = (
+                    f"review-cycle round {round_num} aborted: fix-implementation made no commits "
+                    f"(agent status={fix_status!r}, reported_hashes={reported_hashes!r}). "
+                    f"See {run_folder / 'fix-implementation' / f'fix-implementation-{cycle}-output.md'} "
+                    f"for the agent's reasoning."
+                )
+            else:
+                msg = (
+                    f"review-cycle round {round_num} aborted: no valid git diff at {diff_path!r} "
+                    f"for commits {commit_hashes!r}"
+                )
             logger.log("review-cycle", "ERROR", msg)
             append_findings_summary(
                 run_folder / "plan.md", findings_map, reviewer_statuses, accepted_risks=accepted_risks

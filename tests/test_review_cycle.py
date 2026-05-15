@@ -806,3 +806,151 @@ def test_cycle_aborts_when_diff_invalid(tmp_path):
     # Only fix-implementation ran; reviewer was NOT dispatched.
     assert mock_rs.call_count == 1
     assert mock_rs.call_args.args[0] == "fix-implementation"
+
+
+# ── git-derived commit detection ──────────────────────────────────────────────
+
+
+def _init_repo(repo_root):
+    import subprocess
+
+    subprocess.run(["git", "init", "-q", "-b", "main", str(repo_root)], check=True)
+    subprocess.run(["git", "-C", str(repo_root), "config", "user.email", "t@t"], check=True)
+    subprocess.run(["git", "-C", str(repo_root), "config", "user.name", "t"], check=True)
+    (repo_root / "README.md").write_text("init\n")
+    subprocess.run(["git", "-C", str(repo_root), "add", "README.md"], check=True)
+    subprocess.run(["git", "-C", str(repo_root), "commit", "-q", "-m", "init"], check=True)
+
+
+def _commit_file(repo_root, name, content, message):
+    import subprocess
+
+    (repo_root / name).write_text(content)
+    subprocess.run(["git", "-C", str(repo_root), "add", name], check=True)
+    subprocess.run(["git", "-C", str(repo_root), "commit", "-q", "-m", message], check=True)
+
+
+def test_head_sha_and_commits_since_against_real_repo(tmp_path):
+    from orchestrator.review_cycle import _commits_since, _head_sha
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _init_repo(repo)
+    before = _head_sha(str(repo))
+    assert before  # non-empty
+
+    _commit_file(repo, "a.txt", "a\n", "first fix")
+    _commit_file(repo, "b.txt", "b\n", "second fix")
+
+    after = _head_sha(str(repo))
+    new_commits = _commits_since(str(repo), before)
+    assert len(new_commits) == 2
+    assert new_commits[-1] == after  # newest at the end (chronological order)
+
+
+def test_head_sha_returns_empty_without_repo_root(tmp_path):
+    from orchestrator.review_cycle import _commits_since, _head_sha
+
+    assert _head_sha("") == ""
+    assert _commits_since("", "deadbeef") == []
+    # Real repo but bogus before-sha → git returns non-zero; we yield [].
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _init_repo(repo)
+    assert _commits_since(str(repo), "0" * 40) == []
+
+
+@pytest.mark.real_validator
+def test_actual_commits_override_agent_self_report(tmp_path):
+    """When the agent under-reports commit_hashes (e.g. empty list), the orchestrator must
+    use the actual commits found via git so the diff and re-review can proceed."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _init_repo(repo)
+    run_folder, log_path = _setup(tmp_path)
+    signal = _review_signal({"implementation": "changes-requested"})
+
+    def fake_stage(stage, *a, **kw):
+        if stage == "fix-implementation":
+            # Simulate the failure mode: agent commits but reports an empty list.
+            _commit_file(repo, "fix.txt", "fix\n", "fix: applied")
+            return {"stage": "fix-implementation", "status": "passed", "commit_hashes": []}
+        return _reviewer_sig("implementation", "approved")
+
+    with patch("orchestrator.review_cycle.run_stage", side_effect=fake_stage):
+        result = review_cycle.run(run_folder, "/docs", "proj", "feat/x", signal, log_path, repo_root=str(repo))
+
+    assert result == {"all_passed": True}
+    # Verify the diff file was written with real diff content for the recovered commit.
+    diff_path = run_folder / "review" / "diff-round-2.patch"
+    assert diff_path.exists()
+    assert "diff --git" in diff_path.read_text()
+
+
+@pytest.mark.real_validator
+def test_cycle_aborts_with_clear_message_when_no_commits_made(tmp_path):
+    """If fix-implementation truly makes no commits, the error message must point at the
+    fix-implementation output so the operator can see why the agent didn't commit — not
+    just complain about an empty diff path."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _init_repo(repo)
+    run_folder, log_path = _setup(tmp_path)
+    signal = _review_signal({"implementation": "changes-requested"})
+
+    no_commit_sig = {"stage": "fix-implementation", "status": "passed", "commit_hashes": []}
+
+    with patch("orchestrator.review_cycle.run_stage", return_value=no_commit_sig):
+        result = review_cycle.run(run_folder, "/docs", "proj", "feat/x", signal, log_path, repo_root=str(repo))
+
+    assert result["all_passed"] is False
+    assert result["blocked"] is True
+    message = result.get("message", "")
+    assert "fix-implementation made no commits" in message
+    assert "fix-implementation-1-output.md" in message
+
+
+# ── changes_brief fallback ────────────────────────────────────────────────────
+
+
+def test_changes_brief_falls_back_to_in_memory_findings(tmp_path):
+    """When review-log.md doesn't contain a matching reviewer section, the fix prompt must
+    still receive an actionable brief — rendered from the in-memory findings_map."""
+    run_folder, log_path = _setup(tmp_path)
+    signal = {
+        "stage": "review",
+        "status": "passed",
+        "reviewer_statuses": {"implementation": "changes-requested"},
+        "reviewer_findings": {"implementation": ["Missing null check in auth.py"]},
+        "changes_requested": ["implementation"],
+    }
+
+    captured_vars = {}
+
+    def capture_stage(stage, impl, variables, *a, **kw):
+        if stage == "fix-implementation":
+            captured_vars.update(variables)
+            return _fix_sig()
+        return _reviewer_sig("implementation", "approved")
+
+    with patch("orchestrator.review_cycle.run_stage", side_effect=capture_stage):
+        review_cycle.run(run_folder, "/docs", "proj", "feat/x", signal, log_path)
+
+    brief = captured_vars.get("changes_brief", "")
+    assert "Missing null check in auth.py" in brief
+    assert "Implementation Review" in brief
+
+
+def test_render_findings_brief_skips_resolved_and_empty(tmp_path):
+    from orchestrator.review_cycle import _render_findings_brief
+
+    findings_map: dict[str, list[tuple[str, int | None]]] = {
+        "implementation": [("Critical bug A", None), ("Already fixed B", 1)],
+        "tests": [],
+        "architecture": [("Layer leak C", None)],
+    }
+    brief = _render_findings_brief(findings_map)
+    assert "Critical bug A" in brief
+    assert "Layer leak C" in brief
+    assert "Already fixed B" not in brief
+    assert "Tests Review" not in brief  # empty list — section omitted
