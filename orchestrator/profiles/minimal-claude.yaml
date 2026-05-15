@@ -1,0 +1,28 @@
+name: minimal-claude
+
+agent:
+  backend: claude_code_auto
+  model: claude-opus-4-7
+
+stages:
+  - stage: specification
+    prompt: prompts/specification/minimal.md
+
+  - stage: decomposition
+    prompt: prompts/decomposition/minimal.md
+
+  - stage: implementation
+    prompt: prompts/implementation/minimal.md
+    standards: true
+    cwd_from_repo_root: true
+
+  - stage: verification
+    mode: deterministic
+
+  - stage: review
+    expansion: prompts
+    prompts:
+      implementation: prompts/review/implementation.md
+    agent:
+      backend: codex_cli
+      permission_mode: read-only

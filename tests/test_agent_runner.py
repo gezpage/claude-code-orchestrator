@@ -9,6 +9,7 @@ import pytest
 from orchestrator.agent_runner import (
     AgentConfig,
     AgentRunRequest,
+    ClaudeCodeAutoRunner,
     ClaudeCodePrintRunner,
     CodexCliRunner,
     FakeRunner,
@@ -133,6 +134,102 @@ def test_claude_runner_non_zero_exit_captured(monkeypatch):
     result = runner.run(AgentRunRequest(prompt="x"))
     assert result.exit_code == 2
     assert result.timed_out is False
+
+
+# ── Claude code auto runner ───────────────────────────────────────────────────
+
+
+def test_claude_code_auto_runner_builds_expected_command(monkeypatch):
+    from orchestrator.agent_runner import _claude_auto as auto_mod
+
+    captured = _stub_popen(monkeypatch, auto_mod, stdout="ok")
+    runner = ClaudeCodeAutoRunner()
+    runner.run(AgentRunRequest(prompt="do the thing"))
+    cmd = captured["cmd"]
+    assert cmd[0] == "claude"
+    assert "-p" in cmd
+    assert "do the thing" in cmd
+    assert "--permission-mode" in cmd
+    assert "auto" in cmd
+    # The whole point of the auto runner: --bare and --dangerously-skip-permissions
+    # must be absent. --bare would force ANTHROPIC_API_KEY auth, --dangerously-skip-permissions
+    # would defeat the permission gating.
+    assert "--bare" not in cmd
+    assert "--dangerously-skip-permissions" not in cmd
+
+
+def test_claude_code_auto_runner_sterile_context_env(monkeypatch):
+    from orchestrator.agent_runner import _claude_auto as auto_mod
+
+    captured = _stub_popen(monkeypatch, auto_mod)
+    runner = ClaudeCodeAutoRunner(sterile_context=True)
+    runner.run(AgentRunRequest(prompt="x"))
+    assert captured["kwargs"]["env"].get("CLAUDE_CODE_DISABLE_AUTO_MEMORY") == "1"
+
+    captured = _stub_popen(monkeypatch, auto_mod)
+    monkeypatch.delenv("CLAUDE_CODE_DISABLE_AUTO_MEMORY", raising=False)
+    runner = ClaudeCodeAutoRunner(sterile_context=False)
+    runner.run(AgentRunRequest(prompt="x"))
+    assert "CLAUDE_CODE_DISABLE_AUTO_MEMORY" not in captured["kwargs"]["env"]
+
+
+def test_claude_code_auto_runner_model_flag(monkeypatch):
+    from orchestrator.agent_runner import _claude_auto as auto_mod
+
+    captured = _stub_popen(monkeypatch, auto_mod)
+    runner = ClaudeCodeAutoRunner(model="claude-opus-4-7")
+    runner.run(AgentRunRequest(prompt="x"))
+    cmd = captured["cmd"]
+    assert "--model" in cmd
+    assert "claude-opus-4-7" in cmd
+
+    # Request-level model overrides the constructor default.
+    captured = _stub_popen(monkeypatch, auto_mod)
+    runner = ClaudeCodeAutoRunner(model="claude-opus-4-7")
+    runner.run(AgentRunRequest(prompt="x", model="sonnet"))
+    cmd = captured["cmd"]
+    assert "--model" in cmd
+    assert "sonnet" in cmd
+
+
+def test_claude_code_auto_runner_writes_transcript(monkeypatch, tmp_path):
+    from orchestrator.agent_runner import _claude_auto as auto_mod
+
+    _stub_popen(monkeypatch, auto_mod, stdout="transcript body")
+    transcript_path = tmp_path / "stage" / "stage-transcript.md"
+    runner = ClaudeCodeAutoRunner()
+    result = runner.run(AgentRunRequest(prompt="x", transcript_path=transcript_path))
+    assert transcript_path.read_text() == "transcript body"
+    assert result.transcript_path == transcript_path
+
+
+def test_claude_code_auto_runner_timeout_marks_result(monkeypatch):
+    from orchestrator.agent_runner import _claude_auto as auto_mod
+
+    class _SlowPopen:
+        def __init__(self, cmd, **kwargs):
+            self.stdout = iter(["partial"])
+            self._killed = False
+
+        def wait(self, timeout=None):
+            if self._killed:
+                return -9
+            raise subprocess.TimeoutExpired(cmd="claude", timeout=1)
+
+        def kill(self):
+            self._killed = True
+
+    monkeypatch.setattr(auto_mod.subprocess, "Popen", _SlowPopen)
+    runner = ClaudeCodeAutoRunner()
+    result = runner.run(AgentRunRequest(prompt="x", timeout_seconds=1))
+    assert result.timed_out is True
+
+
+def test_build_runner_resolves_claude_code_auto():
+    runner = build_runner(AgentConfig(backend="claude_code_auto", model="claude-opus-4-7", timeout_seconds=42))
+    assert isinstance(runner, ClaudeCodeAutoRunner)
+    assert runner._model == "claude-opus-4-7"
+    assert runner._timeout_seconds == 42
 
 
 # ── Codex runner ──────────────────────────────────────────────────────────────
