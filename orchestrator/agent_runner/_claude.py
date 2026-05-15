@@ -8,11 +8,16 @@ from orchestrator.agent_runner._protocol import AgentRunner, AgentRunRequest, Ag
 
 
 class ClaudeCodePrintRunner(AgentRunner):
-    """Dispatch via `claude -p` print mode.
+    """Dispatch via the `claude` CLI for unattended stage runs.
 
-    `--bare` and `--dangerously-skip-permissions` are mandatory on every invocation —
-    they are the original ADR-003 / ADR-012 invariants, now scoped to this runner.
-    Stage agents have no MCP/hook access and bypass permission prompts unattended.
+    `--dangerously-skip-permissions` is mandatory (ADR-003) — stage agents cannot
+    pause on permission prompts. `-p` and `--bare` are intentionally absent: see
+    ADR-022. `--bare` forces `ANTHROPIC_API_KEY`-only auth, which excludes OAuth /
+    keychain logins; `-p` is unnecessary because subprocess-piped stdout already
+    triggers Claude Code's non-interactive mode. `ANTHROPIC_API_KEY` /
+    `ANTHROPIC_AUTH_TOKEN` are stripped from the forwarded env so a stale or
+    invalid external key in the caller's shell never overrides the user's
+    keychain auth.
     """
 
     backend_name = "claude_code_print"
@@ -31,7 +36,7 @@ class ClaudeCodePrintRunner(AgentRunner):
         self._output_mode = output_mode
 
     def run(self, request: AgentRunRequest) -> AgentRunResult:
-        cmd = ["claude", "-p", request.prompt, "--bare", "--dangerously-skip-permissions"]
+        cmd = ["claude", request.prompt, "--dangerously-skip-permissions"]
         model = request.model or self._model
         output_mode = request.output_mode if request.output_mode != "text" else self._output_mode
         timeout_seconds = request.timeout_seconds if request.timeout_seconds is not None else self._timeout_seconds
@@ -41,6 +46,9 @@ class ClaudeCodePrintRunner(AgentRunner):
             cmd += ["--output-format", output_mode]
 
         env = os.environ.copy()
+        # Force keychain/OAuth auth — see ADR-022.
+        env.pop("ANTHROPIC_API_KEY", None)
+        env.pop("ANTHROPIC_AUTH_TOKEN", None)
         if self._sterile_context:
             # Suppress ambient auto-memory injection so pipeline runs are reproducible.
             env["CLAUDE_CODE_DISABLE_AUTO_MEMORY"] = "1"

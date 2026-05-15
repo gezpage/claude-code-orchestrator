@@ -47,10 +47,25 @@ def test_claude_runner_command_construction(monkeypatch):
     runner.run(AgentRunRequest(prompt="do the thing", stage_name="discovery"))
     cmd = captured["cmd"]
     assert cmd[0] == "claude"
-    assert "-p" in cmd
     assert "do the thing" in cmd
-    assert "--bare" in cmd
     assert "--dangerously-skip-permissions" in cmd
+    # ADR-022: --bare and -p are intentionally absent (OAuth/keychain auth path).
+    assert "--bare" not in cmd
+    assert "-p" not in cmd
+
+
+def test_claude_runner_strips_anthropic_api_key_env(monkeypatch):
+    from orchestrator.agent_runner import _claude as claude_mod
+
+    captured = _stub_popen(monkeypatch, claude_mod)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "stale-key")
+    monkeypatch.setenv("ANTHROPIC_AUTH_TOKEN", "stale-token")
+    runner = ClaudeCodePrintRunner()
+    runner.run(AgentRunRequest(prompt="x"))
+    env = captured["kwargs"]["env"]
+    # ADR-022: external-key env vars must be removed so keychain/OAuth is used.
+    assert "ANTHROPIC_API_KEY" not in env
+    assert "ANTHROPIC_AUTH_TOKEN" not in env
 
 
 def test_claude_runner_sterile_env_set_when_enabled(monkeypatch):
@@ -147,15 +162,28 @@ def test_claude_code_auto_runner_builds_expected_command(monkeypatch):
     runner.run(AgentRunRequest(prompt="do the thing"))
     cmd = captured["cmd"]
     assert cmd[0] == "claude"
-    assert "-p" in cmd
     assert "do the thing" in cmd
     assert "--permission-mode" in cmd
     assert "auto" in cmd
-    # The whole point of the auto runner: --bare and --dangerously-skip-permissions
-    # must be absent. --bare would force ANTHROPIC_API_KEY auth, --dangerously-skip-permissions
-    # would defeat the permission gating.
+    # ADR-022: --bare, -p, and --dangerously-skip-permissions are all absent.
+    # --bare forces ANTHROPIC_API_KEY auth; -p is redundant under piped stdout;
+    # --dangerously-skip-permissions would defeat the permission gating.
     assert "--bare" not in cmd
+    assert "-p" not in cmd
     assert "--dangerously-skip-permissions" not in cmd
+
+
+def test_claude_code_auto_runner_strips_anthropic_api_key_env(monkeypatch):
+    from orchestrator.agent_runner import _claude_auto as auto_mod
+
+    captured = _stub_popen(monkeypatch, auto_mod)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "stale-key")
+    monkeypatch.setenv("ANTHROPIC_AUTH_TOKEN", "stale-token")
+    runner = ClaudeCodeAutoRunner()
+    runner.run(AgentRunRequest(prompt="x"))
+    env = captured["kwargs"]["env"]
+    assert "ANTHROPIC_API_KEY" not in env
+    assert "ANTHROPIC_AUTH_TOKEN" not in env
 
 
 def test_claude_code_auto_runner_sterile_context_env(monkeypatch):

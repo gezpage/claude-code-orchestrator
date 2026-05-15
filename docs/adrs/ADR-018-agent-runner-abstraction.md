@@ -2,12 +2,20 @@
 status: accepted
 date: 2026-05-14
 affects: [run_stage.py, orchestrate.py, profile.py, state.py, agent_runner/]
+amended_by: [ADR-022]
 ---
 
 # ADR-018: Agent Runner Abstraction
 
-**Status:** Accepted
+**Status:** Accepted (amended by [ADR-022](ADR-022-claude-runners-oauth-only.md))
 **Date:** 2026-05-14
+
+> **Note.** The "`ClaudeCodePrintRunner` always passes `--bare` and
+> `--dangerously-skip-permissions`" decision below has been amended by
+> [ADR-022](ADR-022-claude-runners-oauth-only.md): `--bare` and `-p` are no
+> longer passed because they exclude OAuth/keychain auth. The rest of this
+> ADR (the runner abstraction, sterile context, per-stage backend choice)
+> still stands.
 
 ## Context
 
