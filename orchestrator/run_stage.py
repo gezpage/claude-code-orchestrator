@@ -164,7 +164,6 @@ def run_stage(
     # Re-render so the prompt link surfaces in plan.md before the agent dispatches
     # — otherwise it only appears after the stage finishes and update_plan_md re-renders.
     rerender_plan_md(run_folder)
-    stream_log_path = output_dir / f"{stage}{tag}-stream.log"
 
     t0 = time.monotonic()
     result = runner.run(
@@ -174,7 +173,6 @@ def run_stage(
             cwd=cwd,
             workspace_root=cwd or docs_root,
             writable_roots=_agent_writable_roots(docs_root, run_folder, variables),
-            stream_log_path=stream_log_path,
         )
     )
     stdout = result.stdout
@@ -206,7 +204,6 @@ def run_stage(
                 cwd=cwd,
                 workspace_root=cwd or docs_root,
                 writable_roots=_agent_writable_roots(docs_root, run_folder, variables),
-                stream_log_path=output_dir / f"{stage}{tag}-grace-stream.log",
             )
         )
         if failure := _runner_failure_signal(stage, retry_result):

@@ -11,7 +11,7 @@ from pathlib import Path
 
 from orchestrator import state as state_mod
 from orchestrator.plan._constants import _STATUS_CLASS
-from orchestrator.plan._graph import Graph, Node, load_graph, save_graph
+from orchestrator.plan._graph import Edge, Graph, Node, load_graph, save_graph
 from orchestrator.plan._helpers import (
     _PR_NOTICE_MARKER,
     _fetch_commit_messages,
@@ -80,6 +80,50 @@ def update_plan_md(
 ) -> None:
     with _plan_lock:
         _update_plan_md(run_folder, stage, status, elapsed_secs, output_summary, signal, impl_name, repo_root)
+
+
+_PR_NODE_ID = "pr"
+
+
+def set_pr_node(run_folder: Path, url: str) -> None:
+    """Insert (or refresh) the PR node spliced between the last stage and Done.
+
+    The node's label is a large-text link to ``url``. Idempotent: re-calling
+    with a different URL just refreshes the label and any existing edges.
+    """
+    with _plan_lock:
+        run_folder = Path(run_folder)
+        plan_path = run_folder / "plan.md"
+        graph = load_graph(run_folder)
+        if graph is None or not plan_path.exists() or "Done" not in graph.nodes:
+            return
+
+        url_text = url.strip()
+        large_url = (
+            f"<a href='{url_text}' "
+            "style='font-size:18px;font-weight:bold;color:#fff;text-decoration:underline'>"
+            f"{url_text}</a>"
+        )
+        if _PR_NODE_ID in graph.nodes:
+            graph.nodes[_PR_NODE_ID].raw_label = large_url
+        else:
+            graph.add_node(
+                Node(
+                    id=_PR_NODE_ID,
+                    shape="stadium",
+                    raw_label=large_url,
+                    css_class="startend",
+                    status="passed",
+                )
+            )
+            # Splice "pr" between any predecessor of Done and Done itself.
+            for edge in graph.edges:
+                if edge.steps and "Done" in edge.steps[-1]:
+                    edge.steps[-1] = [_PR_NODE_ID if n == "Done" else n for n in edge.steps[-1]]
+            graph.edges.append(Edge(steps=[[_PR_NODE_ID], ["Done"]]))
+
+        save_graph(run_folder, graph)
+        replace_mermaid_block(plan_path, graph)
 
 
 def rerender_plan_md(run_folder: Path) -> None:

@@ -31,6 +31,11 @@ class Node:
     display: str = ""
     impl: str = ""
     mode: str = ""
+    # Runner backend (e.g. claude_code_print, codex_cli, deterministic) and model
+    # name (e.g. claude-opus-4-7, gpt-5). Populated from resolved agent config so
+    # the diagram shows which agent ran each stage.
+    backend: str = ""
+    model: str = ""
     # stage_dir + file_suffix locate this node's prompt/output files in the run folder.
     # A file matches when its parent directory equals stage_dir and its stem (after
     # stripping any -prompt / -output suffix) equals f"{stage_dir}-{file_suffix}" — or

@@ -18,7 +18,7 @@ from orchestrator import state as state_mod
 from orchestrator._git import GitStateError
 from orchestrator.agent_runner import AgentConfig, AgentRunner, build_runner, resolve_agent_config
 from orchestrator.logger import OrchestratorLogger
-from orchestrator.plan import expand_nodes, init_plan_md, set_pr_notice, update_plan_md
+from orchestrator.plan import expand_nodes, init_plan_md, set_pr_node, set_pr_notice, update_plan_md
 from orchestrator.profile import ExpansionKind, Profile, StageConfig, load_profile
 from orchestrator.run_stage import _fmt_elapsed, run_deterministic_stage, run_interactive_stage, run_stage
 
@@ -926,7 +926,8 @@ def run_pipeline(
     pr_notice = None
     if preflight.create_pr:
         pr_notice = f"_will be created on completion (base: `{preflight.base_branch}`)_"
-    init_plan_md(run_folder, profile, pr_notice=pr_notice)
+    runners, agent_metadata = _build_stage_runners(profile)
+    init_plan_md(run_folder, profile, pr_notice=pr_notice, agent_metadata=agent_metadata)
 
     if not resume:
         try:
@@ -940,7 +941,6 @@ def run_pipeline(
             logger.log("pipeline", "ERROR", f"base-branch sync failed: {exc}")
             sys.exit(f"[orchestrator] [ERROR] base-branch sync failed: {exc}")
 
-    runners, agent_metadata = _build_stage_runners(profile)
     ctx = _PipelineContext(
         docs_root=docs_root,
         project=project,
@@ -1163,4 +1163,5 @@ def _finalize_pr(
         return
 
     set_pr_notice(run_folder, url)
+    set_pr_node(run_folder, url)
     logger.log("pipeline", "INFO", f"draft PR opened: {url}")

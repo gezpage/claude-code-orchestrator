@@ -18,13 +18,13 @@ reasons; nothing in the rendered output references them. See ADR-020.
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 from orchestrator.plan._constants import _CLASSDEFS
 from orchestrator.plan._graph import Edge, Graph, Node
 from orchestrator.plan._helpers import _node_label
 
-_LEGEND_NODE_ID = "legend_files"
 # Files that should never appear in the diagram (plan.md is the diagram's host).
 _LEGEND_SKIP = {"plan.md"}
 _OVERVIEW_NODE_ID = "overview"
@@ -84,18 +84,17 @@ def render_block(graph: Graph, run_folder: Path | None = None) -> str:
             lines.append(f"    {_prompt_node_decl(nid, node_files.get(nid, []), href_prefix)}")
         lines.append(f"    {_node_decl(node)}")
         if aux[nid].has_panel:
-            lines.append(f"    {_panel_node_decl(nid, node, node_files.get(nid, []), href_prefix)}")
-
-    if legend_files:
-        legend_label = _legend_label(legend_files, href_prefix)
-        lines.append(f'    {_LEGEND_NODE_ID}["{legend_label}"]')
+            lines.append(f"    {_panel_node_decl(nid, node, node_files.get(nid, []), href_prefix, run_folder)}")
 
     # Internal chain edges that wire each stage's materialised partners together.
+    # The stage-to-panel link is invisible (~~~) so the output panel butts up
+    # against its stage with no arrow between them — the panel IS the stage's
+    # output, not a downstream step.
     for nid in graph.nodes:
         if aux[nid].has_prompt:
             lines.append(f"    {nid}_prompt --> {nid}")
         if aux[nid].has_panel:
-            lines.append(f"    {nid} --> {nid}_panel")
+            lines.append(f"    {nid} ~~~ {nid}_panel")
 
     # Start --> overview is fixed; rewritten user edges connect overview onward.
     if has_overview:
@@ -103,12 +102,6 @@ def render_block(graph: Graph, run_folder: Path | None = None) -> str:
 
     for edge in graph.edges:
         lines.extend(f"    {rendered}" for rendered in _render_edge(edge, aux, has_overview))
-
-    if legend_files:
-        anchor = _legend_anchor(graph)
-        if anchor:
-            anchor_rewritten = _rewrite_source(anchor, aux, has_overview)
-            lines.append(f"    {anchor_rewritten} ~~~ {_LEGEND_NODE_ID}")
 
     lines.extend(_CLASSDEFS)
     for nid, node in graph.nodes.items():
@@ -119,11 +112,39 @@ def render_block(graph: Graph, run_folder: Path | None = None) -> str:
             lines.append(f"    class {nid}_panel json")
     if has_overview:
         lines.append(f"    class {_OVERVIEW_NODE_ID} input")
-    if legend_files:
-        lines.append(f"    class {_LEGEND_NODE_ID} pending")
 
     lines.append("```")
-    return "\n".join(lines) + "\n"
+    block = "\n".join(lines) + "\n"
+    if legend_files:
+        block += _other_files_section(legend_files, href_prefix)
+    return block
+
+
+# --- "Other files" buttons rendered below the mermaid fence -----------------
+
+_OTHER_FILES_BEGIN = "<!-- other-files-begin -->"
+_OTHER_FILES_END = "<!-- other-files-end -->"
+_OTHER_FILES_BTN_STYLE = (
+    "display:inline-block;padding:4px 10px;margin:2px 3px;background:#1f2937;"
+    "color:#d1d5db;border:1px solid #374151;border-radius:4px;text-decoration:none;"
+    "font-size:12px;font-family:sans-serif"
+)
+
+
+def _other_files_section(legend_files: list[Path], href_prefix: str) -> str:
+    """Render the unmatched-files button strip placed outside the mermaid fence.
+
+    Wrapped in HTML comment markers so subsequent renders can identify and
+    replace it without parsing the surrounding plan.md.
+    """
+    buttons = "".join(_other_file_button(f, href_prefix) for f in legend_files)
+    return f"\n{_OTHER_FILES_BEGIN}\n<div>{buttons}</div>\n{_OTHER_FILES_END}\n"
+
+
+def _other_file_button(file_path: Path, href_prefix: str) -> str:
+    url = _file_url(file_path, href_prefix)
+    display = _link_display(file_path.name)
+    return f"<a href='{url}' style='{_OTHER_FILES_BTN_STYLE};'>{display}</a>"
 
 
 # --- materialised-node helpers ----------------------------------------------
@@ -212,10 +233,11 @@ def _label_for(node: Node) -> str:
         return title
     return _node_label(
         node.display,
-        node.impl,
         status=node.status,
         elapsed_secs=node.elapsed_secs,
         mode=node.mode,
+        backend=node.backend,
+        model=node.model,
     )
 
 
@@ -236,12 +258,12 @@ def _prompt_node_decl(nid: str, files: list[Path], href_prefix: str) -> str:
     return f"{nid}_prompt[/\"<span style='{_TITLE_STYLE};'>{inner}</span>\"/]"
 
 
-def _panel_node_decl(nid: str, node: Node, files: list[Path], href_prefix: str) -> str:
-    label = _panel_label(node, files, href_prefix)
+def _panel_node_decl(nid: str, node: Node, files: list[Path], href_prefix: str, run_folder: Path | None) -> str:
+    label = _panel_label(node, files, href_prefix, run_folder)
     return f'{nid}_panel["{label}"]'
 
 
-def _panel_label(node: Node, files: list[Path], href_prefix: str) -> str:
+def _panel_label(node: Node, files: list[Path], href_prefix: str, run_folder: Path | None) -> str:
     output_file = next((f for f in files if f.name.endswith("-output.md")), None)
     other_files = [f for f in files if not (f.name.endswith("-output.md") or f.name.endswith("-prompt.md"))]
 
@@ -249,7 +271,7 @@ def _panel_label(node: Node, files: list[Path], href_prefix: str) -> str:
     if output_file is not None:
         url = _file_url(output_file, href_prefix)
         parts.append(f"<a href='{url}' style='{_OUTPUT_HEADER_STYLE};'>Output</a><br/><br/>")
-    parts.append(_panel_json(node))
+    parts.append(_panel_body(node, output_file, run_folder))
     if other_files:
         parts.append("<br/><br/>")
         parts.append(_join_pills(other_files, href_prefix))
@@ -257,23 +279,62 @@ def _panel_label(node: Node, files: list[Path], href_prefix: str) -> str:
     return f"<div style='{_PANEL_DIV_STYLE};'>{''.join(parts)}</div>"
 
 
-# Status → placeholder JSON body. The orchestrator doesn't have the real signal
-# JSON at render time (signals are consumed once and not re-read — see ADR-004),
-# so the panel shows a status-derived stub; the Output anchor at the top links
-# to the full output file for the actual content.
 _PANEL_STATUS_TEXT = {
-    "passed": "ok",
-    "in_progress": "in_progress",
+    "passed": "",
+    "in_progress": "in progress…",
     "blocked": "blocked",
     "failed": "blocked",
     "pending": "pending",
     "skipped": "skipped",
 }
 
+# Cap the prose summary at a length that keeps the panel readable in the diagram.
+# Longer prose stays accessible via the Output link.
+_PANEL_SUMMARY_MAX_CHARS = 360
 
-def _panel_json(node: Node) -> str:
-    status_text = _PANEL_STATUS_TEXT.get(node.status, "pending")
-    return f"{{<br/>&nbsp;&nbsp;&quot;status&quot;: &quot;{status_text}&quot;<br/>}}"
+
+def _panel_body(node: Node, output_file: Path | None, run_folder: Path | None) -> str:
+    """Render the panel body: the stage's prose output if available, else a status word.
+
+    The output file is read fresh on each render — this is bounded (capped at
+    _PANEL_SUMMARY_MAX_CHARS) and discarded immediately after writing the diagram,
+    so ADR-004's no-cross-stage-content invariant still holds.
+    """
+    if output_file is not None and run_folder is not None:
+        prose = _extract_output_prose(run_folder / output_file)
+        if prose:
+            return _escape_mermaid_label(prose)
+    return _PANEL_STATUS_TEXT.get(node.status, "pending") or "pending"
+
+
+_JSON_FENCE_RE = re.compile(r"^```json\n.*?\n```\s*$", re.DOTALL | re.MULTILINE)
+_SIGNAL_SENTINEL_RE = re.compile(r"^SIGNAL_JSON:.*$", re.MULTILINE)
+
+
+def _extract_output_prose(output_path: Path) -> str:
+    """Return a truncated prose summary from a stage's *-output.md file.
+
+    Strips fenced ```json``` blocks (where the formatter places the signal) and
+    any bare SIGNAL_JSON: lines; keeps the first non-empty paragraph; truncates
+    to a panel-friendly length with an ellipsis marker.
+    """
+    try:
+        text = output_path.read_text()
+    except OSError:
+        return ""
+    text = _JSON_FENCE_RE.sub("", text)
+    text = _SIGNAL_SENTINEL_RE.sub("", text)
+    paragraphs = [p.strip() for p in text.split("\n\n") if p.strip()]
+    if not paragraphs:
+        return ""
+    summary = paragraphs[0]
+    if len(summary) > _PANEL_SUMMARY_MAX_CHARS:
+        summary = summary[:_PANEL_SUMMARY_MAX_CHARS].rstrip() + "…"
+    return summary
+
+
+def _escape_mermaid_label(text: str) -> str:
+    return text.replace("&", "&amp;").replace('"', "&quot;").replace("\n", "<br/>")
 
 
 # --- legend & file matching -------------------------------------------------
@@ -345,20 +406,6 @@ def _overview_url(run_folder: Path) -> str:
     project = tail[1]
     feature = tail[4]
     return f"/#projects/{project}/features/{feature}/overview.md"
-
-
-def _legend_anchor(graph: Graph) -> str | None:
-    """Pick the node to invisibly chain the legend off so it lands as a sibling of Done."""
-    if "Done" not in graph.nodes:
-        return None
-    for edge in graph.edges:
-        steps = edge.steps
-        for i in range(1, len(steps)):
-            if "Done" in steps[i] and steps[i - 1]:
-                return steps[i - 1][0]
-    # No predecessor wired yet — fall back to Done itself so the legend at least
-    # ends up downstream of the flow instead of floating at the top.
-    return "Done"
 
 
 def _scan_files(
@@ -455,12 +502,6 @@ def _file_sort_key(rel: Path) -> tuple[int, str]:
     return (2, name)
 
 
-def _legend_label(legend_files: list[Path], href_prefix: str) -> str:
-    title = f"<span style='{_TITLE_STYLE};'>Other files</span>"
-    pills = _join_pills(legend_files, href_prefix)
-    return f"{title}<br/>{pills}"
-
-
 def write_plan_md(plan_path, header: str, graph: Graph) -> None:
     """Create plan.md with header + rendered mermaid block. Used by init only."""
     plan_path = Path(plan_path)
@@ -473,11 +514,13 @@ def replace_mermaid_block(plan_path, graph: Graph) -> None:
     """Replace the existing ```mermaid``` block in plan.md with a fresh render.
 
     Preserves everything before and after the fence (run header, stage sections,
-    run summary, file manifest). If no fence is found, the file is left
-    unchanged — callers should handle creation themselves.
+    run summary, file manifest). Also strips any prior ``other-files`` section
+    placed directly below the fence so a single replace call refreshes both the
+    diagram and its trailing button strip. If no fence is found, the file is
+    left unchanged — callers should handle creation themselves.
     """
     plan_path = Path(plan_path)
-    content = plan_path.read_text()
+    content = _strip_other_files_section(plan_path.read_text())
     start = content.find("```mermaid")
     if start < 0:
         return
@@ -490,3 +533,22 @@ def replace_mermaid_block(plan_path, graph: Graph) -> None:
         end += 1
     new_block = render_block(graph, plan_path.parent)
     plan_path.write_text(content[:start] + new_block + content[end:])
+
+
+def _strip_other_files_section(content: str) -> str:
+    """Remove any prior `<!-- other-files-begin -->...<!-- other-files-end -->` block,
+    along with a single trailing newline, so the next render writes a fresh strip."""
+    begin = content.find(_OTHER_FILES_BEGIN)
+    if begin < 0:
+        return content
+    end_marker = content.find(_OTHER_FILES_END, begin)
+    if end_marker < 0:
+        return content
+    end = end_marker + len(_OTHER_FILES_END)
+    if end < len(content) and content[end] == "\n":
+        end += 1
+    # Also drop the blank line that the section's leading "\n" added before it.
+    prefix = content[:begin]
+    if prefix.endswith("\n\n"):
+        prefix = prefix[:-1]
+    return prefix + content[end:]
