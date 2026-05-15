@@ -43,7 +43,7 @@ If the diff path is missing, unreadable, or not a full git diff file:
 - emit a blocking finding that the review input is invalid
 - do not continue with speculative review
 
-{% if verify_md_path %}
+{% if verify_md_path is defined and verify_md_path %}
 ## Deterministic verification context
 
 Read `{{ verify_md_path }}` before you start. It is the output of an automated verification stage that ran the project's build, tests, lint, typecheck, and toolchain-specific probes against the diff under review.

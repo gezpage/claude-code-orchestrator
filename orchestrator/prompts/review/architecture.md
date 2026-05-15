@@ -56,7 +56,7 @@ You may run cheap read-only verification commands where useful, such as:
 
 Do not run expensive full test suites unless needed to confirm a blocking architectural concern.
 
-{% if verify_md_path %}
+{% if verify_md_path is defined and verify_md_path %}
 ## Deterministic verification context
 
 Read `{{ verify_md_path }}` for the automated verification results (build, tests, lint, typecheck, probes). Architecture concerns rarely surface as deterministic failures, but a failing build or probe finding ("dependencies declared but go.sum missing", "no-op lint script") often signals structural issues — surface those as blocking when they are.

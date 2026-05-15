@@ -240,6 +240,11 @@ def run(
 
     signals = state_mod.load_signals(run_folder)
     context_path = signals.get("specification", {}).get("context_path", "")
+    verification_signal = signals.get("verification", {})
+    if not isinstance(verification_signal, dict):
+        verification_signal = {}
+    verify_md_path = verification_signal.get("verify_md_path", "")
+    verification_status = verification_signal.get("verification_status", "")
 
     reviewer_statuses = dict(review_signal.get("reviewer_statuses", {}))
     changes_requested = [r for r, s in reviewer_statuses.items() if s == "changes-requested"]
@@ -351,6 +356,8 @@ def run(
                 "round": str(round_num),
                 "context_path": context_path,
                 "repo_root": repo_root,
+                "verify_md_path": verify_md_path,
+                "verification_status": verification_status,
             }
             review_t0 = time.monotonic()
             sig = run_stage(
