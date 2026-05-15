@@ -465,6 +465,41 @@ def test_resolve_agent_config_unknown_key_raises():
         resolve_agent_config({"bogus": True}, None)
 
 
+def test_resolve_agent_config_drops_profile_model_when_stage_switches_backend():
+    """A Claude model at profile level must not bleed into a stage that switches to
+    codex (or vice versa). Models are CLI-specific — passing `claude-opus-4-7` to
+    `codex exec -m ...` produces a 400 from Codex's account-level model whitelist."""
+    cfg = resolve_agent_config(
+        {"backend": "claude_code_auto", "model": "claude-opus-4-7"},
+        {"backend": "codex_cli", "permission_mode": "read-only"},
+    )
+    assert cfg.backend == "codex_cli"
+    assert cfg.model is None
+    assert cfg.permission_mode == "read-only"
+
+
+def test_resolve_agent_config_drops_profile_permission_mode_when_stage_switches_backend():
+    """permission_mode is also backend-specific (claude's modes != codex's modes)."""
+    cfg = resolve_agent_config(
+        {"backend": "codex_cli", "permission_mode": "workspace-write"},
+        {"backend": "claude_code_print"},
+    )
+    assert cfg.backend == "claude_code_print"
+    assert cfg.permission_mode is None
+
+
+def test_resolve_agent_config_keeps_non_backend_specific_keys_across_backend_switch():
+    """Generic keys (timeout_seconds, sterile_context) survive a backend switch — they
+    don't carry backend-specific semantics."""
+    cfg = resolve_agent_config(
+        {"backend": "claude_code_auto", "timeout_seconds": 120, "sterile_context": False},
+        {"backend": "codex_cli"},
+    )
+    assert cfg.backend == "codex_cli"
+    assert cfg.timeout_seconds == 120
+    assert cfg.sterile_context is False
+
+
 def test_build_runner_claude_default():
     runner = build_runner(AgentConfig())
     assert isinstance(runner, ClaudeCodePrintRunner)
