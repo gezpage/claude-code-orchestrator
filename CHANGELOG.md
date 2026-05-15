@@ -7,6 +7,9 @@ Format: [Unreleased] at the top, dated releases below, newest first.
 
 ## [Unreleased]
 
+### Changed
+- 2026-05-15: Plan mermaid renderer now materialises a `Prompt` input parallelogram and a `JSON`-style panel around every stage, plus a single `Overview` input between `Start` and the first stage. The panel folds the previous Output parallelogram into a bold header, embeds a status-derived JSON stub, and surfaces other stage artefacts as pill-style buttons. Stage labels are slimmed to a prominent title and a compact `impl · Mode · ⏱` sub-line. Subgraph wrappers are no longer rendered. Edges are rewritten through the materialised partners (`A_panel --> B_prompt`). See ADR-020.
+
 ### Fixed
 - 2026-05-15: Review-cycle re-review prompts now receive the deterministic verification signal context (`verify_md_path` and `verification_status`) from `_state.yaml`, and review prompts tolerate runs without verification context. This fixes the `minimal-codex` round-2 render failure where `verify_md_path` was undefined.
 - 2026-05-15: Review cycles now detect commits made by `fix-implementation` via `git rev-list` rather than trusting the agent's `commit_hashes` self-report, so a stage that commits but under-reports its SHAs (observed with the Codex backend emitting `commit_hashes: []` despite the work being done) no longer aborts the re-review with a misleading "no valid git diff" error. When the agent genuinely makes no commits, the abort message now points at the fix-implementation output file so the operator can see why. When `review-log.md` is missing the expected reviewer sections, the fix prompt's `changes_brief` falls back to a brief rendered from the in-memory findings so the agent still has actionable input.

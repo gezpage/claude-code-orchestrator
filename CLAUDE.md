@@ -28,6 +28,8 @@ Developer-facing reference. Read before touching any orchestrator code.
 
 - **The mermaid block in `plan.md` is a projection of the `Graph` in `orchestrator/plan/_graph.py`** — persisted as `_plan_graph.yaml`. All mutations go: load graph → mutate typed objects → save → re-render via `render_block`. Do not parse or rewrite mermaid text with regex; the renderer is the only code that knows mermaid syntax. See ADR-016.
 
+- **`_render.py` materialises `{id}_prompt` and `{id}_panel` partner nodes around each rect-shape stage at render time, plus a single `overview` node before the first stage.** Edge endpoints are rewritten on serialisation (`A → B` becomes `A_panel --> B_prompt`; `Start → first` is split through `overview`; chain edges are broken into per-pair edges). The graph model itself contains no prompt/panel/overview nodes — they exist only in the rendered output. New behaviour around stage edges goes through this rewriting, not through new graph edges. See ADR-020.
+
 - **Deterministic stages (`mode: deterministic`) are dispatched through `run_deterministic_stage()` in `run_stage.py` — not `run_stage()`.** They execute Python in-process and never invoke Claude. The `--bare` / `--dangerously-skip-permissions` invariants apply only to `run_stage()` and have no meaning for deterministic stages. See ADR-017.
 
 - **Toolchain-specific verification logic lives in `orchestrator/verifiers/recipes/` (data) and `orchestrator/verifiers/probes/` (Python).** Orchestration code (`orchestrate.py`, `run_stage.py`, profile parsing) must contain no `if node` / `if go` / `if python` branches. Adding a new ecosystem means adding a recipe and any probes it needs — nothing else. See ADR-017.

@@ -60,8 +60,10 @@ def test_init_plan_md_alignment_gate_shape(tmp_path):
     )
     init_plan_md(run_folder, profile)
     content = (run_folder / "plan.md").read_text()
-    # Hex shape is preserved; the label now also carries a Mode line.
-    assert 'alignment{{"✋ Alignment' in content
+    # Hex shape is preserved; the title is wrapped in the prominent-title span
+    # used by every node, and the Mode line is appended below.
+    assert "alignment{{" in content
+    assert "✋ Alignment" in content
     assert "Mode: interactive" in content
     assert "class alignment gate" in content
 
@@ -86,7 +88,8 @@ def test_init_plan_md_review_stage_with_prompts(tmp_path):
     content = (run_folder / "plan.md").read_text()
     assert "review_arch[" in content
     assert "review_security[" in content
-    assert "review --> review_arch & review_security" in content
+    # Renderer rewrites edge endpoints to the materialised prompt/panel partners.
+    assert "review_panel --> review_arch_prompt & review_security_prompt" in content
 
 
 def test_init_plan_md_review_fan_in_to_next_stage(tmp_path):
@@ -109,9 +112,10 @@ def test_init_plan_md_review_fan_in_to_next_stage(tmp_path):
     )
     init_plan_md(run_folder, profile)
     content = (run_folder / "plan.md").read_text()
-    assert "review --> review_arch & review_security" in content
-    assert "review_arch & review_security --> harvest" in content
+    assert "review_panel --> review_arch_prompt & review_security_prompt" in content
+    assert "review_arch_panel & review_security_panel --> harvest_prompt" in content
     assert "review --> harvest" not in content
+    assert "review_panel --> harvest_prompt" not in content
 
 
 def test_init_plan_md_start_done_nodes(tmp_path):
@@ -123,8 +127,11 @@ def test_init_plan_md_start_done_nodes(tmp_path):
     assert "Done([" in content
     assert "class Start startend" in content
     assert "class Done startend" in content
-    assert "Start --> discovery" in content
-    assert "specification --> Done" in content
+    # Start now passes through the overview input before the first stage's prompt.
+    assert "Start --> overview" in content
+    assert "overview --> discovery_prompt" in content
+    # Done is reached from the last stage's panel, not the stage node.
+    assert "specification_panel --> Done" in content
 
 
 def test_init_plan_md_start_done_single_stage(tmp_path):
@@ -132,8 +139,9 @@ def test_init_plan_md_start_done_single_stage(tmp_path):
     profile = _simple_profile("discovery")
     init_plan_md(run_folder, profile)
     content = (run_folder / "plan.md").read_text()
-    assert "Start --> discovery" in content
-    assert "discovery --> Done" in content
+    assert "Start --> overview" in content
+    assert "overview --> discovery_prompt" in content
+    assert "discovery_panel --> Done" in content
 
 
 def test_init_plan_md_start_done_with_review(tmp_path):
@@ -149,8 +157,9 @@ def test_init_plan_md_start_done_with_review(tmp_path):
     )
     init_plan_md(run_folder, profile)
     content = (run_folder / "plan.md").read_text()
-    assert "harvest --> Done" in content
+    assert "harvest_panel --> Done" in content
     assert "review --> Done" not in content
+    assert "review_panel --> Done" not in content
 
 
 def test_update_plan_md_run_summary_section(tmp_path):
@@ -189,14 +198,16 @@ def test_update_plan_md_file_manifest_timestamp_column(tmp_path):
 
 
 def test_expand_nodes_tracks_rewrites_start_edge(tmp_path):
-    """Start --> discovery must be rewritten to Start --> discovery_planning after expansion."""
+    """The Start-anchored edge target must shift from discovery to discovery_planning after expansion."""
     run_folder = _make_run_folder(tmp_path)
     init_plan_md(run_folder, _discovery_profile())
-    assert "Start --> discovery" in (run_folder / "plan.md").read_text()
+    # Initial layout: Start → overview → discovery_prompt
+    assert "overview --> discovery_prompt" in (run_folder / "plan.md").read_text()
     expand_nodes(run_folder, _discovery_stage(), tracks=[{"name": "risk"}])
     content = (run_folder / "plan.md").read_text()
-    assert "Start --> discovery_planning" in content
-    assert "Start --> discovery\n" not in content
+    # After expansion: the entry edge now targets the materialised planning prompt.
+    assert "overview --> discovery_planning_prompt" in content
+    assert "overview --> discovery_prompt" not in content
 
 
 def test_update_plan_md_commit_messages_in_section(tmp_path):
@@ -236,16 +247,20 @@ def test_expand_nodes_tracks_multi_track(tmp_path):
     run_folder = _make_run_folder(tmp_path)
     init_plan_md(run_folder, _discovery_profile())
     tracks = [{"name": "architecture"}, {"name": "product-requirements"}]
-    result = expand_nodes(run_folder, _discovery_stage(), tracks=tracks)
+    expand_nodes(run_folder, _discovery_stage(), tracks=tracks)
     content = (run_folder / "plan.md").read_text()
     assert "discovery_planning[" in content
     assert "discovery_architecture[" in content
     assert "discovery_product_requirements[" in content
     assert "discovery_fanout" in content
     assert "discovery_fanin" in content
-    assert "discovery_planning --> discovery_fanout" in content
-    assert "discovery_fanout --> discovery_architecture & discovery_product_requirements" in content
-    assert "discovery_architecture & discovery_product_requirements --> discovery_fanin" in content
+    # Fan-out/in circles have no prompt/panel partners; rect tracks do, so edges
+    # touching tracks rewrite to the materialised endpoints.
+    assert "discovery_planning_panel --> discovery_fanout" in content
+    assert "discovery_fanout --> discovery_architecture_prompt & discovery_product_requirements_prompt" in content
+    assert "discovery_architecture_panel & discovery_product_requirements_panel --> discovery_fanin" in content
+    # alignment is an interactive hex gate (no prompt/panel) so the edge into it
+    # keeps the bare target id.
     assert "discovery_fanin --> alignment" in content
     assert "class discovery_planning complete" in content
     assert "class discovery_architecture pending" in content
@@ -265,7 +280,10 @@ def test_expand_nodes_tracks_single_track(tmp_path):
     assert "discovery_risk[" in content
     assert "discovery_fanout" not in content
     assert "discovery_fanin" not in content
-    assert "discovery_planning --> discovery_risk --> alignment" in content
+    # Chain edges are emitted as one mermaid edge per consecutive pair (so a
+    # middle node can serve as both source-with-panel and target-with-prompt).
+    assert "discovery_planning_panel --> discovery_risk_prompt" in content
+    assert "discovery_risk_panel --> alignment" in content
     assert "class discovery_planning complete" in content
     assert "class discovery_risk pending" in content
 
@@ -318,7 +336,9 @@ def test_expand_nodes_slices_replaces_node_and_chain(tmp_path):
     assert "impl_2[" in content
     assert "impl_3[" in content
     assert '    implementation["' not in content
-    assert "impl_1 --> impl_2 --> impl_3" in content
+    # The slice chain is emitted as per-pair edges, with rewritten panel/prompt endpoints.
+    assert "impl_1_panel --> impl_2_prompt" in content
+    assert "impl_2_panel --> impl_3_prompt" in content
     assert "class impl_1 pending" in content
     assert "class implementation" not in content
 
@@ -392,8 +412,8 @@ def test_add_fix_cycle_node_cycle1_single_reviewer(tmp_path):
     content = (run_folder / "plan.md").read_text()
     assert "fix_impl_1[" in content
     assert "review_tests_2[" in content
-    assert "review_tests --> fix_impl_1" in content
-    assert "fix_impl_1 --> review_tests_2" in content
+    assert "review_tests_panel --> fix_impl_1_prompt" in content
+    assert "fix_impl_1_panel --> review_tests_2_prompt" in content
     assert "class fix_impl_1 active" in content
     assert "class review_tests_2 pending" in content
 
@@ -406,8 +426,8 @@ def test_add_fix_cycle_node_cycle2_sources_previous_round(tmp_path):
     content = (run_folder / "plan.md").read_text()
     assert "fix_impl_2[" in content
     assert "review_tests_3[" in content
-    assert "review_tests_2 --> fix_impl_2" in content
-    assert "fix_impl_2 --> review_tests_3" in content
+    assert "review_tests_2_panel --> fix_impl_2_prompt" in content
+    assert "fix_impl_2_panel --> review_tests_3_prompt" in content
 
 
 def test_add_fix_cycle_node_multiple_reviewers(tmp_path):
@@ -431,8 +451,8 @@ def test_add_fix_cycle_node_multiple_reviewers(tmp_path):
     assert "fix_impl_1[" in content
     assert "review_architecture_2[" in content
     assert "review_tests_2[" in content
-    assert "review_architecture & review_tests --> fix_impl_1" in content
-    assert "fix_impl_1 --> review_architecture_2 & review_tests_2" in content
+    assert "review_architecture_panel & review_tests_panel --> fix_impl_1_prompt" in content
+    assert "fix_impl_1_panel --> review_architecture_2_prompt & review_tests_2_prompt" in content
 
 
 def test_add_fix_cycle_node_redirects_failing_reviewer_away_from_downstream(tmp_path):
@@ -455,10 +475,12 @@ def test_add_fix_cycle_node_redirects_failing_reviewer_away_from_downstream(tmp_
     init_plan_md(run_folder, profile)
     add_fix_cycle_node(run_folder, cycle_num=1, reviewers=["architecture"])
     content = (run_folder / "plan.md").read_text()
-    assert "review_implementation & review_tests --> harvest" in content
-    assert "review_architecture & review_implementation & review_tests --> harvest" not in content
-    assert "review_architecture --> fix_impl_1" in content
-    assert "review_architecture_2 --> harvest" in content
+    assert "review_implementation_panel & review_tests_panel --> harvest_prompt" in content
+    assert (
+        "review_architecture_panel & review_implementation_panel & review_tests_panel --> harvest_prompt" not in content
+    )
+    assert "review_architecture_panel --> fix_impl_1_prompt" in content
+    assert "review_architecture_2_panel --> harvest_prompt" in content
 
 
 def test_add_fix_cycle_node_removes_edge_when_all_reviewers_fail(tmp_path):
@@ -480,8 +502,8 @@ def test_add_fix_cycle_node_removes_edge_when_all_reviewers_fail(tmp_path):
     init_plan_md(run_folder, profile)
     add_fix_cycle_node(run_folder, cycle_num=1, reviewers=["architecture", "tests"])
     content = (run_folder / "plan.md").read_text()
-    assert "review_architecture & review_tests --> harvest" not in content
-    assert "review_architecture_2 & review_tests_2 --> harvest" in content
+    assert "review_architecture_panel & review_tests_panel --> harvest_prompt" not in content
+    assert "review_architecture_2_panel & review_tests_2_panel --> harvest_prompt" in content
 
 
 def test_add_fix_cycle_node_cycle2_re_redirects_through_new_fix(tmp_path):
@@ -490,9 +512,9 @@ def test_add_fix_cycle_node_cycle2_re_redirects_through_new_fix(tmp_path):
     add_fix_cycle_node(run_folder, cycle_num=1, reviewers=["tests"])
     add_fix_cycle_node(run_folder, cycle_num=2, reviewers=["tests"])
     content = (run_folder / "plan.md").read_text()
-    assert "review_tests_2 --> harvest" not in content
-    assert "review_tests_2 --> fix_impl_2" in content
-    assert "review_tests_3 --> harvest" in content
+    assert "review_tests_2_panel --> harvest_prompt" not in content
+    assert "review_tests_2_panel --> fix_impl_2_prompt" in content
+    assert "review_tests_3_panel --> harvest_prompt" in content
 
 
 def test_add_fix_cycle_node_noop_when_no_plan(tmp_path):
@@ -539,10 +561,16 @@ def test_render_inlines_file_links_per_node(tmp_path):
     # Trigger a re-render through the public API.
     update_plan_md(run_folder, "specification", "passed", elapsed_secs=10)
     content = (run_folder / "plan.md").read_text()
-    style = "color:inherit;text-decoration:underline"
-    assert f"<a href='specification/specification-prompt.md' style='{style}'>Prompt</a>" in content
-    assert f"<a href='specification/specification-output.md' style='{style}'>Output</a>" in content
-    assert f"<a href='specification/prd.md' style='{style}'>prd</a>" in content
+    # Prompt link lives inside the materialised prompt input parallelogram.
+    assert (
+        "<a href='specification/specification-prompt.md' style='color:inherit;text-decoration:underline;'>Prompt</a>"
+    ) in content
+    # Output link is the bold header at the top of the panel — distinct style.
+    assert "<a href='specification/specification-output.md' style='font-size:16px;font-weight:bold" in content
+    assert ">Output</a>" in content
+    # Other stage artefacts render as pill-style buttons inside the panel.
+    assert "<a href='specification/prd.md' style='display:inline-block;" in content
+    assert ">prd</a>" in content
 
 
 def test_render_legend_floats_after_main_flow(tmp_path):
@@ -555,15 +583,15 @@ def test_render_legend_floats_after_main_flow(tmp_path):
     content = (run_folder / "plan.md").read_text()
     # No more "Legend" subgraph wrapper — the bare node sits in the diagram body.
     assert 'subgraph sg_legend["Legend"]' not in content
-    assert "Other files<br/>" in content
+    assert "Other files" in content
     # Extensions are stripped from the link display.
     assert "<a href='run.log'" in content
     assert ">run</a>" in content
     assert "<a href='stray.txt'" in content
     assert ">stray</a>" in content
-    # Legend hangs off Done's predecessor so mermaid lays it out as a sibling of Done
-    # rather than floating it above the flow.
-    assert "specification ~~~ legend_files" in content
+    # Legend hangs off the predecessor of Done; that predecessor is now the
+    # last stage's materialised panel.
+    assert "specification_panel ~~~ legend_files" in content
 
 
 def test_render_reviewer_subnode_links_to_per_reviewer_files(tmp_path):
@@ -575,9 +603,10 @@ def test_render_reviewer_subnode_links_to_per_reviewer_files(tmp_path):
     (review_dir / "review-tests-output.md").write_text("o")
     update_plan_md(run_folder, "review_tests", "passed", elapsed_secs=5)
     content = (run_folder / "plan.md").read_text()
-    style = "color:inherit;text-decoration:underline"
-    assert f"<a href='review/review-tests-prompt.md' style='{style}'>Prompt</a>" in content
-    assert f"<a href='review/review-tests-output.md' style='{style}'>Output</a>" in content
+    assert (
+        "<a href='review/review-tests-prompt.md' style='color:inherit;text-decoration:underline;'>Prompt</a>"
+    ) in content
+    assert "<a href='review/review-tests-output.md' style='font-size:16px;font-weight:bold" in content
 
 
 def test_render_slice_node_links_to_implementation_files(tmp_path):
@@ -591,9 +620,13 @@ def test_render_slice_node_links_to_implementation_files(tmp_path):
     (impl_dir / "implementation-impl_1-output.md").write_text("o")
     update_plan_md(run_folder, "impl_1", "passed", elapsed_secs=5)
     content = (run_folder / "plan.md").read_text()
-    style = "color:inherit;text-decoration:underline"
-    assert f"<a href='implementation/implementation-impl_1-prompt.md' style='{style}'>Prompt</a>" in content
-    assert f"<a href='implementation/implementation-impl_1-output.md' style='{style}'>Output</a>" in content
+    assert (
+        "<a href='implementation/implementation-impl_1-prompt.md' "
+        "style='color:inherit;text-decoration:underline;'>Prompt</a>"
+    ) in content
+    assert (
+        "<a href='implementation/implementation-impl_1-output.md' style='font-size:16px;font-weight:bold"
+    ) in content
 
 
 def test_render_link_hrefs_use_docs_root_prefix(tmp_path):

@@ -1,4 +1,20 @@
-"""Renderer: serialize a :class:`Graph` to a complete mermaid fenced block."""
+"""Renderer: serialize a :class:`Graph` to a complete mermaid fenced block.
+
+The renderer materialises additional nodes around each stage in the graph
+(prompt input, output/JSON panel, plus a single Overview node before the
+first stage) without changing the underlying graph model. Stage nodes in the
+graph keep their original ids; the renderer derives ``{id}_prompt`` and
+``{id}_panel`` partners and rewrites edge endpoints so user-defined edges
+connect through the materialised structure:
+
+* ``A → B`` becomes ``A_panel --> B_prompt`` (when both stages have partners)
+* ``Start → first`` is split into ``Start --> overview`` + ``overview --> first_prompt``
+* ``B_prompt --> B`` and ``B --> B_panel`` are emitted as internal chain edges
+
+The graph's :class:`Subgraph` records are ignored at render time. They remain
+in the model only because expansion code still creates them for historical
+reasons; nothing in the rendered output references them. See ADR-020.
+"""
 
 from __future__ import annotations
 
@@ -11,68 +27,98 @@ from orchestrator.plan._helpers import _node_label
 _LEGEND_NODE_ID = "legend_files"
 # Files that should never appear in the diagram (plan.md is the diagram's host).
 _LEGEND_SKIP = {"plan.md"}
-# `color: inherit` on the anchor keeps link text in the node's white class colour
-# instead of the browser's default link blue, which is unreadable on the green/orange
-# status backgrounds.
-_LINK_STYLE = "color:inherit;text-decoration:underline"
+_OVERVIEW_NODE_ID = "overview"
+
+# Prompt-link styling lives inside the prompt parallelogram label. color:inherit
+# defers to the node's class fill so the link reads cleanly on the blue input
+# background.
+_PROMPT_LINK_STYLE = "color:inherit;text-decoration:underline"
+
+# Output-link styling for the bold header at the top of each stage panel. The
+# pale green colour matches the prior output-parallelogram fill so the user can
+# still recognise it as the "output" anchor.
+_OUTPUT_HEADER_STYLE = "font-size:16px;font-weight:bold;color:#dcfce7;text-decoration:underline;font-family:sans-serif"
+
+# Pill button styling for non-prompt/output artifact links inside the panel.
+_PILL_STYLE = (
+    "display:inline-block;padding:1px 6px;margin:2px 1px;background:rgba(255,255,255,0.18);"
+    "color:inherit;border-radius:3px;text-decoration:none;font-size:11px;font-family:sans-serif"
+)
+
+# Wrapper div for the panel content — monospace JSON-friendly font, left-aligned.
+_PANEL_DIV_STYLE = "text-align:left;font-family:ui-monospace,monospace;font-size:11px;line-height:1.45;color:#d1d5db"
+
+# Big prominent first line used by Start/Done/Overview/Prompt labels (stage
+# nodes get the same span via _node_label).
+_TITLE_STYLE = "font-size:18px;font-weight:bold"
 
 
 def render_block(graph: Graph, run_folder: Path | None = None) -> str:
     """Render the full ```mermaid...``` fenced block, ending with a trailing newline.
 
     When ``run_folder`` is provided, files in the run folder are matched to nodes
-    via ``Node.stage_dir`` / ``Node.file_suffix`` and embedded as clickable links
-    inside each node's label. Files that don't match any node are surfaced in a
-    separate "Other files" node placed near the bottom of the diagram.
+    via ``Node.stage_dir`` / ``Node.file_suffix`` and surfaced as links on the
+    appropriate materialised node (prompt files on the prompt input, output and
+    artifact files on the panel). Files that don't match any node are surfaced
+    in a separate "Other files" node placed near the bottom of the diagram.
     """
     node_files, legend_files = _scan_files(graph, run_folder) if run_folder else ({}, [])
     href_prefix = _href_prefix(run_folder) if run_folder else ""
+    overview_url = _overview_url(run_folder) if run_folder else ""
+
+    aux = _aux_index(graph.nodes)
+    has_overview = "Start" in graph.nodes
 
     lines: list[str] = ["```mermaid"]
     if graph.init_directive:
         lines.append(graph.init_directive)
     lines.append("flowchart TD")
 
-    # Nodes outside any subgraph come first (Start, Done, etc.)
-    for node in graph.nodes.values():
-        if node.subgraph is None:
-            lines.append(f"    {_node_decl(node, node_files.get(node.id, []), href_prefix)}")
+    if has_overview:
+        lines.append(f"    {_overview_node_decl(overview_url)}")
 
-    # Then each subgraph with its member nodes.
-    for sg in graph.subgraphs.values():
-        members = [n for n in graph.nodes.values() if n.subgraph == sg.id]
-        if not members:
-            continue
-        lines.append(f'    subgraph {sg.id}["{sg.display}"]')
-        for node in members:
-            lines.append(f"    {_node_decl(node, node_files.get(node.id, []), href_prefix)}")
-        lines.append("    end")
+    # Each stage's prompt/stage/panel triple is emitted together so the file
+    # reads top-to-bottom in chain order.
+    for nid, node in graph.nodes.items():
+        if aux[nid].has_prompt:
+            lines.append(f"    {_prompt_node_decl(nid, node_files.get(nid, []), href_prefix)}")
+        lines.append(f"    {_node_decl(node)}")
+        if aux[nid].has_panel:
+            lines.append(f"    {_panel_node_decl(nid, node, node_files.get(nid, []), href_prefix)}")
 
-    # "Other files" floats as a bare node (no subgraph wrapper) at the bottom of the
-    # diagram. Anchoring it to Done's predecessor below makes it a sibling of Done so
-    # mermaid lays it out alongside, not above.
     if legend_files:
         legend_label = _legend_label(legend_files, href_prefix)
         lines.append(f'    {_LEGEND_NODE_ID}["{legend_label}"]')
 
-    # Edges.
-    for edge in graph.edges:
-        rendered = _edge_str(edge)
-        if rendered:
-            lines.append(f"    {rendered}")
+    # Internal chain edges that wire each stage's materialised partners together.
+    for nid in graph.nodes:
+        if aux[nid].has_prompt:
+            lines.append(f"    {nid}_prompt --> {nid}")
+        if aux[nid].has_panel:
+            lines.append(f"    {nid} --> {nid}_panel")
 
-    # Sibling-of-Done placement: connect Done's predecessor to legend with an
-    # invisible link. Falls back to anchoring against Done itself if no predecessor
-    # is wired yet (init render, fresh graphs).
+    # Start --> overview is fixed; rewritten user edges connect overview onward.
+    if has_overview:
+        lines.append(f"    Start --> {_OVERVIEW_NODE_ID}")
+
+    for edge in graph.edges:
+        lines.extend(f"    {rendered}" for rendered in _render_edge(edge, aux, has_overview))
+
     if legend_files:
         anchor = _legend_anchor(graph)
         if anchor:
-            lines.append(f"    {anchor} ~~~ {_LEGEND_NODE_ID}")
+            anchor_rewritten = _rewrite_source(anchor, aux, has_overview)
+            lines.append(f"    {anchor_rewritten} ~~~ {_LEGEND_NODE_ID}")
 
-    # Class definitions and assignments.
     lines.extend(_CLASSDEFS)
-    for node in graph.nodes.values():
-        lines.append(f"    class {node.id} {node.css_class}")
+    for nid, node in graph.nodes.items():
+        lines.append(f"    class {nid} {node.css_class}")
+        if aux[nid].has_prompt:
+            lines.append(f"    class {nid}_prompt input")
+        if aux[nid].has_panel:
+            lines.append(f"    class {nid}_panel json")
+    if has_overview:
+        lines.append(f"    class {_OVERVIEW_NODE_ID} input")
     if legend_files:
         lines.append(f"    class {_LEGEND_NODE_ID} pending")
 
@@ -80,8 +126,70 @@ def render_block(graph: Graph, run_folder: Path | None = None) -> str:
     return "\n".join(lines) + "\n"
 
 
-def _node_decl(node: Node, files: list[Path], href_prefix: str) -> str:
-    label = _label_for(node, files, href_prefix)
+# --- materialised-node helpers ----------------------------------------------
+
+
+class _Aux:
+    __slots__ = ("has_panel", "has_prompt")
+
+    def __init__(self, has_prompt: bool, has_panel: bool) -> None:
+        self.has_prompt = has_prompt
+        self.has_panel = has_panel
+
+
+def _aux_index(nodes: dict[str, Node]) -> dict[str, _Aux]:
+    """For each node decide whether a prompt input and/or JSON panel applies.
+
+    Only ``rect``-shape stage nodes get partners. Deterministic stages produce
+    no prompt file, so their prompt input is suppressed; their panel still
+    renders (e.g. verification's verify.json artefact lands there).
+    """
+    result: dict[str, _Aux] = {}
+    for nid, node in nodes.items():
+        is_stage = node.shape == "rect" and nid not in {"Start", "Done"}
+        has_prompt = is_stage and node.mode != "deterministic"
+        has_panel = is_stage
+        result[nid] = _Aux(has_prompt, has_panel)
+    return result
+
+
+def _render_edge(edge: Edge, aux: dict[str, _Aux], has_overview: bool) -> list[str]:
+    """Break a multi-step edge into per-pair edges with rewritten endpoints.
+
+    A middle step in a chain is simultaneously a target (of the previous step)
+    and a source (of the next step). The same id can't carry both ``_prompt``
+    and ``_panel`` suffixes, so we always emit one mermaid edge per consecutive
+    pair instead of the original ``A --> B --> C`` chain form.
+    """
+    rendered: list[str] = []
+    for i in range(len(edge.steps) - 1):
+        src_step = edge.steps[i]
+        tgt_step = edge.steps[i + 1]
+        if not src_step or not tgt_step:
+            continue
+        src_ids = [_rewrite_source(s, aux, has_overview) for s in src_step]
+        tgt_ids = [_rewrite_target(t, aux) for t in tgt_step]
+        rendered.append(f"{' & '.join(src_ids)} --> {' & '.join(tgt_ids)}")
+    return rendered
+
+
+def _rewrite_source(nid: str, aux: dict[str, _Aux], has_overview: bool) -> str:
+    if nid == "Start" and has_overview:
+        return _OVERVIEW_NODE_ID
+    info = aux.get(nid)
+    return f"{nid}_panel" if info and info.has_panel else nid
+
+
+def _rewrite_target(nid: str, aux: dict[str, _Aux]) -> str:
+    info = aux.get(nid)
+    return f"{nid}_prompt" if info and info.has_prompt else nid
+
+
+# --- node declarations ------------------------------------------------------
+
+
+def _node_decl(node: Node) -> str:
+    label = _label_for(node)
     if node.shape == "stadium":
         return f'{node.id}(["{label}"])'
     if node.shape == "hex":
@@ -92,48 +200,98 @@ def _node_decl(node: Node, files: list[Path], href_prefix: str) -> str:
     return f'{node.id}["{label}"]'
 
 
-def _label_for(node: Node, files: list[Path], href_prefix: str) -> str:
-    file_links = _file_links_for(files, href_prefix)
+def _label_for(node: Node) -> str:
     if node.raw_label is not None:
         # raw_label nodes (Start/Done/interactive gates) carry a hand-crafted top
-        # line; append Mode and any file links below using the same HTML format.
-        extras: list[str] = []
+        # line. Wrap it in the same big-title span the composed labels use so
+        # node titles look consistent across the diagram, then append Mode below
+        # if present.
+        title = f"<span style='{_TITLE_STYLE};'>{node.raw_label}</span>"
         if node.mode:
-            extras.append(f"Mode: {node.mode}")
-        if file_links:
-            extras.append(_join_links(file_links))
-        if not extras:
-            return node.raw_label
-        return "<br/>".join([node.raw_label, *extras])
+            return f"{title}<br/>Mode: {node.mode}"
+        return title
     return _node_label(
         node.display,
         node.impl,
         status=node.status,
         elapsed_secs=node.elapsed_secs,
         mode=node.mode,
-        file_links=file_links,
     )
 
 
-def _file_links_for(files: list[Path], href_prefix: str) -> list[tuple[str, str]]:
-    """Return (display, url) pairs for each file. URLs are prefixed with the
-    run-folder's path from docs-root so mermaid SVG anchors resolve correctly
-    regardless of the page URL the diagram is rendered on."""
-    links: list[tuple[str, str]] = []
-    seen_urls: set[str] = set()
-    for f in files:
-        rel = f.as_posix() if isinstance(f, Path) else str(f)
-        url = f"{href_prefix}{rel}" if href_prefix else rel
-        if url in seen_urls:
-            continue
-        seen_urls.add(url)
-        name = f.name if isinstance(f, Path) else rel
-        links.append((_link_display(name), url))
-    return links
+def _overview_node_decl(overview_url: str) -> str:
+    inner = "Overview"
+    if overview_url:
+        inner = f"<a href='{overview_url}' style='{_PROMPT_LINK_STYLE};'>Overview</a>"
+    return f"{_OVERVIEW_NODE_ID}[/\"<span style='{_TITLE_STYLE};'>{inner}</span>\"/]"
 
 
-def _join_links(file_links: list[tuple[str, str]]) -> str:
-    return " · ".join(f"<a href='{url}' style='{_LINK_STYLE}'>{name}</a>" for name, url in file_links)
+def _prompt_node_decl(nid: str, files: list[Path], href_prefix: str) -> str:
+    prompt_file = next((f for f in files if f.name.endswith("-prompt.md")), None)
+    if prompt_file is None:
+        inner = "Prompt"
+    else:
+        url = _file_url(prompt_file, href_prefix)
+        inner = f"<a href='{url}' style='{_PROMPT_LINK_STYLE};'>Prompt</a>"
+    return f"{nid}_prompt[/\"<span style='{_TITLE_STYLE};'>{inner}</span>\"/]"
+
+
+def _panel_node_decl(nid: str, node: Node, files: list[Path], href_prefix: str) -> str:
+    label = _panel_label(node, files, href_prefix)
+    return f'{nid}_panel["{label}"]'
+
+
+def _panel_label(node: Node, files: list[Path], href_prefix: str) -> str:
+    output_file = next((f for f in files if f.name.endswith("-output.md")), None)
+    other_files = [f for f in files if not (f.name.endswith("-output.md") or f.name.endswith("-prompt.md"))]
+
+    parts: list[str] = []
+    if output_file is not None:
+        url = _file_url(output_file, href_prefix)
+        parts.append(f"<a href='{url}' style='{_OUTPUT_HEADER_STYLE};'>Output</a><br/><br/>")
+    parts.append(_panel_json(node))
+    if other_files:
+        parts.append("<br/><br/>")
+        parts.append(_join_pills(other_files, href_prefix))
+
+    return f"<div style='{_PANEL_DIV_STYLE};'>{''.join(parts)}</div>"
+
+
+# Status → placeholder JSON body. The orchestrator doesn't have the real signal
+# JSON at render time (signals are consumed once and not re-read — see ADR-004),
+# so the panel shows a status-derived stub; the Output anchor at the top links
+# to the full output file for the actual content.
+_PANEL_STATUS_TEXT = {
+    "passed": "ok",
+    "in_progress": "in_progress",
+    "blocked": "blocked",
+    "failed": "blocked",
+    "pending": "pending",
+    "skipped": "skipped",
+}
+
+
+def _panel_json(node: Node) -> str:
+    status_text = _PANEL_STATUS_TEXT.get(node.status, "pending")
+    return f"{{<br/>&nbsp;&nbsp;&quot;status&quot;: &quot;{status_text}&quot;<br/>}}"
+
+
+# --- legend & file matching -------------------------------------------------
+
+
+def _join_pills(files: list[Path], href_prefix: str) -> str:
+    return "".join(_pill(f, href_prefix) for f in files)
+
+
+def _pill(file_path: Path, href_prefix: str) -> str:
+    url = _file_url(file_path, href_prefix)
+    display = _link_display(file_path.name)
+    return f"<a href='{url}' style='{_PILL_STYLE};'>{display}</a>"
+
+
+def _file_url(file_path: Path, href_prefix: str) -> str:
+    rel = file_path.as_posix()
+    return f"{href_prefix}{rel}" if href_prefix else rel
 
 
 def _link_display(name: str) -> str:
@@ -169,6 +327,24 @@ def _href_prefix(run_folder: Path) -> str:
     if tail[0] != "projects" or tail[2] != "workflow" or tail[3] != "runs":
         return ""
     return "/#" + "/".join(tail) + "/"
+
+
+def _overview_url(run_folder: Path) -> str:
+    """Return the docs-site URL for the feature's overview.md, or empty string.
+
+    Overview lives at ``projects/{project}/features/{feature}/overview.md`` — a
+    sibling tree to ``workflow/runs/``. We extract project and feature from the
+    same six-segment tail anchor used by ``_href_prefix``.
+    """
+    parts = Path(run_folder).resolve().parts
+    if len(parts) < 6:
+        return ""
+    tail = parts[-6:]
+    if tail[0] != "projects" or tail[2] != "workflow" or tail[3] != "runs":
+        return ""
+    project = tail[1]
+    feature = tail[4]
+    return f"/#projects/{project}/features/{feature}/overview.md"
 
 
 def _legend_anchor(graph: Graph) -> str | None:
@@ -280,15 +456,9 @@ def _file_sort_key(rel: Path) -> tuple[int, str]:
 
 
 def _legend_label(legend_files: list[Path], href_prefix: str) -> str:
-    file_links = _file_links_for(legend_files, href_prefix)
-    return f"Other files<br/>{_join_links(file_links)}"
-
-
-def _edge_str(edge: Edge) -> str:
-    parts = [" & ".join(step) for step in edge.steps if step]
-    if len(parts) < 2:
-        return ""
-    return " --> ".join(parts)
+    title = f"<span style='{_TITLE_STYLE};'>Other files</span>"
+    pills = _join_pills(legend_files, href_prefix)
+    return f"{title}<br/>{pills}"
 
 
 def write_plan_md(plan_path, header: str, graph: Graph) -> None:

@@ -31,29 +31,25 @@ def _node_label(
     mode: str = "",
     file_links: list[tuple[str, str]] | None = None,
 ) -> str:
-    # Using HTML <br/> + <a> tags so file_links render as clickable links inside the
-    # node; mermaid's flowchart renderer treats <br/> as a line break when htmlLabels
-    # is on (default).
+    # Stage nodes have a prominent first line (stage name + status icon) and a
+    # compact second line joining impl / mode / elapsed with ` · ` separators.
+    # File links no longer live inside the stage label — they belong to the
+    # adjacent prompt and panel nodes the renderer materialises around each stage.
+    # file_links and output_summary are kept on the signature for backward
+    # compatibility but are intentionally ignored.
+    del file_links, output_summary
     icon = _STATUS_ICON.get(status, "-")
-    parts = [f"{display} {icon}"]
+    title = f"<span style='font-size:18px;font-weight:bold;'>{display} {icon}</span>"
+    sub_parts: list[str] = []
     if impl:
-        parts.append(impl)
+        sub_parts.append(impl)
     if mode:
-        parts.append(f"Mode: {mode}")
+        sub_parts.append(f"Mode: {mode}")
     if elapsed_secs is not None:
-        parts.append(f"⏱ {_format_elapsed(elapsed_secs)}")
-    if file_links:
-        # color:inherit keeps the link text in the node's white (or grey) class colour
-        # rather than the browser's default link blue, which is invisible on the green
-        # / orange status backgrounds.
-        parts.append(
-            " · ".join(
-                f"<a href='{url}' style='color:inherit;text-decoration:underline'>{name}</a>"
-                for name, url in file_links
-            )
-        )
-    # output_summary appears in the markdown section, not the diagram node
-    return "<br/>".join(parts)
+        sub_parts.append(f"⏱ {_format_elapsed(elapsed_secs)}")
+    if sub_parts:
+        return f"{title}<br/>{' · '.join(sub_parts)}"
+    return title
 
 
 def _track_node_id(stage_name: str, track_name: str) -> str:
