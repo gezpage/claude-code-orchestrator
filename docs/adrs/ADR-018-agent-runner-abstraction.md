@@ -37,7 +37,7 @@ Introduce `orchestrator.agent_runner`, a small package exposing:
 - `AgentRunner` — Protocol with one method, `run(request: AgentRunRequest) -> AgentRunResult`.
 - `AgentRunRequest` / `AgentRunResult` — frozen dataclasses describing prompt,
   cwd, env, timeout, model, permission mode, output mode, stage name,
-  transcript path / stdout, stderr, exit code, duration, timed-out flag.
+  stream-log path / stdout, stderr, exit code, duration, timed-out flag.
 - `ClaudeCodePrintRunner` — wraps the legacy command shape. **Always** passes
   `--bare` and `--dangerously-skip-permissions`. These were the ADR-003 and
   ADR-012 invariants; they are now invariants of this runner specifically.
@@ -100,7 +100,7 @@ abstraction.
 - **Per-call subprocess construction inline.** Rejected: gives up the seam
   before any second backend lands.
 - **Stream protocol normalisation.** Rejected for first PR; the runner result
-  exposes a stdout string and writes a transcript file, which is sufficient
+  exposes a stdout string and writes a stream-log file, which is sufficient
   for SIGNAL_JSON extraction. Streaming/JSON-mode output can be a follow-up
   through `AgentRunRequest.output_mode`.
 - **Interactive in the same protocol.** Rejected: `AgentRunner` would become

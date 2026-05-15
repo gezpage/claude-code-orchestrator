@@ -18,9 +18,10 @@ class AgentRunRequest:
     model: str | None = None
     permission_mode: str | None = None
     output_mode: str = "text"
-    # If set, the runner writes its transcript here. run_stage computes the path so
-    # transcripts land in the existing per-stage folder convention.
-    transcript_path: Path | None = None
+    # If set, the runner writes the raw agent CLI stdout stream here. run_stage
+    # computes the path so stream logs land in the existing per-stage folder
+    # convention.
+    stream_log_path: Path | None = None
 
 
 @dataclass(frozen=True)
@@ -31,7 +32,7 @@ class AgentRunResult:
     exit_code: int | None
     duration_seconds: float
     timed_out: bool
-    transcript_path: Path | None = None
+    stream_log_path: Path | None = None
     command: list[str] | None = field(default=None)
 
 
