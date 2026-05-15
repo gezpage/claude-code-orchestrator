@@ -38,6 +38,15 @@ def test_builtin_spike():
     assert profile.stages[0].expansion == ExpansionKind.TRACKS
 
 
+def test_builtin_full_interactive_alignment():
+    profile = load_profile("full-interactive")
+    alignment = next(s for s in profile.stages if s.name == "alignment")
+
+    assert alignment.mode == "interactive"
+    assert alignment.artifact == "alignment-log.md"
+    assert alignment.prompt == "prompts/alignment/interactive.md"
+
+
 def test_unknown_builtin_raises():
     with pytest.raises(FileNotFoundError, match="Unknown profile 'bogus'"):
         load_profile("bogus")
