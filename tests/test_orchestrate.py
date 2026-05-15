@@ -924,6 +924,29 @@ def test_orchestrate_source_has_no_open_calls():
     assert lines == [], "orchestrate.py contains open() calls:\n" + "\n".join(lines)
 
 
+def test_unhandled_exception_in_dispatcher_is_logged_to_run_log(tmp_path):
+    """An unexpected exception escaping a stage dispatcher is written to run.log before propagating."""
+    stages = [{"stage": "specification", "prompt": "prompts/specification/default.md"}]
+    docs_root = _setup_docs(tmp_path, stages)
+    run_folder_path = tmp_path / "projects" / "myproject" / "workflow" / "runs" / "feat" / "2026-01-01-run-1"
+    run_folder_path.mkdir(parents=True)
+
+    with (
+        patch("orchestrator.orchestrate.run_stage", side_effect=FileNotFoundError("no such directory")),
+        patch("orchestrator.orchestrate.update_plan_md"),
+        patch("orchestrator.orchestrate._resolve_run_folder", return_value=run_folder_path),
+    ):
+        with pytest.raises(FileNotFoundError):
+            orchestrate.run_pipeline(docs_root, "myproject", "feature", "feat/test", str(tmp_path / "test.yaml"))
+
+    run_log = run_folder_path / "run.log"
+    assert run_log.exists(), "run.log must be written before the exception propagates"
+    log_text = run_log.read_text()
+    assert "unhandled exception" in log_text
+    assert "FileNotFoundError" in log_text
+    assert "no such directory" in log_text
+
+
 # ── dispatcher unit tests ─────────────────────────────────────────────────────
 
 
