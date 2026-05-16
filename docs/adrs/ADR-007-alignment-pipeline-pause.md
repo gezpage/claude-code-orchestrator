@@ -9,6 +9,16 @@ affects: [run_stage.py, orchestrate.py]
 **Status:** Accepted
 **Date:** 2026-05-07
 
+> **Note.** The "`claude -p` with `--dangerously-skip-permissions`" dispatch
+> shape referenced in the Context section is historical. The current
+> dispatch path is `claude <prompt> --permission-mode auto` via the
+> `ClaudeCodeRunner` agent-runner seam — see
+> [ADR-018](ADR-018-agent-runner-abstraction.md),
+> [ADR-022](ADR-022-claude-runners-oauth-only.md) and
+> [ADR-025](ADR-025-remove-dangerously-skip-permissions.md). The decision
+> below (alignment as a declared pipeline pause point that bypasses the
+> uniform dispatch path) is unaffected.
+
 ## Context
 
 The core architectural principle of the rebuild is that every stage runs through `run_stage.py` — a uniform dispatch path via `claude -p` with `--dangerously-skip-permissions`. This enables independent invocation, consistent signal handling, and testability.
