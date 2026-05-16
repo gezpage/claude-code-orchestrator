@@ -350,12 +350,19 @@ _PANEL_SUMMARY_MAX_CHARS = 360
 def _panel_body(node: Node, output_file: Path | None, run_folder: Path | None) -> str:
     """Render the panel body: the stage's prose output if available, else a status word.
 
-    The output file is read fresh on each render — this is bounded (capped at
-    _PANEL_SUMMARY_MAX_CHARS) and discarded immediately after writing the diagram,
-    so ADR-004's no-cross-stage-content invariant still holds.
+    For review sub-nodes whose direct ``-output.md`` is only SIGNAL_JSON, fall back
+    to the matching section in ``review/review-log.md`` so an approved review does
+    not render as a bare status word. The output file is read fresh on each render
+    — this is bounded (capped at _PANEL_SUMMARY_MAX_CHARS) and discarded immediately
+    after writing the diagram, so ADR-004's no-cross-stage-content invariant still
+    holds.
     """
     if output_file is not None and run_folder is not None:
         prose = _extract_output_prose(run_folder / output_file)
+        if prose:
+            return _escape_mermaid_label(prose)
+    if run_folder is not None:
+        prose = _review_log_prose(run_folder, node)
         if prose:
             return _escape_mermaid_label(prose)
     return _PANEL_STATUS_TEXT.get(node.status, "pending")
@@ -363,6 +370,7 @@ def _panel_body(node: Node, output_file: Path | None, run_folder: Path | None) -
 
 _JSON_FENCE_RE = re.compile(r"^```json\n.*?\n```\s*$", re.DOTALL | re.MULTILINE)
 _SIGNAL_SENTINEL_RE = re.compile(r"^SIGNAL_JSON:.*$", re.MULTILINE)
+_REVIEWER_ROUND_RE = re.compile(r"^(?P<reviewer>.+)-round(?P<round>\d+)$")
 
 
 def _extract_output_prose(output_path: Path) -> str:
@@ -376,6 +384,11 @@ def _extract_output_prose(output_path: Path) -> str:
         text = output_path.read_text()
     except OSError:
         return ""
+    return _prose_summary(text)
+
+
+def _prose_summary(text: str) -> str:
+    """Strip SIGNAL_JSON noise, keep the first non-empty paragraph, cap to panel size."""
     text = _JSON_FENCE_RE.sub("", text)
     text = _SIGNAL_SENTINEL_RE.sub("", text)
     paragraphs = [p.strip() for p in text.split("\n\n") if p.strip()]
@@ -385,6 +398,62 @@ def _extract_output_prose(output_path: Path) -> str:
     if len(summary) > _PANEL_SUMMARY_MAX_CHARS:
         summary = summary[:_PANEL_SUMMARY_MAX_CHARS].rstrip() + "…"
     return summary
+
+
+def _review_log_prose(run_folder: Path, node: Node) -> str:
+    """Return the review-log section prose for a review sub-node, capped.
+
+    Reviewer agents write SIGNAL_JSON to their per-reviewer ``-output.md`` while
+    the detailed prose lands in ``review/review-log.md`` under
+    ``## {Reviewer.title()} Review — Round {N}``. When the direct output is
+    SIGNAL_JSON-only the panel would otherwise fall back to a bare status word
+    for a finished review; this helper recovers the matching log section so the
+    diagram shows actual review content. Round 1 sub-nodes carry the bare
+    reviewer name in ``file_suffix``; round N nodes use ``{reviewer}-round{N}``.
+    """
+    if node.stage_dir != "review" or not node.file_suffix:
+        return ""
+
+    m = _REVIEWER_ROUND_RE.match(node.file_suffix)
+    if m:
+        reviewer = m.group("reviewer")
+        round_num = int(m.group("round"))
+    else:
+        reviewer = node.file_suffix
+        round_num = 1
+
+    review_log = run_folder / "review" / "review-log.md"
+    try:
+        text = review_log.read_text()
+    except OSError:
+        return ""
+
+    section_body = _find_review_section(text, reviewer, round_num)
+    if not section_body:
+        return ""
+    return _prose_summary(section_body)
+
+
+def _find_review_section(text: str, reviewer: str, round_num: int) -> str:
+    """Return the raw body under a ``## {Reviewer} Review — Round {N}`` heading.
+
+    Matches both em-dash and ASCII hyphen between "Review" and "Round" so
+    reviewers that emit the section heading with a plain dash still resolve.
+    Body ends at the next ``##`` heading or a fix-cycle ``---`` divider so we
+    don't bleed across rounds.
+    """
+    heading_re = re.compile(
+        rf"^##\s+{re.escape(reviewer.title())}\s+Review\s+(?:—|-)\s+Round\s+{round_num}\b.*$",
+        re.MULTILINE | re.IGNORECASE,
+    )
+    match = heading_re.search(text)
+    if not match:
+        return ""
+    body_start = match.end()
+    rest = text[body_start:]
+    boundary = re.search(r"^(?:##\s+|---\s*$)", rest, re.MULTILINE)
+    body = rest[: boundary.start()] if boundary else rest
+    return body.strip()
 
 
 def _escape_mermaid_label(text: str) -> str:

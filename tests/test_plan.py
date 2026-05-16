@@ -1128,6 +1128,104 @@ def test_panel_body_passed_renders_done_not_pending(tmp_path):
     assert ">done</div>" in panel
 
 
+# --- review-log fallback for review panel bodies (issue #128) ---
+
+
+def _seed_review_run_with_log(tmp_path, *, output_body: str, review_log: str | None) -> tuple:
+    """Build a run folder where the review sub-node 'tests' has completed.
+
+    Writes the per-reviewer output file plus an optional review-log.md so we can
+    assert how _panel_body falls back when the output is SIGNAL_JSON-only.
+    """
+    run_folder = _make_run_folder(tmp_path)
+    init_plan_md(run_folder, _profile_with_review())
+    review_dir = run_folder / "review"
+    review_dir.mkdir(parents=True, exist_ok=True)
+    (review_dir / "review-tests-output.md").write_text(output_body)
+    if review_log is not None:
+        (review_dir / "review-log.md").write_text(review_log)
+    update_plan_md(run_folder, "review_tests", "passed", elapsed_secs=1.0)
+    content = (run_folder / "plan.md").read_text()
+    panel_line = next(line for line in content.splitlines() if line.lstrip().startswith("review_tests_panel["))
+    return run_folder, panel_line
+
+
+def test_review_panel_uses_direct_output_when_prose_present(tmp_path):
+    """When the per-reviewer output file has real prose, the panel renders that
+    prose verbatim — no need to fall through to review-log.md."""
+    output_body = 'Direct prose from the reviewer agent.\n\n```json\n{"stage": "review"}\n```\n'
+    _, panel = _seed_review_run_with_log(
+        tmp_path,
+        output_body=output_body,
+        review_log="---\nreviewer_statuses: {}\n---\n\n## Tests Review — Round 1\n\nLog prose that must NOT win.\n",
+    )
+    assert "Direct prose from the reviewer agent." in panel
+    assert "Log prose that must NOT win." not in panel
+
+
+def test_review_panel_falls_back_to_review_log_when_output_is_signal_only(tmp_path):
+    """When the output is just SIGNAL_JSON, the panel must render prose from
+    review-log.md instead of bare ``done``."""
+    output_body = '```json\n{"stage": "review", "status": "passed", "reviewer_statuses": {"tests": "approved"}}\n```\n'
+    review_log = (
+        "---\nreviewer_statuses:\n  tests: approved\n---\n\n"
+        "## Tests Review — Round 1\n\n"
+        "**Verdict**: approved — coverage is sufficient.\n"
+    )
+    _, panel = _seed_review_run_with_log(tmp_path, output_body=output_body, review_log=review_log)
+    assert "approved — coverage is sufficient" in panel
+    # Status-word fallback must not leak in when prose was found.
+    assert ">done</div>" not in panel
+
+
+def test_review_panel_picks_correct_round_section(tmp_path):
+    """Multiple rounds in review-log.md must not bleed into one another — round 2
+    nodes must only see round 2 prose."""
+    run_folder = _make_run_folder(tmp_path)
+    init_plan_md(run_folder, _profile_with_review())
+    add_fix_cycle_node(run_folder, cycle_num=1, reviewers=["tests"])
+    review_dir = run_folder / "review"
+    review_dir.mkdir(parents=True, exist_ok=True)
+    # Both round outputs are SIGNAL_JSON only so the renderer is forced to use review-log.
+    signal_only = '```json\n{"stage": "review", "status": "passed"}\n```\n'
+    (review_dir / "review-tests-output.md").write_text(signal_only)
+    (review_dir / "review-tests-round2-output.md").write_text(signal_only)
+    (review_dir / "review-log.md").write_text(
+        "---\nreviewer_statuses:\n  tests: approved\n---\n\n"
+        "## Tests Review — Round 1\n\nFirst round verdict prose.\n\n"
+        "## Tests Review — Round 2\n\nSecond round verdict prose.\n"
+    )
+    update_plan_md(run_folder, "review_tests", "passed", elapsed_secs=1.0)
+    update_plan_md(run_folder, "review_tests_2", "passed", elapsed_secs=1.0)
+    content = (run_folder / "plan.md").read_text()
+    round1 = next(line for line in content.splitlines() if line.lstrip().startswith("review_tests_panel["))
+    round2 = next(line for line in content.splitlines() if line.lstrip().startswith("review_tests_2_panel["))
+    assert "First round verdict prose." in round1
+    assert "Second round verdict prose." not in round1
+    assert "Second round verdict prose." in round2
+    assert "First round verdict prose." not in round2
+
+
+def test_review_panel_falls_back_to_status_when_no_review_log(tmp_path):
+    """No review-log.md and no prose in output — the panel still renders the
+    status word, not a hard error."""
+    output_body = '```json\n{"stage": "review", "status": "passed"}\n```\n'
+    _, panel = _seed_review_run_with_log(tmp_path, output_body=output_body, review_log=None)
+    assert ">done</div>" in panel
+
+
+def test_review_panel_falls_back_to_status_when_log_section_missing(tmp_path):
+    """A review-log.md that has prose for another reviewer/round must not match —
+    the panel falls back to the status word for the unmatched reviewer."""
+    output_body = '```json\n{"stage": "review", "status": "passed"}\n```\n'
+    review_log = (
+        "---\nreviewer_statuses:\n  arch: approved\n---\n\n## Arch Review — Round 1\n\nWrong reviewer's prose.\n"
+    )
+    _, panel = _seed_review_run_with_log(tmp_path, output_body=output_body, review_log=review_log)
+    assert "Wrong reviewer's prose." not in panel
+    assert ">done</div>" in panel
+
+
 # --- PR node terminal-state semantics (ADR-026) ---
 
 
