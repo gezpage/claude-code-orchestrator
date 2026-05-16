@@ -86,10 +86,16 @@ _PR_NODE_ID = "pr"
 
 
 def set_pr_node(run_folder: Path, url: str) -> None:
-    """Insert (or refresh) the PR node spliced between the last stage and Done.
+    """Stamp the PR stage's ``url`` field with the created GitHub PR URL.
 
-    The node's label is a large-text link to ``url``. Idempotent: re-calling
-    with a different URL just refreshes the label and any existing edges.
+    The PR node is added at init time when ``create-pr`` is true (see
+    :func:`init_plan_md`); this function only updates its URL/status fields so
+    the panel surfaces a clickable link. Idempotent: re-calling with a new URL
+    just refreshes it.
+
+    For backwards compatibility with older runs that pre-date init-time PR
+    nodes, falls back to splicing a stadium-shape node between the last stage
+    and Done.
     """
     with _plan_lock:
         run_folder = Path(run_folder)
@@ -99,14 +105,26 @@ def set_pr_node(run_folder: Path, url: str) -> None:
             return
 
         url_text = url.strip()
-        large_url = (
-            f"<a href='{url_text}' "
-            "style='font-size:18px;font-weight:bold;color:#fff;text-decoration:underline'>"
-            f"{url_text}</a>"
-        )
         if _PR_NODE_ID in graph.nodes:
-            graph.nodes[_PR_NODE_ID].raw_label = large_url
+            node = graph.nodes[_PR_NODE_ID]
+            if node.shape == "rect":
+                # Init-time PR stage rect — surface URL via the panel.
+                node.url = url_text
+                node.status = "passed"
+                node.css_class = "complete"
+            else:
+                # Legacy stadium-shape PR node — refresh the embedded link.
+                node.raw_label = (
+                    f"<a href='{url_text}' "
+                    "style='font-size:18px;font-weight:bold;color:#fff;text-decoration:underline'>"
+                    f"{url_text}</a>"
+                )
         else:
+            large_url = (
+                f"<a href='{url_text}' "
+                "style='font-size:18px;font-weight:bold;color:#fff;text-decoration:underline'>"
+                f"{url_text}</a>"
+            )
             graph.add_node(
                 Node(
                     id=_PR_NODE_ID,
@@ -116,12 +134,29 @@ def set_pr_node(run_folder: Path, url: str) -> None:
                     status="passed",
                 )
             )
-            # Splice "pr" between any predecessor of Done and Done itself.
             for edge in graph.edges:
                 if edge.steps and "Done" in edge.steps[-1]:
                     edge.steps[-1] = [_PR_NODE_ID if n == "Done" else n for n in edge.steps[-1]]
             graph.edges.append(Edge(steps=[[_PR_NODE_ID], ["Done"]]))
 
+        save_graph(run_folder, graph)
+        replace_mermaid_block(plan_path, graph)
+
+
+def mark_pipeline_done(run_folder: Path) -> None:
+    """Flip the Done node's class to ``complete`` so it renders with the green fill.
+
+    Called when the pipeline reaches Done without an error. Best-effort: silently
+    no-ops if the plan or Done node does not exist.
+    """
+    with _plan_lock:
+        run_folder = Path(run_folder)
+        plan_path = run_folder / "plan.md"
+        graph = load_graph(run_folder)
+        if graph is None or not plan_path.exists() or "Done" not in graph.nodes:
+            return
+        graph.nodes["Done"].css_class = "complete"
+        graph.nodes["Done"].status = "passed"
         save_graph(run_folder, graph)
         replace_mermaid_block(plan_path, graph)
 

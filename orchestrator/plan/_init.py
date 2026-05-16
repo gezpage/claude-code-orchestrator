@@ -13,13 +13,14 @@ def init_plan_md(
     profile: Profile,
     pr_notice: str | None = None,
     agent_metadata: dict[str, dict[str, str | None]] | None = None,
+    create_pr: bool = False,
 ) -> None:
     run_folder = Path(run_folder)
     plan_path = run_folder / "plan.md"
     if plan_path.exists():
         return
 
-    graph = build_initial_graph(profile, agent_metadata=agent_metadata)
+    graph = build_initial_graph(profile, agent_metadata=agent_metadata, create_pr=create_pr)
     save_graph(run_folder, graph)
     write_plan_md(plan_path, _run_header(run_folder, pr_notice=pr_notice), graph)
 
@@ -27,6 +28,7 @@ def init_plan_md(
 def build_initial_graph(
     profile: Profile,
     agent_metadata: dict[str, dict[str, str | None]] | None = None,
+    create_pr: bool = False,
 ) -> Graph:
     graph = Graph(init_directive=_INIT_DIRECTIVE)
     graph.add_node(Node(id="Start", shape="stadium", raw_label="▶ Start", css_class="startend"))
@@ -114,6 +116,18 @@ def build_initial_graph(
                 )
             )
             chain_ids.append(name)
+
+    if create_pr:
+        graph.add_node(
+            Node(
+                id="pr",
+                display="PR",
+                css_class="pending",
+                mode="deterministic",
+                stage_dir="pr_draft",
+            )
+        )
+        chain_ids.append("pr")
 
     graph.add_node(Node(id="Done", shape="stadium", raw_label="■ Done", css_class="startend"))
 

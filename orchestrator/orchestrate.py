@@ -18,7 +18,14 @@ from orchestrator import state as state_mod
 from orchestrator._git import GitStateError
 from orchestrator.agent_runner import AgentConfig, AgentRunner, build_runner, resolve_agent_config
 from orchestrator.logger import OrchestratorLogger
-from orchestrator.plan import expand_nodes, init_plan_md, set_pr_node, set_pr_notice, update_plan_md
+from orchestrator.plan import (
+    expand_nodes,
+    init_plan_md,
+    mark_pipeline_done,
+    set_pr_node,
+    set_pr_notice,
+    update_plan_md,
+)
 from orchestrator.profile import ExpansionKind, Profile, StageConfig, load_profile
 from orchestrator.run_stage import _fmt_elapsed, run_deterministic_stage, run_interactive_stage, run_stage
 
@@ -940,7 +947,13 @@ def run_pipeline(
     if preflight.create_pr:
         pr_notice = f"_will be created on completion (base: `{preflight.base_branch}`)_"
     runners, agent_metadata = _build_stage_runners(profile)
-    init_plan_md(run_folder, profile, pr_notice=pr_notice, agent_metadata=agent_metadata)
+    init_plan_md(
+        run_folder,
+        profile,
+        pr_notice=pr_notice,
+        agent_metadata=agent_metadata,
+        create_pr=bool(preflight.create_pr and preflight.origin.is_github and preflight.origin.gh_repo),
+    )
 
     if not resume:
         try:
@@ -1075,7 +1088,12 @@ def run_pipeline(
 
     logger.log("pipeline", "INFO", "pipeline completed successfully")
 
-    if preflight.create_pr and preflight.origin.is_github and preflight.origin.gh_repo:
+    gh_repo = preflight.origin.gh_repo
+    pr_will_run = bool(preflight.create_pr and preflight.origin.is_github and gh_repo)
+    if not pr_will_run:
+        mark_pipeline_done(run_folder)
+
+    if pr_will_run and gh_repo:
         # pr_draft is not a profile stage, so _build_stage_runners does not produce a
         # runner for it. Resolve one from the profile-level agent config so the
         # finalisation phase honours the configured backend (e.g. codex_cli) instead
@@ -1089,7 +1107,7 @@ def run_pipeline(
             repo_root=project_config["repo-root"],
             impl_branch=branch,
             base_branch=preflight.base_branch,
-            gh_repo=preflight.origin.gh_repo,
+            gh_repo=gh_repo,
             logger=logger,
             agent_config=resolve_agent_config(profile.agent, None),
         )
@@ -1115,6 +1133,7 @@ def _finalize_pr(
     """
     plan_path = run_folder / "plan.md"
     fallback_cmd = f"gh pr create --draft --base {base_branch} --head {impl_branch} --repo {gh_repo}"
+    t0 = time.monotonic()
 
     def _fail(reason: str) -> None:
         logger.log("pipeline", "WARN", f"PR creation skipped: {reason}")
@@ -1122,8 +1141,10 @@ def _finalize_pr(
             run_folder,
             f"_PR creation failed — run manually:_ `{fallback_cmd}`",
         )
+        update_plan_md(run_folder, "pr", "blocked", elapsed_secs=time.monotonic() - t0)
 
     set_pr_notice(run_folder, "_drafting…_")
+    update_plan_md(run_folder, "pr", "in_progress")
 
     overview_path = Path(docs_root) / feature_path / "overview.md"
     variables = {
@@ -1177,4 +1198,6 @@ def _finalize_pr(
 
     set_pr_notice(run_folder, url)
     set_pr_node(run_folder, url)
+    update_plan_md(run_folder, "pr", "passed", elapsed_secs=time.monotonic() - t0)
+    mark_pipeline_done(run_folder)
     logger.log("pipeline", "INFO", f"draft PR opened: {url}")

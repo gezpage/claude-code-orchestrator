@@ -41,8 +41,8 @@ _OUTPUT_HEADER_STYLE = "font-size:16px;font-weight:bold;color:#dcfce7;text-decor
 
 # Pill button styling for non-prompt/output artifact links inside the panel.
 _PILL_STYLE = (
-    "display:inline-block;padding:1px 6px;margin:2px 1px;background:rgba(255,255,255,0.18);"
-    "color:inherit;border-radius:3px;text-decoration:none;font-size:11px;font-family:sans-serif"
+    "display:inline-block;padding:4px 10px;margin:3px 2px;background:rgba(255,255,255,0.18);"
+    "color:inherit;border-radius:4px;text-decoration:none;font-size:14px;font-family:sans-serif"
 )
 
 # Wrapper div for the panel content — monospace JSON-friendly font, left-aligned.
@@ -68,6 +68,7 @@ def render_block(graph: Graph, run_folder: Path | None = None) -> str:
 
     aux = _aux_index(graph.nodes)
     has_overview = "Start" in graph.nodes
+    any_passed = any(n.status == "passed" for nid, n in graph.nodes.items() if nid not in {"Start", "Done"})
 
     lines: list[str] = ["```mermaid"]
     if graph.init_directive:
@@ -86,22 +87,42 @@ def render_block(graph: Graph, run_folder: Path | None = None) -> str:
         if aux[nid].has_panel:
             lines.append(f"    {_panel_node_decl(nid, node, node_files.get(nid, []), href_prefix, run_folder)}")
 
+    # Edges are emitted in fixed order: internal partner edges, Start→overview,
+    # then per-pair user edges. Each edge gets a sequential mermaid index used
+    # below to drive linkStyle directives that thicken the "completed path".
+    bold_indices: list[int] = []
+    edge_index = 0
+
     # Internal chain edges that wire each stage's materialised partners together.
-    # The stage-to-panel link is invisible (~~~) so the output panel butts up
-    # against its stage with no arrow between them — the panel IS the stage's
-    # output, not a downstream step.
+    # Both prompt→stage and stage→panel are visible arrows so the data-flow
+    # relationship (prompt drives the stage, stage produces the panel output)
+    # reads clearly in the diagram.
     for nid in graph.nodes:
+        passed = _is_passed(nid, graph.nodes)
         if aux[nid].has_prompt:
             lines.append(f"    {nid}_prompt --> {nid}")
+            if passed:
+                bold_indices.append(edge_index)
+            edge_index += 1
         if aux[nid].has_panel:
-            lines.append(f"    {nid} ~~~ {nid}_panel")
+            lines.append(f"    {nid} --> {nid}_panel")
+            if passed:
+                bold_indices.append(edge_index)
+            edge_index += 1
 
     # Start --> overview is fixed; rewritten user edges connect overview onward.
     if has_overview:
         lines.append(f"    Start --> {_OVERVIEW_NODE_ID}")
+        if any_passed:
+            bold_indices.append(edge_index)
+        edge_index += 1
 
     for edge in graph.edges:
-        lines.extend(f"    {rendered}" for rendered in _render_edge(edge, aux, has_overview))
+        for rendered, tgt_ids in _render_edge(edge, aux, has_overview):
+            lines.append(f"    {rendered}")
+            if all(_target_completed(tid, graph.nodes) for tid in tgt_ids):
+                bold_indices.append(edge_index)
+            edge_index += 1
 
     lines.extend(_CLASSDEFS)
     for nid, node in graph.nodes.items():
@@ -113,11 +134,35 @@ def render_block(graph: Graph, run_folder: Path | None = None) -> str:
     if has_overview:
         lines.append(f"    class {_OVERVIEW_NODE_ID} input")
 
+    if bold_indices:
+        lines.append(f"    linkStyle {','.join(str(i) for i in bold_indices)} stroke-width:3px,stroke:#34d399")
+
     lines.append("```")
     block = "\n".join(lines) + "\n"
     if legend_files:
         block += _other_files_section(legend_files, href_prefix)
     return block
+
+
+def _is_passed(nid: str, nodes: dict[str, Node]) -> bool:
+    n = nodes.get(nid)
+    return n is not None and n.status == "passed"
+
+
+def _target_completed(rewritten_id: str, nodes: dict[str, Node]) -> bool:
+    """Given a rewritten edge target (e.g. ``X_prompt``, ``Y_panel``, ``Done``),
+    return whether its underlying stage is in the completed state.
+
+    Used to decide whether an edge belongs on the bold "progress trail".
+    """
+    if rewritten_id == _OVERVIEW_NODE_ID:
+        return any(n.status == "passed" for nid, n in nodes.items() if nid not in {"Start", "Done"})
+    base = rewritten_id
+    for suffix in ("_prompt", "_panel"):
+        if base.endswith(suffix):
+            base = base[: -len(suffix)]
+            break
+    return _is_passed(base, nodes)
 
 
 # --- "Other files" buttons rendered below the mermaid fence -----------------
@@ -174,15 +219,19 @@ def _aux_index(nodes: dict[str, Node]) -> dict[str, _Aux]:
     return result
 
 
-def _render_edge(edge: Edge, aux: dict[str, _Aux], has_overview: bool) -> list[str]:
+def _render_edge(edge: Edge, aux: dict[str, _Aux], has_overview: bool) -> list[tuple[str, list[str]]]:
     """Break a multi-step edge into per-pair edges with rewritten endpoints.
 
     A middle step in a chain is simultaneously a target (of the previous step)
     and a source (of the next step). The same id can't carry both ``_prompt``
     and ``_panel`` suffixes, so we always emit one mermaid edge per consecutive
     pair instead of the original ``A --> B --> C`` chain form.
+
+    Returns a list of ``(line, target_ids)`` tuples. ``target_ids`` is the list
+    of rewritten target node ids (after ``_prompt`` / ``_panel`` rewriting) so
+    callers can decide whether the edge belongs on the bold "completed path".
     """
-    rendered: list[str] = []
+    rendered: list[tuple[str, list[str]]] = []
     for i in range(len(edge.steps) - 1):
         src_step = edge.steps[i]
         tgt_step = edge.steps[i + 1]
@@ -190,7 +239,7 @@ def _render_edge(edge: Edge, aux: dict[str, _Aux], has_overview: bool) -> list[s
             continue
         src_ids = [_rewrite_source(s, aux, has_overview) for s in src_step]
         tgt_ids = [_rewrite_target(t, aux) for t in tgt_step]
-        rendered.append(f"{' & '.join(src_ids)} --> {' & '.join(tgt_ids)}")
+        rendered.append((f"{' & '.join(src_ids)} --> {' & '.join(tgt_ids)}", tgt_ids))
     return rendered
 
 
@@ -263,11 +312,16 @@ def _panel_node_decl(nid: str, node: Node, files: list[Path], href_prefix: str, 
     return f'{nid}_panel["{label}"]'
 
 
+_NODE_URL_STYLE = "font-size:16px;font-weight:bold;color:#dcfce7;text-decoration:underline;font-family:sans-serif;word-break:break-all"
+
+
 def _panel_label(node: Node, files: list[Path], href_prefix: str, run_folder: Path | None) -> str:
     output_file = next((f for f in files if f.name.endswith("-output.md")), None)
     other_files = [f for f in files if not (f.name.endswith("-output.md") or f.name.endswith("-prompt.md"))]
 
     parts: list[str] = []
+    if node.url:
+        parts.append(f"<a href='{node.url}' style='{_NODE_URL_STYLE};'>{node.url}</a><br/><br/>")
     if output_file is not None:
         url = _file_url(output_file, href_prefix)
         parts.append(f"<a href='{url}' style='{_OUTPUT_HEADER_STYLE};'>Output</a><br/><br/>")
