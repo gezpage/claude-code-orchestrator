@@ -69,6 +69,44 @@ def _update_review_md(review_md_path: Path, reviewer: str, verdict: str, round_n
     review_md_path.write_text(_write_frontmatter(meta, body + section))
 
 
+def _chronological_hashes(repo_root: str, hashes: list[str]) -> list[str]:
+    """Sort commit hashes oldest-first using git's topological order.
+
+    Agents may emit `commit_hashes` in any order (notably `git log` default is newest-first).
+    `first^..last` only produces the intended forward diff when `first` is the topological
+    ancestor, so callers must not rely on the agent's ordering. Falls back to the input
+    order if git fails (so an invalid hash is surfaced by the downstream diff command
+    rather than swallowed here)."""
+    if len(hashes) <= 1 or not repo_root:
+        return list(hashes)
+    result = subprocess.run(
+        ["git", "-C", repo_root, "rev-list", "--no-walk", "--topo-order", "--reverse", *hashes],
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0 or not result.stdout.strip():
+        return list(hashes)
+    return result.stdout.strip().splitlines()
+
+
+def compute_stage_diff(repo_root: str, commit_hashes: list[str]) -> str:
+    """Return the unified diff text covering all commits in `commit_hashes`.
+
+    Sorts hashes topologically before computing `first^..last`, so agents that report
+    newest-first (or any other order) still produce a forward diff. Returns '' when
+    there are no commits or repo_root is missing."""
+    if not commit_hashes or not repo_root:
+        return ""
+    ordered = _chronological_hashes(repo_root, commit_hashes)
+    first, last = ordered[0], ordered[-1]
+    diff_result = subprocess.run(
+        ["git", "-C", repo_root, "diff", f"{first}^..{last}"],
+        capture_output=True,
+        text=True,
+    )
+    return diff_result.stdout
+
+
 def _write_round_diff(run_folder: Path, repo_root: str, commit_hashes: list[str], round_num: int) -> str:
     """Compute the real git diff for this fix cycle and persist it to review/diff-round-N.patch.
 
@@ -76,15 +114,10 @@ def _write_round_diff(run_folder: Path, repo_root: str, commit_hashes: list[str]
     agent. Returns the absolute path string (empty if no commits or repo_root)."""
     if not commit_hashes or not repo_root:
         return ""
-    first, last = commit_hashes[0], commit_hashes[-1]
-    diff_result = subprocess.run(
-        ["git", "-C", repo_root, "diff", f"{first}^..{last}"],
-        capture_output=True,
-        text=True,
-    )
+    diff_text = compute_stage_diff(repo_root, commit_hashes)
     diff_path = run_folder / "review" / f"diff-round-{round_num}.patch"
     diff_path.parent.mkdir(parents=True, exist_ok=True)
-    diff_path.write_text(diff_result.stdout)
+    diff_path.write_text(diff_text)
     return str(diff_path)
 
 

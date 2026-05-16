@@ -1,3 +1,4 @@
+from pathlib import Path
 from unittest.mock import patch
 
 import pytest
@@ -629,6 +630,46 @@ def test_write_round_diff_no_commits_returns_empty(tmp_path):
 
     assert _write_round_diff(tmp_path, "/tmp/anywhere", [], 2) == ""
     assert _write_round_diff(tmp_path, "", ["abc123"], 2) == ""
+
+
+def test_write_round_diff_sorts_hashes_chronologically(tmp_path):
+    """Agents often emit commit_hashes newest-first (git log default). The diff must
+    still walk forward through history — diffing `newest^..oldest` produces a reversed
+    patch where additions appear as deletions, which blocked spelling-bee phase-3
+    run-1 (see issue #125)."""
+    import subprocess as sp
+
+    from orchestrator.review_cycle import _write_round_diff
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    sp.run(["git", "-C", str(repo), "init", "-q", "-b", "main"], check=True)
+    sp.run(["git", "-C", str(repo), "config", "user.email", "t@t"], check=True)
+    sp.run(["git", "-C", str(repo), "config", "user.name", "t"], check=True)
+    (repo / "f.txt").write_text("base\n")
+    sp.run(["git", "-C", str(repo), "add", "f.txt"], check=True)
+    sp.run(["git", "-C", str(repo), "commit", "-q", "-m", "base"], check=True)
+    (repo / "f.txt").write_text("base\nfirst\n")
+    sp.run(["git", "-C", str(repo), "commit", "-q", "-am", "first feature commit"], check=True)
+    first_sha = sp.run(
+        ["git", "-C", str(repo), "rev-parse", "HEAD"], check=True, capture_output=True, text=True
+    ).stdout.strip()
+    (repo / "f.txt").write_text("base\nfirst\nsecond\n")
+    sp.run(["git", "-C", str(repo), "commit", "-q", "-am", "second feature commit"], check=True)
+    second_sha = sp.run(
+        ["git", "-C", str(repo), "rev-parse", "HEAD"], check=True, capture_output=True, text=True
+    ).stdout.strip()
+
+    run_folder = tmp_path / "run"
+    run_folder.mkdir()
+    # Agent reports newest-first, mirroring the spelling-bee phase-3 failure.
+    diff_path = _write_round_diff(run_folder, str(repo), [second_sha, first_sha], 1)
+
+    written = Path(diff_path).read_text()
+    assert "+first" in written and "+second" in written, "expected forward additions"
+    assert "-first" not in written and "-second" not in written, (
+        "diff was reversed — agent's newest-first ordering leaked through"
+    )
 
 
 def test_accepted_risks_written_when_cycle_runs(tmp_path):

@@ -316,14 +316,23 @@ def test_dispatch_prompts_diff_spans_implementation_and_fix_verification_commits
     captured_diff_args: list[list[str]] = []
 
     def fake_run(args, **kw):
-        if len(args) >= 4 and args[3] == "diff":
+        cmd = args[3] if len(args) >= 4 else ""
+        if cmd == "rev-list":
+            # Chronological sort defers to git topo-order; for the test we echo the input
+            # hashes unchanged (signals are already in implementation→verification order).
+            rev_list_result = MagicMock()
+            rev_list_result.returncode = 0
+            hashes = [a for a in args[4:] if not a.startswith("--")]
+            rev_list_result.stdout = "\n".join(hashes) + "\n"
+            return rev_list_result
+        if cmd == "diff":
             captured_diff_args.append(args)
         return git_diff
 
     with (
         patch("orchestrator.orchestrate.run_stage", return_value=review_sig),
         patch("orchestrator.orchestrate.update_plan_md"),
-        patch("orchestrator.orchestrate.subprocess.run", side_effect=fake_run),
+        patch("orchestrator.review_cycle.subprocess.run", side_effect=fake_run),
     ):
         _dispatch_prompts(stage, {"repo_root": "/tmp"}, run_folder, ctx, signals)
 

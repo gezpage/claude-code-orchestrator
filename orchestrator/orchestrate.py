@@ -687,14 +687,9 @@ def _dispatch_prompts(
         if isinstance(sig, dict):
             commit_hashes.extend(sig.get("commit_hashes", []))
     if commit_hashes and "repo_root" in variables:
-        first, last = commit_hashes[0], commit_hashes[-1]
-        diff_result = subprocess.run(
-            ["git", "-C", variables["repo_root"], "diff", f"{first}^..{last}"],
-            capture_output=True,
-            text=True,
-        )
+        diff_text = review_cycle_mod.compute_stage_diff(variables["repo_root"], commit_hashes)
         diff_path = run_folder / stage.name / "diff-round-1.patch"
-        diff_path.write_text(diff_result.stdout)
+        diff_path.write_text(diff_text)
         variables["diff"] = str(diff_path)
     else:
         variables["diff"] = ""

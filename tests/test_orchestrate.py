@@ -1716,7 +1716,7 @@ def test_prompts_diff_patch_written_when_commit_hashes_present(tmp_path):
     with (
         patch("orchestrator.orchestrate.run_stage", return_value=review_sig),
         patch("orchestrator.orchestrate.update_plan_md"),
-        patch("orchestrator.orchestrate.subprocess.run", return_value=git_diff),
+        patch("orchestrator.review_cycle.subprocess.run", return_value=git_diff),
     ):
         _dispatch_prompts(stage, {"repo_root": "/tmp"}, run_folder, ctx, signals)
 
