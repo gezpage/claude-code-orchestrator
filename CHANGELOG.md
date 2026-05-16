@@ -7,6 +7,9 @@ Format: [Unreleased] at the top, dated releases below, newest first.
 
 ## [Unreleased]
 
+### Fixed
+- 2026-05-16: `minimal-claude` review stage now runs the codex reviewer with `permission_mode: workspace-write` instead of `read-only`. The review prompt instructs codex to append its detailed verdict to `review-log.md`; under `read-only` that write was rejected by the sandbox and the reviewer's prose was silently lost, leaving only the one-line SIGNAL_JSON for the fix-implementation agent to act on.
+
 ### Changed
 - 2026-05-16: `ClaudeCodePrintRunner` and the `claude_code_print` backend are removed. The surviving Claude runner is now `ClaudeCodeRunner` (backend `claude_code`), dispatching with `--permission-mode auto`; `--dangerously-skip-permissions` no longer appears anywhere in the codebase. `claude_code_auto` was renamed to `claude_code` and is the new default backend. Operator-authored profiles that named either old backend must be migrated. See ADR-025 (supersedes ADR-003).
 

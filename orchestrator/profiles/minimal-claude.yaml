@@ -25,4 +25,4 @@ stages:
       implementation: prompts/review/implementation.md
     agent:
       backend: codex_cli
-      permission_mode: read-only
+      permission_mode: workspace-write
