@@ -4,7 +4,7 @@ date: 2026-05-16
 affects: [orchestrator/orchestrate.py, orchestrator/prompts/executive_summary/, orchestrator/schemas/executive_summary.json]
 ---
 
-# ADR-027: Executive Summary as Always-On Post-Pipeline Finalisation
+# ADR-028: Executive Summary as Always-On Post-Pipeline Finalisation
 
 **Status:** Accepted
 **Date:** 2026-05-16
@@ -20,11 +20,11 @@ The executive summary has different semantics from PR creation:
 - PR creation is **conditional** on `create-pr` and a GitHub origin; it only fires on a clean pipeline because pushing a failed branch and asking for review is not useful.
 - The executive summary is most valuable precisely when something went wrong: blocked stages, incomplete interactive prompts, verification failures the fix-cycle could not resolve. A successful run also benefits from a summary, but a failed run benefits more.
 
-This makes the summary an **always-on** finalisation step. It also raises the surface-area question: there will now be two post-pipeline Claude stages, both running outside the profile loop. ADR-019's "post-pipeline finalisation step, not a profile stage" framing was singular; this ADR generalises it.
+This makes the summary an **always-on** finalisation step. It also raises the surface-area question: there will now be two post-pipeline finalisation stages, both running outside the profile loop and dispatched via the profile's resolved agent (Claude by default, Codex for codex-only profiles). ADR-019's "post-pipeline finalisation step, not a profile stage" framing was singular; this ADR generalises it.
 
 ## Decision
 
-Add a built-in `executive_summary` Claude stage that runs after the stage loop and after the PR finalisation phase, regardless of pipeline outcome.
+Add a built-in `executive_summary` finalisation stage that runs after the stage loop and after the PR finalisation phase, regardless of pipeline outcome. It is dispatched via the profile's resolved agent (Claude or Codex), not hardcoded to a specific backend.
 
 1. **Always-on.** The summary is dispatched on every exit path:
    - clean pipeline completion,
@@ -49,9 +49,11 @@ Add a built-in `executive_summary` Claude stage that runs after the stage loop a
 
 Adding `create-summary` alongside `create-pr` is the obvious parallel, but the failure-mode argument cuts the other way. The user reading a blocked run is the one with the lowest tolerance for trawling through `_state.yaml` and review logs — and that user might not have remembered to enable a flag. Defaulting to always-on, swallowing failures as warnings, gives the highest-value behaviour without making the user opt in.
 
-### Why a Claude stage rather than a deterministic template
+### Why an LLM stage rather than a deterministic template
 
-Many sections of the summary — "what was done", "open risks", "recommended next actions" — require synthesis the orchestrator cannot do from signal JSON. A deterministic template can only emit fact-shaped sections (timings, commands, test counts). Picking deterministic for those parts would result in a thin summary missing the most useful sections; picking Claude for the whole thing keeps the prompt cohesive. The cost is one additional LLM call per run.
+Many sections of the summary — "what was done", "open risks", "recommended next actions" — require synthesis the orchestrator cannot do from signal JSON. A deterministic template can only emit fact-shaped sections (timings, commands, test counts). Picking deterministic for those parts would result in a thin summary missing the most useful sections; picking an LLM stage for the whole thing keeps the prompt cohesive. The cost is one additional LLM call per run, billed to whichever backend the profile resolved.
+
+The summary stage is also explicitly a *synthesizer and linker*, not a new source of truth. Its prompt instructs it to reference and link to `plan.md`, `_state.yaml`, the review log, verifier artifacts, and the PR URL rather than re-deriving status verdicts. Authoritative status lives in those files; the summary's job is to make them readable in one pass.
 
 ### Why ordering: PR before summary
 
@@ -63,7 +65,7 @@ CLAUDE.md previously stated: *"PR creation is a post-pipeline finalisation step,
 
 ## Consequences
 
-- One additional LLM call per run (regardless of outcome). For runs that block at the first stage, this is the only Claude call after that point.
+- One additional LLM call per run (regardless of outcome). For runs that block at the first stage, this is the only LLM call after that point.
 - The run folder gains `executive_summary.md` as a new top-level artefact.
 - The "PR creation is a post-pipeline finalisation step" invariant in CLAUDE.md is rephrased to cover finalisation steps in general. New finalisation steps must follow the same rules: outside the stage loop, swallow their own failures, never change the pipeline exit status.
 - `_finalize_pr` now returns the PR URL (or `None`) instead of returning `None` unconditionally — callers that previously discarded the return value continue to work because Python ignores unused returns.

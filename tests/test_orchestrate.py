@@ -13,7 +13,7 @@ from orchestrator.profile import ExpansionKind, StageConfig
 
 @pytest.fixture(autouse=True)
 def _stub_preflight_and_sync():
-    """Stub the ADR-019 preflight, base-branch sync, and ADR-027 executive summary
+    """Stub the ADR-019 preflight, base-branch sync, and ADR-028 executive summary
     finalisation for every test in this file.
 
     Tests that explicitly exercise these paths re-patch within their own `with`
@@ -2126,7 +2126,7 @@ def test_slices_dispatcher_blocks_when_worktree_creation_fails(tmp_path):
     mock_rs.assert_not_called()
 
 
-# ── ADR-027: executive summary finalisation ───────────────────────────────────
+# ── ADR-028: executive summary finalisation ───────────────────────────────────
 
 
 def test_executive_summary_runs_after_successful_pipeline(tmp_path):

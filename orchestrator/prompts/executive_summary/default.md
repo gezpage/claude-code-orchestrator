@@ -2,6 +2,8 @@
 
 You are writing a post-run executive summary for the developer who launched this pipeline. The audience is *not* a PR reviewer — it is whoever is about to read the run folder and decide what to do next. Keep it concise enough to read in under 3 minutes.
 
+This summary is a *synthesizer and linker*, not a new source of truth. Authoritative status lives in `plan.md`, `_state.yaml`, `review-log.md`, and the verifier artifacts. Your job is to make those readable in one pass — quote and link to them, do not re-derive their verdicts.
+
 ## Inputs
 
 - **Run folder:** `{{ run_folder }}`
@@ -71,6 +73,8 @@ Render exactly this markdown structure, in this order:
 - Total length: **target under 400 words**. Hard cap 700 words.
 - Plain markdown only — no HTML, no embedded images, no code fences except for inline shell commands.
 - Do not invent facts. If you cannot determine something from the run artifacts, say so or omit the bullet.
+- Do not override or contradict the status recorded in `_state.yaml` / `plan.md`. The `Status:` line at the top must match whatever those files say.
+- Link to underlying artifacts (e.g. `[review log](review/review-log.md)`, `[plan](plan.md)`) rather than restating their contents at length.
 - Do not include the `Co-Authored-By` trailer or any signature.
 
 ## Signal
