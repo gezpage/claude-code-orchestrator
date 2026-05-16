@@ -248,6 +248,90 @@ def test_update_plan_md_run_summary_accumulates(tmp_path):
     assert "2m 30s" in content
 
 
+def _run_summary_stage_rows(plan_text: str) -> list[str]:
+    """Extract the stage-name column from the Run Summary table, in order."""
+    lines = plan_text.splitlines()
+    start = next(i for i, ln in enumerate(lines) if ln.startswith("| Stage |"))
+    rows: list[str] = []
+    for line in lines[start + 2 :]:  # skip header and separator
+        if not line.startswith("| "):
+            break
+        rows.append(line.split("|")[1].strip())
+    return rows
+
+
+def test_run_summary_preserves_chronological_completion_order(tmp_path):
+    """Run summary lists stages in the order they completed, not alphabetically (#130).
+
+    YAML's default sort_keys=True was alphabetising the elapsed map on every save,
+    so the table showed e.g. ``Decomposition`` before ``Specification`` even though
+    specification ran first. This regresses if state.save_state stops preserving
+    insertion order."""
+    run_folder = _make_run_folder(tmp_path)
+    profile = _simple_profile("specification", "decomposition", "implementation")
+    init_plan_md(run_folder, profile)
+    # Save in the chronological (non-alphabetical) order they would run.
+    update_plan_md(run_folder, "specification", "passed", elapsed_secs=10, signal={})
+    update_plan_md(run_folder, "decomposition", "passed", elapsed_secs=20, signal={})
+    update_plan_md(run_folder, "implementation", "passed", elapsed_secs=30, signal={})
+    rows = _run_summary_stage_rows((run_folder / "plan.md").read_text())
+    assert rows == ["Specification", "Decomposition", "Implementation"]
+
+
+def test_run_summary_review_fix_cycle_chronological(tmp_path):
+    """Fix-impl and re-review rows appear in execution order, not interleaved alphabetically."""
+    run_folder = _make_run_folder(tmp_path)
+    init_plan_md(run_folder, _profile_with_review())
+    update_plan_md(run_folder, "implementation", "passed", elapsed_secs=10, signal={})
+    update_plan_md(run_folder, "review_tests", "passed", elapsed_secs=5, signal={})
+    add_fix_cycle_node(run_folder, cycle_num=1, reviewers=["tests"])
+    update_plan_md(run_folder, "fix_impl_1", "passed", elapsed_secs=15, signal={})
+    update_plan_md(run_folder, "review_tests_2", "passed", elapsed_secs=5, signal={})
+    add_fix_cycle_node(run_folder, cycle_num=2, reviewers=["tests"])
+    update_plan_md(run_folder, "fix_impl_2", "passed", elapsed_secs=15, signal={})
+    update_plan_md(run_folder, "review_tests_3", "passed", elapsed_secs=5, signal={})
+    rows = _run_summary_stage_rows((run_folder / "plan.md").read_text())
+    assert rows == [
+        "Implementation",
+        "Review Tests",
+        "Fix Impl 1",
+        "Review Tests 2",
+        "Fix Impl 2",
+        "Review Tests 3",
+    ]
+
+
+def test_run_summary_pr_draft_appears_after_final_review(tmp_path):
+    """The PR stage runs after fix cycles complete and must render last."""
+    run_folder = _make_run_folder(tmp_path)
+    init_plan_md(run_folder, _profile_with_review(), create_pr=True)
+    update_plan_md(run_folder, "implementation", "passed", elapsed_secs=10, signal={})
+    update_plan_md(run_folder, "review_tests", "passed", elapsed_secs=5, signal={})
+    add_fix_cycle_node(run_folder, cycle_num=1, reviewers=["tests"])
+    update_plan_md(run_folder, "fix_impl_1", "passed", elapsed_secs=15, signal={})
+    update_plan_md(run_folder, "review_tests_2", "passed", elapsed_secs=5, signal={})
+    update_plan_md(run_folder, "harvest", "passed", elapsed_secs=2, signal={})
+    update_plan_md(run_folder, "pr", "passed", elapsed_secs=3, signal={})
+    rows = _run_summary_stage_rows((run_folder / "plan.md").read_text())
+    assert rows[-1] == "Pr"
+    assert rows.index("Pr") > rows.index("Fix Impl 1")
+    assert rows.index("Pr") > rows.index("Review Tests 2")
+
+
+def test_run_summary_render_is_deterministic(tmp_path):
+    """Re-running update_plan_md with the same state produces an identical table."""
+    run_folder = _make_run_folder(tmp_path)
+    profile = _simple_profile("specification", "decomposition", "implementation")
+    init_plan_md(run_folder, profile)
+    update_plan_md(run_folder, "specification", "passed", elapsed_secs=10, signal={})
+    update_plan_md(run_folder, "decomposition", "passed", elapsed_secs=20, signal={})
+    first_rows = _run_summary_stage_rows((run_folder / "plan.md").read_text())
+    update_plan_md(run_folder, "implementation", "passed", elapsed_secs=30, signal={})
+    second_rows = _run_summary_stage_rows((run_folder / "plan.md").read_text())
+    assert second_rows[: len(first_rows)] == first_rows
+    assert second_rows == ["Specification", "Decomposition", "Implementation"]
+
+
 def test_update_plan_md_file_manifest_timestamp_column(tmp_path):
     run_folder = _make_run_folder(tmp_path)
     profile = _simple_profile("discovery")
