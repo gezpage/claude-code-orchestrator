@@ -5,9 +5,12 @@ from orchestrator.plan import (
     expand_nodes,
     init_plan_md,
     mark_pipeline_done,
+    mark_pr_blocked,
     rerender_plan_md,
+    resolve_review_subnode_statuses,
     set_pr_node,
     update_plan_md,
+    worst_status,
 )
 from orchestrator.profile import ExpansionKind, Profile, StageConfig
 
@@ -1031,3 +1034,123 @@ def test_mark_pipeline_done_flips_done_node_to_complete(tmp_path):
     content = (run_folder / "plan.md").read_text()
     assert "class Done complete" in content
     assert "class Done startend" not in content
+
+
+# --- terminal-status precedence (ADR-026) ---
+
+
+def test_worst_status_picks_failed_over_everything():
+    assert worst_status("failed", "passed", "pending") == "failed"
+
+
+def test_worst_status_blocked_beats_changes_requested_in_progress_passed():
+    assert worst_status("passed", "blocked", "in_progress") == "blocked"
+    assert worst_status("blocked", "changes-requested") == "blocked"
+
+
+def test_worst_status_changes_requested_beats_in_progress_and_below():
+    assert worst_status("in_progress", "changes-requested", "passed") == "changes-requested"
+
+
+def test_worst_status_in_progress_beats_passed_skipped_pending():
+    assert worst_status("passed", "in_progress", "pending") == "in_progress"
+
+
+def test_worst_status_passed_beats_skipped_and_pending():
+    assert worst_status("pending", "passed", "skipped") == "passed"
+
+
+def test_worst_status_empty_returns_pending():
+    assert worst_status() == "pending"
+
+
+def test_worst_status_unknown_loses_to_known():
+    # Unknown statuses must not beat a recognised state — we'd rather render a
+    # known result than propagate a typo into the diagram.
+    assert worst_status("mystery", "passed") == "passed"
+
+
+def test_resolve_review_subnode_status_flips_blocked_round1_to_passed_when_approved(tmp_path):
+    """An approved final cycle re-stamps the round-1 sub-node to passed so it
+    no longer renders red beside a green round-N sibling. See ADR-026."""
+    run_folder = _make_run_folder(tmp_path)
+    init_plan_md(run_folder, _profile_with_review())
+    # Round-1 reviewer requested changes → blocked.
+    update_plan_md(run_folder, "review_tests", "blocked", elapsed_secs=1.0, output_summary="changes-requested")
+    add_fix_cycle_node(run_folder, cycle_num=1, reviewers=["tests"])
+    update_plan_md(run_folder, "review_tests_2", "passed", elapsed_secs=1.0, output_summary="approved")
+
+    resolve_review_subnode_statuses(run_folder, {"tests": "approved"})
+    content = (run_folder / "plan.md").read_text()
+    # The round-1 sub-node and the round-2 sub-node now agree.
+    assert "class review_tests complete" in content
+    assert "class review_tests blocked" not in content
+    assert "class review_tests_2 complete" in content
+
+
+def test_resolve_review_subnode_status_keeps_blocked_when_changes_still_requested(tmp_path):
+    """A reviewer that still has changes-requested at the end of cycles must
+    remain blocked — the worst status wins, not the final-round value."""
+    run_folder = _make_run_folder(tmp_path)
+    init_plan_md(run_folder, _profile_with_review())
+    update_plan_md(run_folder, "review_tests", "blocked", elapsed_secs=1.0)
+
+    resolve_review_subnode_statuses(run_folder, {"tests": "changes-requested"})
+    content = (run_folder / "plan.md").read_text()
+    assert "class review_tests blocked" in content
+
+
+def test_resolve_review_subnode_status_noop_when_subnode_missing(tmp_path):
+    """A reviewer that never registered a round-1 sub-node (e.g. the original
+    review stage produced no node) is silently ignored — the helper must not
+    create nodes it doesn't already own."""
+    run_folder = _make_run_folder(tmp_path)
+    init_plan_md(run_folder, _profile_with_review())
+    resolve_review_subnode_statuses(run_folder, {"unknown_reviewer": "approved"})
+    content = (run_folder / "plan.md").read_text()
+    assert "review_unknown_reviewer" not in content
+
+
+def test_panel_body_passed_renders_done_not_pending(tmp_path):
+    """A passed node with no output prose must show ``done``, not ``pending`` —
+    the prior fallback rendered "pending" for stages that completed but didn't
+    emit a *-output.md file."""
+    run_folder = _make_run_folder(tmp_path)
+    init_plan_md(run_folder, _profile_with_review())
+    update_plan_md(run_folder, "review", "passed", elapsed_secs=1.0)
+    content = (run_folder / "plan.md").read_text()
+    # Isolate the review parent's panel line so other pending nodes' panels
+    # don't pollute the assertion.
+    review_panel_lines = [line for line in content.splitlines() if line.lstrip().startswith("review_panel[")]
+    assert len(review_panel_lines) == 1
+    panel = review_panel_lines[0]
+    assert ">pending</div>" not in panel
+    assert ">done</div>" in panel
+
+
+# --- PR node terminal-state semantics (ADR-026) ---
+
+
+def test_mark_pr_blocked_flips_init_time_pr_node(tmp_path):
+    """When the pipeline fails before the PR finalisation step runs, mark_pr_blocked
+    flips the init-time PR node from pending to blocked so the diagram does not
+    show a pending PR after a failed run."""
+    run_folder = _make_run_folder(tmp_path)
+    profile = _simple_profile("specification")
+    init_plan_md(run_folder, profile, create_pr=True)
+    assert "class pr pending" in (run_folder / "plan.md").read_text()
+
+    mark_pr_blocked(run_folder)
+    content = (run_folder / "plan.md").read_text()
+    assert "class pr blocked" in content
+    assert "class pr pending" not in content
+
+
+def test_mark_pr_blocked_noop_when_no_pr_node(tmp_path):
+    """Without create_pr the diagram has no PR node — mark_pr_blocked is a no-op."""
+    run_folder = _make_run_folder(tmp_path)
+    profile = _simple_profile("specification")
+    init_plan_md(run_folder, profile, create_pr=False)
+    before = (run_folder / "plan.md").read_text()
+    mark_pr_blocked(run_folder)
+    assert (run_folder / "plan.md").read_text() == before

@@ -40,6 +40,8 @@ Developer-facing reference. Read before touching any orchestrator code.
 
 - **`run_stage()` passes a `progress_callback` to every `AgentRunner.run()` call.** When the runner supports streaming (the Claude runner does), each parsed event becomes one INFO line in `run.log` so long-running stages emit live "tool X / text Y" breadcrumbs instead of going silent. Callbacks are best-effort — runners must swallow callback exceptions so a logger glitch cannot abort a stage. See ADR-024.
 
+- **`plan.md` status aggregation goes through `worst_status` from `orchestrator/plan/_constants`.** The precedence ordering is `failed > blocked > changes-requested > in_progress > passed > skipped > pending` (lower wins). Concretely: round-1 review sub-nodes are re-stamped via `resolve_review_subnode_statuses` after a fix cycle so they cannot contradict the final verdict; the init-time PR node is flipped via `mark_pr_blocked` when the pipeline fails before finalisation; the panel-body fallback returns the table value (passed → `"done"`) so a passed stage never surfaces as `"pending"`. Adding a new ad-hoc precedence rule instead of using `worst_status` violates this invariant. See ADR-026.
+
 ---
 
 ## Path Resolution Rules

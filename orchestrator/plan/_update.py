@@ -161,6 +161,79 @@ def mark_pipeline_done(run_folder: Path) -> None:
         replace_mermaid_block(plan_path, graph)
 
 
+def mark_pr_blocked(run_folder: Path) -> None:
+    """Stamp the PR node as blocked when the pipeline fails before PR creation.
+
+    Init-time PR nodes are created with ``pending`` status when ``create-pr`` is
+    true. Without this call, a failed pipeline run leaves the PR node ``pending``
+    forever — a contradictory terminal state when the pipeline is plainly not
+    going to produce a PR. See ADR-026.
+    """
+    with _plan_lock:
+        run_folder = Path(run_folder)
+        plan_path = run_folder / "plan.md"
+        graph = load_graph(run_folder)
+        if graph is None or not plan_path.exists() or _PR_NODE_ID not in graph.nodes:
+            return
+        graph.nodes[_PR_NODE_ID].status = "blocked"
+        graph.nodes[_PR_NODE_ID].css_class = _STATUS_CLASS["blocked"]
+        save_graph(run_folder, graph)
+        replace_mermaid_block(plan_path, graph)
+
+
+def resolve_review_subnode_statuses(
+    run_folder: Path,
+    final_reviewer_statuses: dict[str, str],
+) -> None:
+    """Re-stamp round-1 review sub-nodes with the final cycle outcome.
+
+    This is *terminal-verdict restamping*, not status aggregation. The round-1
+    blocked stamp is stale signal once a later fix cycle has produced a final
+    verdict; an ``approved`` final intentionally replaces it rather than being
+    combined with it via :func:`worst_status`. Calling ``worst_status`` here
+    would preserve the stale ``blocked`` and defeat the whole point of the
+    helper. See ADR-026.
+
+    A reviewer that initially returned ``changes-requested`` is recorded on the
+    round-1 sub-node (``review_{reviewer}``) as ``blocked``; when a later fix
+    cycle re-review approves, only the round-N sub-node is updated to
+    ``passed``. Without this propagation the round-1 node stays red next to a
+    green round-N sibling — a contradictory terminal state for an approved run.
+
+    Mapping rule:
+    - ``approved`` final verdict → round-1 sub-node becomes ``passed``.
+    - ``changes-requested`` final verdict → round-1 sub-node stays ``blocked``.
+    Unknown verdicts are left untouched.
+    """
+    with _plan_lock:
+        run_folder = Path(run_folder)
+        plan_path = run_folder / "plan.md"
+        graph = load_graph(run_folder)
+        if graph is None or not plan_path.exists():
+            return
+
+        changed = False
+        for reviewer, verdict in final_reviewer_statuses.items():
+            sub_id = f"review_{reviewer}"
+            node = graph.nodes.get(sub_id)
+            if node is None:
+                continue
+            if verdict == "approved":
+                new_status = "passed"
+            elif verdict == "changes-requested":
+                new_status = "blocked"
+            else:
+                continue
+            if node.status != new_status:
+                node.status = new_status
+                node.css_class = _STATUS_CLASS.get(new_status, "pending")
+                changed = True
+
+        if changed:
+            save_graph(run_folder, graph)
+            replace_mermaid_block(plan_path, graph)
+
+
 def rerender_plan_md(run_folder: Path) -> None:
     """Re-render the mermaid block without changing any node status.
 

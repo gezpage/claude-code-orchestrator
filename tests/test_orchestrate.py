@@ -332,6 +332,7 @@ def test_blocked_stage_exits(tmp_path):
     with (
         patch("orchestrator.orchestrate.run_stage", return_value=BLOCKED_SIGNAL),
         patch("orchestrator.orchestrate.update_plan_md") as mock_plan,
+        patch("orchestrator.orchestrate.mark_pr_blocked") as mock_pr_blocked,
         patch("orchestrator.orchestrate.subprocess.run", return_value=_git_ok()),
         patch("orchestrator.orchestrate._resolve_run_folder", return_value=run_folder_path),
     ):
@@ -343,6 +344,45 @@ def test_blocked_stage_exits(tmp_path):
     assert state.get("blocked_at") == "discovery"
     plan_calls = [(c.args[1], c.args[2]) for c in mock_plan.call_args_list]
     assert ("discovery", "blocked") in plan_calls
+    # PR node must be flipped to blocked on pipeline failure so it does not
+    # remain pending after a failed run. See ADR-026.
+    mock_pr_blocked.assert_called_once_with(run_folder_path)
+
+
+def test_review_subnode_status_resolved_after_cycle(tmp_path):
+    """After a fix cycle approves a previously changes-requested reviewer, the
+    orchestrator re-stamps the round-1 sub-node so it does not stay red beside
+    the green round-N sibling. See ADR-026."""
+    stages = [
+        {"stage": "review", "expansion": "prompts", "prompts": {"architecture": "prompts/review/architecture.md"}},
+    ]
+    docs_root = _setup_docs(tmp_path, stages)
+    run_folder_path = tmp_path / "projects" / "myproject" / "workflow" / "runs" / "feat" / "2026-01-01-run-1"
+    run_folder_path.mkdir(parents=True)
+
+    # Round-1: architecture requests changes, triggering the fix cycle path.
+    round1_signal = {
+        "stage": "review",
+        "status": "passed",
+        "reviewer_statuses": {"architecture": "changes-requested"},
+        "reviewer_findings": {"architecture": ["fix this"]},
+        "non_blocking_findings": [],
+    }
+    # The fake cycle approves on round 2.
+    cycle_result = {"all_passed": True, "reviewer_statuses": {"architecture": "approved"}}
+
+    with (
+        patch("orchestrator.orchestrate.run_stage", return_value=round1_signal),
+        patch("orchestrator.orchestrate.update_plan_md"),
+        patch("orchestrator.orchestrate.subprocess.run", return_value=_git_ok()),
+        patch("orchestrator.orchestrate._resolve_run_folder", return_value=run_folder_path),
+        patch("orchestrator.orchestrate.review_cycle_mod.is_valid_diff_file", return_value=True),
+        patch("orchestrator.orchestrate.review_cycle_mod.run", return_value=cycle_result),
+        patch("orchestrator.orchestrate.resolve_review_subnode_statuses") as mock_resolve,
+    ):
+        orchestrate.run_pipeline(docs_root, "myproject", "feature", "feat/test", str(tmp_path / "test.yaml"))
+
+    mock_resolve.assert_called_once_with(run_folder_path, {"architecture": "approved"})
 
 
 # ── resume skips completed stages ─────────────────────────────────────────────
