@@ -31,7 +31,7 @@ def build_initial_graph(
     create_pr: bool = False,
 ) -> Graph:
     graph = Graph(init_directive=_INIT_DIRECTIVE)
-    profile_subtitle = f"Profile: {profile.name.title()}" if profile.name else ""
+    profile_subtitle = f"Profile: {profile.name.replace('-', ' ').title()}" if profile.name else ""
     graph.add_node(
         Node(
             id="Start",
