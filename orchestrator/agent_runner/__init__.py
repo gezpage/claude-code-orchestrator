@@ -5,6 +5,7 @@ from orchestrator.agent_runner._claude import ClaudeCodePrintRunner
 from orchestrator.agent_runner._claude_auto import ClaudeCodeAutoRunner
 from orchestrator.agent_runner._codex import CodexCliRunner
 from orchestrator.agent_runner._fake import FakeRunner
+from orchestrator.agent_runner._progress import ProgressCallback, ProgressEvent
 from orchestrator.agent_runner._protocol import AgentRunner, AgentRunRequest, AgentRunResult
 from orchestrator.agent_runner._select import AgentConfig, build_runner, resolve_agent_config
 
@@ -17,6 +18,8 @@ __all__ = [
     "ClaudeCodePrintRunner",
     "CodexCliRunner",
     "FakeRunner",
+    "ProgressCallback",
+    "ProgressEvent",
     "build_runner",
     "resolve_agent_config",
 ]

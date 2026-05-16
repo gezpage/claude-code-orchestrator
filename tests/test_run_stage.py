@@ -177,6 +177,44 @@ def test_no_stream_log_written(tmp_path):
     assert list((run_folder / "discovery").glob("*-stream.log")) == []
 
 
+def test_progress_callback_attached_and_logs_events(tmp_path):
+    """run_stage attaches a progress callback to the runner request, and any
+    events the runner emits are logged into run.log so long-running stages
+    show forward progress instead of going silent. See ADR-024."""
+    from orchestrator.agent_runner import AgentRunRequest, AgentRunResult, ProgressEvent
+
+    run_folder, log_path = _setup_run_folder(tmp_path)
+
+    class _StreamingFake:
+        backend_name = "fake_stream"
+
+        def __init__(self):
+            self.requests: list[AgentRunRequest] = []
+
+        def run(self, request: AgentRunRequest) -> AgentRunResult:
+            self.requests.append(request)
+            assert request.progress_callback is not None
+            request.progress_callback(ProgressEvent(kind="tool_use", summary="tool Bash pytest tests/", tool="Bash"))
+            request.progress_callback(ProgressEvent(kind="assistant_text", summary="running tests"))
+            return AgentRunResult(
+                backend="fake_stream",
+                stdout=f"SIGNAL_JSON: {GOOD_SIGNAL}",
+                stderr="",
+                exit_code=0,
+                duration_seconds=0.0,
+                timed_out=False,
+            )
+
+    runner = _StreamingFake()
+    result = run_stage(
+        "discovery", "default", VARS, run_folder, str(tmp_path), "myproject", str(log_path), runner=runner
+    )
+    assert result["status"] == "passed"
+    run_log = (run_folder / "run.log").read_text()
+    assert "tool Bash pytest tests/" in run_log
+    assert "running tests" in run_log
+
+
 def test_non_zero_exit_blocks_signal_extraction(tmp_path):
     """A runner that fails with a non-zero exit code must not have its stdout parsed
     as a valid SIGNAL_JSON. Failure dominates whatever the agent claims to have

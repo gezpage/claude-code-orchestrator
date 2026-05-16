@@ -21,6 +21,12 @@ from orchestrator.agent_runner import (
 
 
 def _stub_popen(monkeypatch, target_module, stdout="", exit_code=0):
+    """Patch the subprocess.Popen used by the runner under test.
+
+    Both Claude runners delegate the actual Popen call to the shared driver in
+    ``orchestrator.agent_runner._claude``; codex has its own subprocess import.
+    We patch whichever module is doing the work for the target runner.
+    """
     captured: dict = {}
 
     class _FakePopen:
@@ -35,7 +41,15 @@ def _stub_popen(monkeypatch, target_module, stdout="", exit_code=0):
         def kill(self):
             pass
 
-    monkeypatch.setattr(target_module.subprocess, "Popen", _FakePopen)
+    if target_module.__name__.endswith((".._claude", "._claude", "._claude_auto")) or target_module.__name__ in {
+        "orchestrator.agent_runner._claude",
+        "orchestrator.agent_runner._claude_auto",
+    }:
+        from orchestrator.agent_runner import _claude as claude_driver
+
+        monkeypatch.setattr(claude_driver.subprocess, "Popen", _FakePopen)
+    else:
+        monkeypatch.setattr(target_module.subprocess, "Popen", _FakePopen)
     return captured
 
 
@@ -241,7 +255,7 @@ def test_claude_code_auto_runner_model_flag(monkeypatch):
 
 
 def test_claude_code_auto_runner_timeout_marks_result(monkeypatch):
-    from orchestrator.agent_runner import _claude_auto as auto_mod
+    from orchestrator.agent_runner import _claude as claude_mod
 
     class _SlowPopen:
         def __init__(self, cmd, **kwargs):
@@ -256,7 +270,7 @@ def test_claude_code_auto_runner_timeout_marks_result(monkeypatch):
         def kill(self):
             self._killed = True
 
-    monkeypatch.setattr(auto_mod.subprocess, "Popen", _SlowPopen)
+    monkeypatch.setattr(claude_mod.subprocess, "Popen", _SlowPopen)
     runner = ClaudeCodeAutoRunner()
     result = runner.run(AgentRunRequest(prompt="x", timeout_seconds=1))
     assert result.timed_out is True
@@ -533,3 +547,123 @@ def test_fake_runner_responder_callable():
     runner = FakeRunner(responder=lambda req: f"echo:{req.prompt}")
     result = runner.run(AgentRunRequest(prompt="hi"))
     assert result.stdout == "echo:hi"
+
+
+# ── Streaming progress (ADR-024) ──────────────────────────────────────────────
+
+
+def _stream_popen(monkeypatch, lines, exit_code=0):
+    """Patch the shared Claude subprocess driver to yield ``lines`` then exit."""
+    from orchestrator.agent_runner import _claude as claude_mod
+
+    captured: dict = {}
+
+    class _StreamPopen:
+        def __init__(self, cmd, **kwargs):
+            captured["cmd"] = cmd
+            captured["kwargs"] = kwargs
+            self.stdout = iter(lines)
+
+        def wait(self, timeout=None):
+            return exit_code
+
+        def kill(self):
+            pass
+
+    monkeypatch.setattr(claude_mod.subprocess, "Popen", _StreamPopen)
+    return captured
+
+
+def test_claude_runner_progress_callback_switches_to_stream_json(monkeypatch):
+    captured = _stream_popen(monkeypatch, lines=[])
+    runner = ClaudeCodePrintRunner()
+    events: list = []
+    runner.run(AgentRunRequest(prompt="x", progress_callback=events.append))
+    cmd = captured["cmd"]
+    assert "--output-format" in cmd
+    assert "stream-json" in cmd
+    # --verbose is required by the claude CLI when --output-format=stream-json is set.
+    assert "--verbose" in cmd
+
+
+def test_claude_runner_no_callback_stays_text_mode(monkeypatch):
+    captured = _stream_popen(monkeypatch, lines=["plain text\n"])
+    runner = ClaudeCodePrintRunner()
+    runner.run(AgentRunRequest(prompt="x"))
+    cmd = captured["cmd"]
+    assert "--output-format" not in cmd
+    assert "stream-json" not in cmd
+    assert "--verbose" not in cmd
+
+
+def test_claude_runner_parses_stream_events_and_emits_to_callback(monkeypatch):
+    lines = [
+        '{"type":"system","subtype":"init","model":"claude-opus-4-7"}\n',
+        (
+            '{"type":"assistant","message":{"content":'
+            '[{"type":"tool_use","name":"Bash","input":{"command":"pytest tests/"}},'
+            '{"type":"text","text":"running tests now"}]}}\n'
+        ),
+        (
+            '{"type":"result","subtype":"success","is_error":false,'
+            '"result":"final reply\\nSIGNAL_JSON: {\\"stage\\":\\"x\\",\\"status\\":\\"passed\\"}"}\n'
+        ),
+    ]
+    _stream_popen(monkeypatch, lines=lines)
+    runner = ClaudeCodePrintRunner()
+    events: list = []
+    result = runner.run(AgentRunRequest(prompt="x", progress_callback=events.append))
+
+    kinds = [e.kind for e in events]
+    assert "session_start" in kinds
+    assert "tool_use" in kinds
+    assert "assistant_text" in kinds
+    assert "session_end" in kinds
+
+    tool_event = next(e for e in events if e.kind == "tool_use")
+    assert tool_event.tool == "Bash"
+    assert "pytest" in tool_event.summary
+
+    # result.stdout reconstructed from the final result event so SIGNAL_JSON
+    # extraction works exactly as in text mode.
+    assert "SIGNAL_JSON" in result.stdout
+    assert "final reply" in result.stdout
+
+
+def test_claude_runner_streaming_falls_back_to_raw_stream_when_no_result(monkeypatch):
+    """If the agent crashes before emitting a result event, output.md must still
+    carry the raw JSONL so the failure remains diagnosable."""
+    lines = [
+        '{"type":"system","subtype":"init","model":"claude-opus-4-7"}\n',
+        "ERROR: keychain auth failed\n",
+    ]
+    _stream_popen(monkeypatch, lines=lines)
+    runner = ClaudeCodePrintRunner()
+    result = runner.run(AgentRunRequest(prompt="x", progress_callback=lambda _e: None))
+    assert "ERROR: keychain auth failed" in result.stdout
+
+
+def test_claude_runner_callback_exceptions_do_not_break_run(monkeypatch):
+    """A logger glitch must not abort a stage — the runner swallows callback errors."""
+    lines = [
+        '{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Edit","input":{"file_path":"x.py"}}]}}\n',
+        '{"type":"result","subtype":"success","result":"done"}\n',
+    ]
+    _stream_popen(monkeypatch, lines=lines)
+    runner = ClaudeCodePrintRunner()
+
+    def _exploding(_event):
+        raise RuntimeError("logger crashed")
+
+    result = runner.run(AgentRunRequest(prompt="x", progress_callback=_exploding))
+    assert result.stdout == "done"
+
+
+def test_claude_auto_runner_progress_callback_also_streams(monkeypatch):
+    captured = _stream_popen(monkeypatch, lines=[])
+    runner = ClaudeCodeAutoRunner()
+    runner.run(AgentRunRequest(prompt="x", progress_callback=lambda _e: None))
+    cmd = captured["cmd"]
+    assert "--output-format" in cmd
+    assert "stream-json" in cmd
+    assert "--verbose" in cmd
