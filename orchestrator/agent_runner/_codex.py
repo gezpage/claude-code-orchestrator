@@ -19,14 +19,17 @@ class CodexCliRunner(AgentRunner):
     `full-auto` alias maps to `--dangerously-bypass-approvals-and-sandbox` (the
     current Codex flag for "no sandbox, no approvals") and is never the default.
 
-    `--ask-for-approval never` is also passed in every non-`full-auto` branch:
+    `-c approval_policy=never` is also passed in every non-`full-auto` branch:
     codex has two independent gates (sandbox + approval), and the sandbox flag
     alone is not sufficient for unattended runs. Without `never`, codex escalates
     out-of-workspace writes (and other sandbox-allowed-but-flagged operations) to
     a human, which deadlocks `codex exec` and surfaces as `error=patch rejected:
-    rejected by user approval settings`. `full-auto` already implies "no
-    approval" via `--dangerously-bypass-approvals-and-sandbox`, so it does not
-    receive the flag.
+    rejected by user approval settings`. The approval policy is set via the
+    `-c key=value` config override flag because `codex exec` (the non-interactive
+    subcommand) does not expose `--ask-for-approval` directly — that flag only
+    exists on the top-level interactive `codex` command. `full-auto` already
+    implies "no approval" via `--dangerously-bypass-approvals-and-sandbox`, so it
+    does not receive the override.
 
     `sterile_context` is currently a no-op for this backend — codex has no
     equivalent of CLAUDE_CODE_DISABLE_AUTO_MEMORY, but the constructor accepts the
@@ -60,9 +63,9 @@ class CodexCliRunner(AgentRunner):
             # Codex CLI replaced --full-auto with --dangerously-bypass-approvals-and-sandbox.
             cmd += ["--dangerously-bypass-approvals-and-sandbox"]
         elif mode in self._SANDBOX_MODES:
-            cmd += ["--sandbox", mode, "--ask-for-approval", "never"]
+            cmd += ["--sandbox", mode, "-c", "approval_policy=never"]
         else:
-            cmd += ["--sandbox", self._DEFAULT_SANDBOX, "--ask-for-approval", "never"]
+            cmd += ["--sandbox", self._DEFAULT_SANDBOX, "-c", "approval_policy=never"]
         model = request.model or self._model
         timeout_seconds = request.timeout_seconds if request.timeout_seconds is not None else self._timeout_seconds
         workspace_root = request.workspace_root or request.cwd
