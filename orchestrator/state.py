@@ -14,7 +14,11 @@ def load_state(run_folder) -> dict:
 def save_state(run_folder, state: dict) -> None:
     p = Path(run_folder) / "_state.yaml"
     p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(yaml.dump(state, default_flow_style=False))
+    # sort_keys=False preserves insertion order so the "elapsed" map records stage
+    # completion order. The run-summary table iterates that map verbatim, so a sorted
+    # dump (the yaml.dump default) re-emits stages alphabetically and the table loses
+    # its chronological story — see issue #130.
+    p.write_text(yaml.dump(state, default_flow_style=False, sort_keys=False))
 
 
 def update_stage_status(run_folder, stage: str, status: str) -> None:
