@@ -1,14 +1,21 @@
 ---
 status: accepted
 date: 2026-05-16
-affects: [agent_runner/_claude.py, agent_runner/_claude_auto.py]
+affects: [agent_runner/_claude.py]
 amends: [ADR-018, ADR-022]
+amended_by: [ADR-025]
 ---
 
 # ADR-023: Sterile Context Also Suppresses MCP Servers
 
-**Status:** Accepted
+**Status:** Accepted (amended by [ADR-025](ADR-025-remove-dangerously-skip-permissions.md))
 **Date:** 2026-05-16
+
+> **Note.** This ADR refers to `ClaudeCodePrintRunner` and
+> `ClaudeCodeAutoRunner` as a pair. [ADR-025](ADR-025-remove-dangerously-skip-permissions.md)
+> has since collapsed them into a single `ClaudeCodeRunner` (backend
+> `claude_code`); the MCP-suppression behaviour described below applies to
+> that one runner unchanged.
 
 ## Context
 

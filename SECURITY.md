@@ -115,7 +115,7 @@ Network egress is the hardest dimension to lock down because the implementation 
 Honest statement of what Orchestrator **does not** currently do:
 
 - **No process sandboxing.** Stages are plain subprocesses inheriting the operator's environment, network, and filesystem access. The only enforced boundary is the working directory passed via `cwd`.
-- **No per-tool permission enforcement** at stage time. `--dangerously-skip-permissions` is a hard invariant of the pipeline (see [ADR-003](docs/adrs/ADR-003-dangerously-skip-permissions.md)); there is no allow-list.
+- **Permission gating, but no per-tool allow-list.** The Claude runner dispatches under `--permission-mode auto` (see [ADR-025](docs/adrs/ADR-025-remove-dangerously-skip-permissions.md)), the next-most-permissive mode short of `bypassPermissions`. Most tool uses are approved without prompting; there is no operator-maintained allow-list, and the threat model continues to treat stages as fully trusted subprocesses.
 - **No content filtering on stage outputs.** A stage that writes a malicious file leaves it on disk; only human review catches this.
 - **No prompt-injection defence.** Trust in input files is total. A feature spec that contains hostile instructions will be acted on.
 - **No audit log signing.** `run.log` and `_state.yaml` are plain files; an agent with filesystem access can rewrite its own audit trail in principle.
@@ -126,12 +126,9 @@ These gaps are deliberate trade-offs for the unattended-pipeline use case, not o
 
 ## Unrestricted execution modes — warning
 
-The pipeline runs under `--dangerously-skip-permissions --bare` **by design**. Removing either flag is not the answer:
+Stages dispatch under `--permission-mode auto` (Claude runner) or the configured Codex sandbox mode. `auto` approves most tool uses without prompting; the operator retains the audit trail of what was allowed but does not gate individual approvals. The threat model treats stage subprocesses as fully trusted — they can execute arbitrary shell commands, write files under `repo-root` / `docs-root`, and make git commits. The Codex backend with `--sandbox danger-full-access` (or the `full-auto` alias, which maps to `--dangerously-bypass-approvals-and-sandbox`) is the escape hatch for environments that need a fully permissive dispatch.
 
-- Removing `--dangerously-skip-permissions` causes the pipeline to hang on every permission prompt — unattended dispatch breaks immediately.
-- Removing `--bare` re-enables MCP servers and hooks at stage startup; stages would then inherit whatever side effects those hooks were configured for, defeating the isolation the flag provides.
-
-If unrestricted execution is unacceptable in your environment, do not run Orchestrator there. Run it in a container or VM that is itself unrestricted but quarantined.
+If that posture is unacceptable in your environment, do not run Orchestrator there. Run it in a container or VM that is itself unrestricted but quarantined.
 
 ---
 

@@ -759,7 +759,7 @@ def test_node_label_shows_runner_and_model_on_separate_lines(tmp_path):
     init_plan_md(
         run_folder,
         profile,
-        agent_metadata={"specification": {"backend": "claude_code_print", "model": "claude-opus-4-7"}},
+        agent_metadata={"specification": {"backend": "claude_code", "model": "claude-opus-4-7"}},
     )
     content = (run_folder / "plan.md").read_text()
     assert "claude · claude-opus-4-7" in content

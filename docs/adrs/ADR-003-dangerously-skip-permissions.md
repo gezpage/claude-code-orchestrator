@@ -1,18 +1,18 @@
 ---
 status: superseded
-superseded_by: ADR-018
+superseded_by: ADR-025
 date: 2026-05-07
 affects: [run_stage.py]
 ---
 
 # ADR-003: `--dangerously-skip-permissions` in All Stage Dispatches
 
-**Status:** Superseded by [ADR-018](ADR-018-agent-runner-abstraction.md)
+**Status:** Superseded by [ADR-025](ADR-025-remove-dangerously-skip-permissions.md) (originally moved into `ClaudeCodePrintRunner` by [ADR-018](ADR-018-agent-runner-abstraction.md))
 **Date:** 2026-05-07
 
-> **Note.** The invariant from this ADR now lives inside `ClaudeCodePrintRunner`
-> (see ADR-018). The flag is still mandatory, but it is enforced by the runner,
-> not by every `run_stage()` call site.
+> **Note.** `--dangerously-skip-permissions` is no longer used. The Claude
+> runner now dispatches with `--permission-mode auto`; see ADR-025. The text
+> below is preserved for historical reference.
 
 ## Context
 

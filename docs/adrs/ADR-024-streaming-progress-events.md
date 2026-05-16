@@ -2,12 +2,19 @@
 status: accepted
 date: 2026-05-16
 affects: [agent_runner/, run_stage.py]
+amended_by: [ADR-025]
 ---
 
 # ADR-024: Streaming Progress Events from Agent Runners
 
-**Status:** Accepted
+**Status:** Accepted (amended by [ADR-025](ADR-025-remove-dangerously-skip-permissions.md))
 **Date:** 2026-05-16
+
+> **Note.** This ADR refers to `ClaudeCodePrintRunner` and
+> `ClaudeCodeAutoRunner` as a pair. [ADR-025](ADR-025-remove-dangerously-skip-permissions.md)
+> has since collapsed them into a single `ClaudeCodeRunner` (backend
+> `claude_code`); the streaming progress behaviour described below applies
+> to that one runner unchanged.
 
 ## Context
 

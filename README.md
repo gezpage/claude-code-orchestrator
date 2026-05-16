@@ -6,7 +6,7 @@ Pipeline sequencer for feature development. Takes a feature spec and drives it t
 
 > ## Safety notice — read before running
 >
-> Orchestrator dispatches stage agents via the `AgentRunner` seam (see [ADR-018](docs/adrs/ADR-018-agent-runner-abstraction.md)). The default backend, `ClaudeCodePrintRunner`, always passes `--dangerously-skip-permissions` and `--bare`. The Codex backend defaults to `--sandbox workspace-write`. Each stage runs **unattended** and, depending on the configured backend's permission mode, has full ability to:
+> Orchestrator dispatches stage agents via the `AgentRunner` seam (see [ADR-018](docs/adrs/ADR-018-agent-runner-abstraction.md)). The default backend, `ClaudeCodeRunner`, dispatches `claude` with `--permission-mode auto` — the next-most-permissive mode short of `bypassPermissions`. The Codex backend defaults to `--sandbox workspace-write`. Each stage runs **unattended** and, depending on the configured backend's permission mode, has full ability to:
 >
 > - **execute arbitrary shell commands** in your `repo-root` and `docs-root`
 > - **read, write, and delete files** under those roots
@@ -39,7 +39,7 @@ Each run produces a folder of stage prompts, raw outputs, and a `_state.yaml` th
 
 **Signals as contracts.** Each stage emits exactly one `SIGNAL_JSON:` sentinel line carrying a structured dict with status, message, and typed output fields validated against a schema. The schema is the interface; any prompt implementation that satisfies it can be substituted. If a stage fails to emit the sentinel, the orchestrator sends one grace retry prompt before marking the stage as blocked.
 
-**Stages as trusted workers.** Stage agents are dispatched through the `AgentRunner` seam ([ADR-018](docs/adrs/ADR-018-agent-runner-abstraction.md)) under whichever backend the active profile selects. The default backend, `ClaudeCodePrintRunner`, always passes `--bare` and `--dangerously-skip-permissions`: full built-in tool access, no MCP servers loaded, no hook execution. This is the intended use case — unattended, trusted pipeline execution on a developer workstation or controlled CI environment. The `--bare` flag reduces startup latency and eliminates hook side effects; `--dangerously-skip-permissions` removes permission gates so stages can read, write, and run commands without interruption. These two flags are runner-level invariants, not project-wide invariants — a different backend (e.g. Codex with `--sandbox workspace-write`) is free to enforce sandboxing instead.
+**Stages as trusted workers.** Stage agents are dispatched through the `AgentRunner` seam ([ADR-018](docs/adrs/ADR-018-agent-runner-abstraction.md)) under whichever backend the active profile selects. The default backend, `ClaudeCodeRunner`, dispatches `claude` with `--permission-mode auto`: full built-in tool access with Claude's permission system engaged at its most permissive setting short of `bypassPermissions`. This is the intended use case — unattended, trusted pipeline execution on a developer workstation or controlled CI environment. The runner's permission flag is a runner-level invariant, not a project-wide invariant — a different backend (e.g. Codex with `--sandbox workspace-write`) is free to enforce sandboxing instead.
 
 **Human-in-the-loop by design.** The alignment stage is a declared pipeline pause point. When the pipeline reaches it, the orchestrator prints a `resume` command and exits. The developer runs alignment in a full interactive Claude Code session — with Forge MCP, full tool access, and human participation — then reinvokes the orchestrator to continue. This is not a workaround; it is the documented execution model for stages that require human judgment.
 
@@ -108,8 +108,8 @@ Built-in profiles ship with the package:
 |------|--------|
 | `full` *(default)* | discovery → alignment → specification → decomposition → implementation → QA → verification → review → harvest |
 | `minimal` | specification → decomposition → implementation → verification → review (single reviewer) — no discovery, alignment, QA, or harvest |
-| `minimal-codex` | Same stages as `minimal`, but dispatches autonomous stages through the `codex_cli` backend (`--sandbox workspace-write`) using the user's Codex CLI default model. The implementation stage overrides to `--sandbox danger-full-access` so it can write `.git` and commit. Intended for fast local runs when Claude Code print-mode is unavailable. |
-| `minimal-claude` | Same stages as `minimal`, but dispatches non-review stages through the `claude_code_auto` backend (`claude -p --permission-mode auto`, model `claude-opus-4-7`) and routes the review stage through `codex_cli` (read-only). Intended for local Claude subscription / OAuth use where `--bare` is unavailable (it forces `ANTHROPIC_API_KEY`-only auth); isolation is weaker than `minimal`, so prefer `minimal` for reproducibility-sensitive work. |
+| `minimal-codex` | Same stages as `minimal`, but dispatches autonomous stages through the `codex_cli` backend (`--sandbox workspace-write`) using the user's Codex CLI default model. The implementation stage overrides to `--sandbox danger-full-access` so it can write `.git` and commit. Intended for fast local runs when the Claude runner is unavailable. |
+| `minimal-claude` | Same stages as `minimal`, but pins the Claude runner to model `claude-opus-4-7` and routes the review stage through `codex_cli` (read-only). Use this when you want a fixed Claude model for the implementation chain and a Codex reviewer; for the default model and a Claude reviewer, prefer `minimal`. |
 | `spike` | discovery only — research and findings, no implementation |
 
 To use a custom profile, pass a path to any YAML file:
@@ -171,7 +171,7 @@ Autonomous stages dispatch through an `AgentRunner` (see [ADR-018](docs/adrs/ADR
 ```yaml
 name: mixed
 agent:                       # profile-level default
-  backend: claude_code_print
+  backend: claude_code
   model: opus
   sterile_context: true      # default — sets CLAUDE_CODE_DISABLE_AUTO_MEMORY=1
 
@@ -192,14 +192,13 @@ stages:
 
 | Backend | Selector | Command shape | Notes |
 |---------|----------|---------------|-------|
-| Claude Code (print mode) | `claude_code_print` *(default)* | `claude -p <prompt> --bare --dangerously-skip-permissions [--model <m>]` | `sterile_context: true` (default) sets `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1` to suppress ambient auto-memory injection. The `--bare` and `--dangerously-skip-permissions` flags are mandatory invariants of this runner. Requires `ANTHROPIC_API_KEY` (the `--bare` flag rejects OAuth / keychain auth). |
-| Claude Code (auto mode) | `claude_code_auto` | `claude -p <prompt> --permission-mode auto [--model <m>]` | Transitional backend for local use with Claude subscription / OAuth auth. `--bare` is **intentionally absent** — it would force `ANTHROPIC_API_KEY`-only auth, defeating the point. `--dangerously-skip-permissions` is also absent so Claude's permission gating stays engaged (`auto` is the next-most-permissive mode short of `bypassPermissions`). `sterile_context: true` (default) still sets `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1`, but the runner cannot block hooks, LSP, plugin sync, keychain reads or repo-root `CLAUDE.md` auto-discovery — isolation is strictly weaker than `claude_code_print`. Reproducibility-sensitive runs should prefer `claude_code_print` (with API key) or `codex_cli`. |
+| Claude Code | `claude_code` *(default)* | `claude <prompt> --permission-mode auto [--model <m>] [--strict-mcp-config --mcp-config '{"mcpServers":{}}']` | Dispatches via OAuth/keychain auth (`ANTHROPIC_API_KEY` and `ANTHROPIC_AUTH_TOKEN` are stripped from the forwarded env to prevent stale keys overriding the keychain — see ADR-022). `--permission-mode auto` is the next-most-permissive mode short of `bypassPermissions` (ADR-025). `sterile_context: true` (default) sets `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1` and adds `--strict-mcp-config --mcp-config '{"mcpServers":{}}'` to suppress globally configured MCP servers (ADR-023). Hooks, LSP, plugin sync, keychain reads and repo-root `CLAUDE.md` auto-discovery remain active — reproducibility-sensitive runs should prefer `codex_cli`. |
 | Codex CLI | `codex_cli` | `codex exec <prompt> --sandbox <mode> [-m <model>]` | `permission_mode` accepts `read-only`, `workspace-write` *(default)*, `danger-full-access` (lifts the FS sandbox so e.g. `.git` writes work), and the explicit `full-auto` alias (maps to `--dangerously-bypass-approvals-and-sandbox` — no sandbox and no approvals). Requires the `codex` binary on PATH. |
 
 Current limitations:
 
 - Anthropic API and OpenAI API backends are not implemented (the seam is in place — adding them is a single module + one branch in `agent_runner/_select.py`).
-- Output streaming/JSON-mode normalisation is not implemented; `output_mode` is consumed by `ClaudeCodePrintRunner` (maps to `--output-format`) but ignored by Codex.
+- Output streaming/JSON-mode normalisation is not implemented; `output_mode` is consumed by `ClaudeCodeRunner` (maps to `--output-format`) but ignored by Codex.
 - Interactive stages (`mode: interactive`) bypass the runner seam and always use `claude`.
 - Fix-cycle dispatches inside `review_cycle.py` currently use the default runner; per-stage backend overrides do not propagate into fix cycles.
 

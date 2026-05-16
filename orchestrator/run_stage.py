@@ -10,7 +10,7 @@ from orchestrator import signal as signal_mod
 from orchestrator.agent_runner import (
     AgentRunner,
     AgentRunRequest,
-    ClaudeCodePrintRunner,
+    ClaudeCodeRunner,
     ProgressEvent,
 )
 from orchestrator.logger import OrchestratorLogger
@@ -103,9 +103,9 @@ def _agent_writable_roots(docs_root: str, run_folder: Path, variables: dict) -> 
 
 
 def _default_runner() -> AgentRunner:
-    """Default runner when callers haven't injected one. Matches the legacy command shape
-    (claude -p ... --bare --dangerously-skip-permissions) with sterile context enabled."""
-    return ClaudeCodePrintRunner(sterile_context=True)
+    """Default runner when callers haven't injected one: `claude` with `--permission-mode auto`
+    and sterile context enabled. See ADR-025."""
+    return ClaudeCodeRunner(sterile_context=True)
 
 
 def _make_progress_callback(logger: OrchestratorLogger, stage: str):
@@ -274,8 +274,8 @@ def run_deterministic_stage(
 ) -> dict:
     """Run a deterministic verification stage in-process.
 
-    No Claude subprocess is invoked; the --bare and --dangerously-skip-permissions
-    invariants apply only to run_stage(). See ADR-017.
+    No Claude subprocess is invoked; runner CLI invariants apply only to
+    run_stage(). See ADR-017.
 
     Returns a signal dict matching schemas/verification.json. On engine failure
     (e.g. no toolchain resolvable), returns a 'blocked' signal so the existing
@@ -322,7 +322,8 @@ def run_interactive_stage(
 ) -> dict:
     """Launch an interactive Claude session for a stage that requires human participation.
 
-    Unlike run_stage(), this does not use --bare or --dangerously-skip-permissions.
+    Unlike run_stage(), this does not pass --permission-mode — interactive
+    `claude` uses its normal permission flow.
     Completion is determined by the existence of artifact_path after the session exits.
     """
     run_folder = Path(run_folder)

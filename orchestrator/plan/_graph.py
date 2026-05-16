@@ -31,7 +31,7 @@ class Node:
     display: str = ""
     impl: str = ""
     mode: str = ""
-    # Runner backend (e.g. claude_code_print, codex_cli, deterministic) and model
+    # Runner backend (e.g. claude_code, codex_cli, deterministic) and model
     # name (e.g. claude-opus-4-7, gpt-5). Populated from resolved agent config so
     # the diagram shows which agent ran each stage.
     backend: str = ""

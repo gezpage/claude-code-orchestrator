@@ -9,8 +9,7 @@ import pytest
 from orchestrator.agent_runner import (
     AgentConfig,
     AgentRunRequest,
-    ClaudeCodeAutoRunner,
-    ClaudeCodePrintRunner,
+    ClaudeCodeRunner,
     CodexCliRunner,
     FakeRunner,
     build_runner,
@@ -23,9 +22,8 @@ from orchestrator.agent_runner import (
 def _stub_popen(monkeypatch, target_module, stdout="", exit_code=0):
     """Patch the subprocess.Popen used by the runner under test.
 
-    Both Claude runners delegate the actual Popen call to the shared driver in
-    ``orchestrator.agent_runner._claude``; codex has its own subprocess import.
-    We patch whichever module is doing the work for the target runner.
+    Both the Claude runner and codex have their own subprocess imports; the
+    helper points monkeypatch at whichever module the caller passes in.
     """
     captured: dict = {}
 
@@ -41,15 +39,7 @@ def _stub_popen(monkeypatch, target_module, stdout="", exit_code=0):
         def kill(self):
             pass
 
-    if target_module.__name__.endswith((".._claude", "._claude", "._claude_auto")) or target_module.__name__ in {
-        "orchestrator.agent_runner._claude",
-        "orchestrator.agent_runner._claude_auto",
-    }:
-        from orchestrator.agent_runner import _claude as claude_driver
-
-        monkeypatch.setattr(claude_driver.subprocess, "Popen", _FakePopen)
-    else:
-        monkeypatch.setattr(target_module.subprocess, "Popen", _FakePopen)
+    monkeypatch.setattr(target_module.subprocess, "Popen", _FakePopen)
     return captured
 
 
@@ -57,12 +47,15 @@ def test_claude_runner_command_construction(monkeypatch):
     from orchestrator.agent_runner import _claude as claude_mod
 
     captured = _stub_popen(monkeypatch, claude_mod, stdout="hello")
-    runner = ClaudeCodePrintRunner(sterile_context=True)
+    runner = ClaudeCodeRunner(sterile_context=True)
     runner.run(AgentRunRequest(prompt="do the thing", stage_name="discovery"))
     cmd = captured["cmd"]
     assert cmd[0] == "claude"
     assert "do the thing" in cmd
-    assert "--dangerously-skip-permissions" in cmd
+    # ADR-025: --permission-mode auto replaces --dangerously-skip-permissions.
+    assert "--permission-mode" in cmd
+    assert "auto" in cmd
+    assert "--dangerously-skip-permissions" not in cmd
     # ADR-022: --bare and -p are intentionally absent (OAuth/keychain auth path).
     assert "--bare" not in cmd
     assert "-p" not in cmd
@@ -76,7 +69,7 @@ def test_claude_runner_mcp_suppression_absent_when_sterile_disabled(monkeypatch)
     from orchestrator.agent_runner import _claude as claude_mod
 
     captured = _stub_popen(monkeypatch, claude_mod)
-    runner = ClaudeCodePrintRunner(sterile_context=False)
+    runner = ClaudeCodeRunner(sterile_context=False)
     runner.run(AgentRunRequest(prompt="x"))
     cmd = captured["cmd"]
     # Opting out of sterile_context re-enables the user's configured MCP servers.
@@ -90,7 +83,7 @@ def test_claude_runner_strips_anthropic_api_key_env(monkeypatch):
     captured = _stub_popen(monkeypatch, claude_mod)
     monkeypatch.setenv("ANTHROPIC_API_KEY", "stale-key")
     monkeypatch.setenv("ANTHROPIC_AUTH_TOKEN", "stale-token")
-    runner = ClaudeCodePrintRunner()
+    runner = ClaudeCodeRunner()
     runner.run(AgentRunRequest(prompt="x"))
     env = captured["kwargs"]["env"]
     # ADR-022: external-key env vars must be removed so keychain/OAuth is used.
@@ -102,7 +95,7 @@ def test_claude_runner_sterile_env_set_when_enabled(monkeypatch):
     from orchestrator.agent_runner import _claude as claude_mod
 
     captured = _stub_popen(monkeypatch, claude_mod)
-    runner = ClaudeCodePrintRunner(sterile_context=True)
+    runner = ClaudeCodeRunner(sterile_context=True)
     runner.run(AgentRunRequest(prompt="x"))
     assert captured["kwargs"]["env"].get("CLAUDE_CODE_DISABLE_AUTO_MEMORY") == "1"
 
@@ -111,7 +104,7 @@ def test_claude_runner_sterile_env_absent_when_disabled(monkeypatch):
     from orchestrator.agent_runner import _claude as claude_mod
 
     captured = _stub_popen(monkeypatch, claude_mod)
-    runner = ClaudeCodePrintRunner(sterile_context=False)
+    runner = ClaudeCodeRunner(sterile_context=False)
     # Ensure no inherited value would leak through.
     monkeypatch.delenv("CLAUDE_CODE_DISABLE_AUTO_MEMORY", raising=False)
     runner.run(AgentRunRequest(prompt="x"))
@@ -122,7 +115,7 @@ def test_claude_runner_request_env_overrides_inherited(monkeypatch):
     from orchestrator.agent_runner import _claude as claude_mod
 
     captured = _stub_popen(monkeypatch, claude_mod)
-    runner = ClaudeCodePrintRunner(sterile_context=False)
+    runner = ClaudeCodeRunner(sterile_context=False)
     runner.run(AgentRunRequest(prompt="x", env={"FOO": "bar"}))
     assert captured["kwargs"]["env"].get("FOO") == "bar"
 
@@ -131,7 +124,15 @@ def test_claude_runner_model_flag(monkeypatch):
     from orchestrator.agent_runner import _claude as claude_mod
 
     captured = _stub_popen(monkeypatch, claude_mod)
-    runner = ClaudeCodePrintRunner()
+    runner = ClaudeCodeRunner()
+    runner.run(AgentRunRequest(prompt="x", model="sonnet"))
+    cmd = captured["cmd"]
+    assert "--model" in cmd
+    assert "sonnet" in cmd
+
+    # Request-level model overrides the constructor default.
+    captured = _stub_popen(monkeypatch, claude_mod)
+    runner = ClaudeCodeRunner(model="claude-opus-4-7")
     runner.run(AgentRunRequest(prompt="x", model="sonnet"))
     cmd = captured["cmd"]
     assert "--model" in cmd
@@ -155,7 +156,7 @@ def test_claude_runner_timeout_marks_result(monkeypatch):
             self._killed = True
 
     monkeypatch.setattr(claude_mod.subprocess, "Popen", _SlowPopen)
-    runner = ClaudeCodePrintRunner()
+    runner = ClaudeCodeRunner()
     result = runner.run(AgentRunRequest(prompt="x", timeout_seconds=1))
     assert result.timed_out is True
 
@@ -164,123 +165,10 @@ def test_claude_runner_non_zero_exit_captured(monkeypatch):
     from orchestrator.agent_runner import _claude as claude_mod
 
     _stub_popen(monkeypatch, claude_mod, exit_code=2)
-    runner = ClaudeCodePrintRunner()
+    runner = ClaudeCodeRunner()
     result = runner.run(AgentRunRequest(prompt="x"))
     assert result.exit_code == 2
     assert result.timed_out is False
-
-
-# ── Claude code auto runner ───────────────────────────────────────────────────
-
-
-def test_claude_code_auto_runner_builds_expected_command(monkeypatch):
-    from orchestrator.agent_runner import _claude_auto as auto_mod
-
-    captured = _stub_popen(monkeypatch, auto_mod, stdout="ok")
-    runner = ClaudeCodeAutoRunner()
-    runner.run(AgentRunRequest(prompt="do the thing"))
-    cmd = captured["cmd"]
-    assert cmd[0] == "claude"
-    assert "do the thing" in cmd
-    assert "--permission-mode" in cmd
-    assert "auto" in cmd
-    # ADR-022: --bare, -p, and --dangerously-skip-permissions are all absent.
-    # --bare forces ANTHROPIC_API_KEY auth; -p is redundant under piped stdout;
-    # --dangerously-skip-permissions would defeat the permission gating.
-    assert "--bare" not in cmd
-    assert "-p" not in cmd
-    assert "--dangerously-skip-permissions" not in cmd
-    # ADR-023: sterile_context (default) suppresses every MCP server.
-    assert "--strict-mcp-config" in cmd
-    assert "--mcp-config" in cmd
-    assert '{"mcpServers":{}}' in cmd
-
-
-def test_claude_code_auto_runner_mcp_suppression_absent_when_sterile_disabled(monkeypatch):
-    from orchestrator.agent_runner import _claude_auto as auto_mod
-
-    captured = _stub_popen(monkeypatch, auto_mod)
-    runner = ClaudeCodeAutoRunner(sterile_context=False)
-    runner.run(AgentRunRequest(prompt="x"))
-    cmd = captured["cmd"]
-    assert "--strict-mcp-config" not in cmd
-    assert "--mcp-config" not in cmd
-
-
-def test_claude_code_auto_runner_strips_anthropic_api_key_env(monkeypatch):
-    from orchestrator.agent_runner import _claude_auto as auto_mod
-
-    captured = _stub_popen(monkeypatch, auto_mod)
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "stale-key")
-    monkeypatch.setenv("ANTHROPIC_AUTH_TOKEN", "stale-token")
-    runner = ClaudeCodeAutoRunner()
-    runner.run(AgentRunRequest(prompt="x"))
-    env = captured["kwargs"]["env"]
-    assert "ANTHROPIC_API_KEY" not in env
-    assert "ANTHROPIC_AUTH_TOKEN" not in env
-
-
-def test_claude_code_auto_runner_sterile_context_env(monkeypatch):
-    from orchestrator.agent_runner import _claude_auto as auto_mod
-
-    captured = _stub_popen(monkeypatch, auto_mod)
-    runner = ClaudeCodeAutoRunner(sterile_context=True)
-    runner.run(AgentRunRequest(prompt="x"))
-    assert captured["kwargs"]["env"].get("CLAUDE_CODE_DISABLE_AUTO_MEMORY") == "1"
-
-    captured = _stub_popen(monkeypatch, auto_mod)
-    monkeypatch.delenv("CLAUDE_CODE_DISABLE_AUTO_MEMORY", raising=False)
-    runner = ClaudeCodeAutoRunner(sterile_context=False)
-    runner.run(AgentRunRequest(prompt="x"))
-    assert "CLAUDE_CODE_DISABLE_AUTO_MEMORY" not in captured["kwargs"]["env"]
-
-
-def test_claude_code_auto_runner_model_flag(monkeypatch):
-    from orchestrator.agent_runner import _claude_auto as auto_mod
-
-    captured = _stub_popen(monkeypatch, auto_mod)
-    runner = ClaudeCodeAutoRunner(model="claude-opus-4-7")
-    runner.run(AgentRunRequest(prompt="x"))
-    cmd = captured["cmd"]
-    assert "--model" in cmd
-    assert "claude-opus-4-7" in cmd
-
-    # Request-level model overrides the constructor default.
-    captured = _stub_popen(monkeypatch, auto_mod)
-    runner = ClaudeCodeAutoRunner(model="claude-opus-4-7")
-    runner.run(AgentRunRequest(prompt="x", model="sonnet"))
-    cmd = captured["cmd"]
-    assert "--model" in cmd
-    assert "sonnet" in cmd
-
-
-def test_claude_code_auto_runner_timeout_marks_result(monkeypatch):
-    from orchestrator.agent_runner import _claude as claude_mod
-
-    class _SlowPopen:
-        def __init__(self, cmd, **kwargs):
-            self.stdout = iter(["partial"])
-            self._killed = False
-
-        def wait(self, timeout=None):
-            if self._killed:
-                return -9
-            raise subprocess.TimeoutExpired(cmd="claude", timeout=1)
-
-        def kill(self):
-            self._killed = True
-
-    monkeypatch.setattr(claude_mod.subprocess, "Popen", _SlowPopen)
-    runner = ClaudeCodeAutoRunner()
-    result = runner.run(AgentRunRequest(prompt="x", timeout_seconds=1))
-    assert result.timed_out is True
-
-
-def test_build_runner_resolves_claude_code_auto():
-    runner = build_runner(AgentConfig(backend="claude_code_auto", model="claude-opus-4-7", timeout_seconds=42))
-    assert isinstance(runner, ClaudeCodeAutoRunner)
-    assert runner._model == "claude-opus-4-7"
-    assert runner._timeout_seconds == 42
 
 
 # ── Codex runner ──────────────────────────────────────────────────────────────
@@ -460,7 +348,7 @@ def test_codex_runner_result_stdout_falls_back_to_stream_when_no_last_message(mo
 
 def test_resolve_agent_config_defaults():
     cfg = resolve_agent_config(None, None)
-    assert cfg.backend == "claude_code_print"
+    assert cfg.backend == "claude_code"
     assert cfg.sterile_context is True
     assert cfg.model is None
 
@@ -469,12 +357,12 @@ def test_resolve_agent_config_profile_only():
     cfg = resolve_agent_config({"model": "opus", "sterile_context": False}, None)
     assert cfg.model == "opus"
     assert cfg.sterile_context is False
-    assert cfg.backend == "claude_code_print"
+    assert cfg.backend == "claude_code"
 
 
 def test_resolve_agent_config_stage_overrides_profile():
     cfg = resolve_agent_config(
-        {"backend": "claude_code_print", "model": "opus"},
+        {"backend": "claude_code", "model": "opus"},
         {"backend": "codex_cli", "model": "gpt-5.1-codex"},
     )
     assert cfg.backend == "codex_cli"
@@ -491,7 +379,7 @@ def test_resolve_agent_config_drops_profile_model_when_stage_switches_backend():
     codex (or vice versa). Models are CLI-specific — passing `claude-opus-4-7` to
     `codex exec -m ...` produces a 400 from Codex's account-level model whitelist."""
     cfg = resolve_agent_config(
-        {"backend": "claude_code_auto", "model": "claude-opus-4-7"},
+        {"backend": "claude_code", "model": "claude-opus-4-7"},
         {"backend": "codex_cli", "permission_mode": "read-only"},
     )
     assert cfg.backend == "codex_cli"
@@ -503,9 +391,9 @@ def test_resolve_agent_config_drops_profile_permission_mode_when_stage_switches_
     """permission_mode is also backend-specific (claude's modes != codex's modes)."""
     cfg = resolve_agent_config(
         {"backend": "codex_cli", "permission_mode": "workspace-write"},
-        {"backend": "claude_code_print"},
+        {"backend": "claude_code"},
     )
-    assert cfg.backend == "claude_code_print"
+    assert cfg.backend == "claude_code"
     assert cfg.permission_mode is None
 
 
@@ -513,7 +401,7 @@ def test_resolve_agent_config_keeps_non_backend_specific_keys_across_backend_swi
     """Generic keys (timeout_seconds, sterile_context) survive a backend switch — they
     don't carry backend-specific semantics."""
     cfg = resolve_agent_config(
-        {"backend": "claude_code_auto", "timeout_seconds": 120, "sterile_context": False},
+        {"backend": "claude_code", "timeout_seconds": 120, "sterile_context": False},
         {"backend": "codex_cli"},
     )
     assert cfg.backend == "codex_cli"
@@ -523,7 +411,14 @@ def test_resolve_agent_config_keeps_non_backend_specific_keys_across_backend_swi
 
 def test_build_runner_claude_default():
     runner = build_runner(AgentConfig())
-    assert isinstance(runner, ClaudeCodePrintRunner)
+    assert isinstance(runner, ClaudeCodeRunner)
+
+
+def test_build_runner_claude_explicit():
+    runner = build_runner(AgentConfig(backend="claude_code", model="claude-opus-4-7", timeout_seconds=42))
+    assert isinstance(runner, ClaudeCodeRunner)
+    assert runner._model == "claude-opus-4-7"
+    assert runner._timeout_seconds == 42
 
 
 def test_build_runner_codex():
@@ -587,7 +482,7 @@ def _stream_popen(monkeypatch, lines, exit_code=0):
 
 def test_claude_runner_progress_callback_switches_to_stream_json(monkeypatch):
     captured = _stream_popen(monkeypatch, lines=[])
-    runner = ClaudeCodePrintRunner()
+    runner = ClaudeCodeRunner()
     events: list = []
     runner.run(AgentRunRequest(prompt="x", progress_callback=events.append))
     cmd = captured["cmd"]
@@ -599,7 +494,7 @@ def test_claude_runner_progress_callback_switches_to_stream_json(monkeypatch):
 
 def test_claude_runner_no_callback_stays_text_mode(monkeypatch):
     captured = _stream_popen(monkeypatch, lines=["plain text\n"])
-    runner = ClaudeCodePrintRunner()
+    runner = ClaudeCodeRunner()
     runner.run(AgentRunRequest(prompt="x"))
     cmd = captured["cmd"]
     assert "--output-format" not in cmd
@@ -621,7 +516,7 @@ def test_claude_runner_parses_stream_events_and_emits_to_callback(monkeypatch):
         ),
     ]
     _stream_popen(monkeypatch, lines=lines)
-    runner = ClaudeCodePrintRunner()
+    runner = ClaudeCodeRunner()
     events: list = []
     result = runner.run(AgentRunRequest(prompt="x", progress_callback=events.append))
 
@@ -649,7 +544,7 @@ def test_claude_runner_streaming_falls_back_to_raw_stream_when_no_result(monkeyp
         "ERROR: keychain auth failed\n",
     ]
     _stream_popen(monkeypatch, lines=lines)
-    runner = ClaudeCodePrintRunner()
+    runner = ClaudeCodeRunner()
     result = runner.run(AgentRunRequest(prompt="x", progress_callback=lambda _e: None))
     assert "ERROR: keychain auth failed" in result.stdout
 
@@ -661,20 +556,10 @@ def test_claude_runner_callback_exceptions_do_not_break_run(monkeypatch):
         '{"type":"result","subtype":"success","result":"done"}\n',
     ]
     _stream_popen(monkeypatch, lines=lines)
-    runner = ClaudeCodePrintRunner()
+    runner = ClaudeCodeRunner()
 
     def _exploding(_event):
         raise RuntimeError("logger crashed")
 
     result = runner.run(AgentRunRequest(prompt="x", progress_callback=_exploding))
     assert result.stdout == "done"
-
-
-def test_claude_auto_runner_progress_callback_also_streams(monkeypatch):
-    captured = _stream_popen(monkeypatch, lines=[])
-    runner = ClaudeCodeAutoRunner()
-    runner.run(AgentRunRequest(prompt="x", progress_callback=lambda _e: None))
-    cmd = captured["cmd"]
-    assert "--output-format" in cmd
-    assert "stream-json" in cmd
-    assert "--verbose" in cmd

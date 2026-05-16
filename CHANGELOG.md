@@ -7,6 +7,9 @@ Format: [Unreleased] at the top, dated releases below, newest first.
 
 ## [Unreleased]
 
+### Changed
+- 2026-05-16: `ClaudeCodePrintRunner` and the `claude_code_print` backend are removed. The surviving Claude runner is now `ClaudeCodeRunner` (backend `claude_code`), dispatching with `--permission-mode auto`; `--dangerously-skip-permissions` no longer appears anywhere in the codebase. `claude_code_auto` was renamed to `claude_code` and is the new default backend. Operator-authored profiles that named either old backend must be migrated. See ADR-025 (supersedes ADR-003).
+
 ### Added
 - 2026-05-16: Streaming progress events for Claude stage runs. When `run_stage` dispatches a Claude runner, each tool call and assistant text chunk is surfaced as one INFO line in `run.log` (and on the operator's terminal) as it happens, instead of going silent for the whole stage. The runners flip the underlying CLI to `--output-format stream-json --verbose` when a `progress_callback` is set on the request; `result.stdout` is reconstructed from the final `result` event so SIGNAL_JSON extraction is unchanged. See ADR-024.
 - 2026-05-15: New `claude_code_auto` backend (`claude -p --permission-mode auto`) and bundled `minimal-claude` profile (claude_code_auto for non-review stages, codex_cli for review). Transitional Claude path for environments without `ANTHROPIC_API_KEY`; `--bare` is intentionally absent, sterile-context still suppresses ambient auto-memory.
