@@ -36,6 +36,10 @@ class Profile:
     name: str
     stages: tuple[StageConfig, ...]
     agent: dict[str, object] | None = None
+    # Optional override for the post-pipeline pr_draft finalisation step.
+    # Merged on top of `agent` via resolve_agent_config so profiles can pin a
+    # cheaper model for PR drafting without affecting pipeline stages. See ADR-029.
+    pr_draft_agent: dict[str, object] | None = None
 
 
 _BUNDLED_PROFILES_DIR = Path(__file__).parent / "profiles"
@@ -96,8 +100,20 @@ def load_profile(profile: str | Path, bundled_dir: Path | None = None) -> Profil
     if profile_agent is not None and not isinstance(profile_agent, dict):
         raise ValueError(f"Profile {raw.get('name')!r}: 'agent' must be a mapping")
 
+    pr_draft_raw = raw.get("pr_draft")
+    pr_draft_agent: dict | None = None
+    if pr_draft_raw is not None:
+        if not isinstance(pr_draft_raw, dict):
+            raise ValueError(f"Profile {raw.get('name')!r}: 'pr_draft' must be a mapping")
+        pr_draft_agent_raw = pr_draft_raw.get("agent")
+        if pr_draft_agent_raw is not None:
+            if not isinstance(pr_draft_agent_raw, dict):
+                raise ValueError(f"Profile {raw.get('name')!r}: 'pr_draft.agent' must be a mapping")
+            pr_draft_agent = dict(pr_draft_agent_raw)
+
     return Profile(
         name=raw.get("name", ""),
         stages=tuple(_parse_stage(s) for s in raw.get("stages", [])),
         agent=dict(profile_agent) if profile_agent else None,
+        pr_draft_agent=pr_draft_agent,
     )

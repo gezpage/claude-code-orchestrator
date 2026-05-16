@@ -118,9 +118,9 @@ Built-in profiles ship with the package:
 | Name | Stages |
 |------|--------|
 | `full` *(default)* | discovery → alignment → specification → decomposition → implementation → QA → verification → review → harvest |
-| `minimal` | specification → decomposition → implementation → verification → review (single reviewer) — no discovery, alignment, QA, or harvest. Uses the default `claude_code` backend at the user's default Claude model. |
+| `minimal` | specification → decomposition → implementation → verification → review (single reviewer) — no discovery, alignment, QA, or harvest. Pins `claude_code` at `claude-opus-4-7` for impl stages and routes review through `codex_cli` (`--sandbox workspace-write`). The post-pipeline `pr_draft` step drops to `claude-sonnet-4-6`. |
 | `minimal-codex` | Same stages as `minimal`, but dispatches autonomous stages through the `codex_cli` backend (`--sandbox workspace-write`) using the user's Codex CLI default model. The implementation stage overrides to `--sandbox danger-full-access` so it can write `.git` and commit. Intended for fast local runs when the Claude runner is unavailable. |
-| `minimal-claude` | Same stages as `minimal`, but pins the Claude runner to model `claude-opus-4-7` and routes the review stage through `codex_cli` (`--sandbox workspace-write`). Use this when you want a fixed Claude model for the implementation chain and a Codex reviewer; for the default model and a Claude reviewer, prefer `minimal`. |
+| `minimal-claude` | Same stages as `minimal`, but uses `claude_code` at `claude-opus-4-7` throughout — including review — with no Codex involvement. The post-pipeline `pr_draft` step drops to `claude-sonnet-4-6`. Use this when you want a fully-Claude run. |
 | `spike` | discovery only — research and findings, no implementation |
 
 To use a custom profile, pass a path to any YAML file:

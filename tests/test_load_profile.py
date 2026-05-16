@@ -141,10 +141,10 @@ def test_minimal_codex_implementation_overrides_permission_mode():
         assert stage.agent is None
 
 
-def test_minimal_claude_profile_loads():
-    """minimal-claude uses claude_code for non-review stages, codex_cli for review."""
-    profile = load_profile("minimal-claude")
-    assert profile.name == "minimal-claude"
+def test_minimal_profile_is_claude_with_codex_review():
+    """minimal is the hybrid default: claude_code for impl stages, codex_cli for review."""
+    profile = load_profile("minimal")
+    assert profile.name == "minimal"
     assert profile.agent == {"backend": "claude_code", "model": "claude-opus-4-7"}
     assert [s.name for s in profile.stages] == [
         "specification",
@@ -155,19 +155,24 @@ def test_minimal_claude_profile_loads():
     ]
     review = next(s for s in profile.stages if s.name == "review")
     assert review.agent == {"backend": "codex_cli", "permission_mode": "workspace-write"}
-    # Non-review stages inherit profile-level claude_code.
     for stage_name in ("specification", "decomposition", "implementation"):
         stage = next(s for s in profile.stages if s.name == stage_name)
         assert stage.agent is None
 
 
-def test_minimal_claude_build_stage_runners_picks_correct_classes():
+def test_minimal_profile_pr_draft_pins_sonnet():
+    """pr_draft override drops to a cheaper model for PR drafting. See ADR-029."""
+    profile = load_profile("minimal")
+    assert profile.pr_draft_agent == {"model": "claude-sonnet-4-6"}
+
+
+def test_minimal_build_stage_runners_picks_correct_classes():
     """Smoke test the full path: load_profile → _build_stage_runners returns the
     right runner class per stage. Catches regressions in the registry wiring."""
     from orchestrator.agent_runner import ClaudeCodeRunner, CodexCliRunner
     from orchestrator.orchestrate import _build_stage_runners
 
-    profile = load_profile("minimal-claude")
+    profile = load_profile("minimal")
     runners, metadata = _build_stage_runners(profile)
     assert isinstance(runners["implementation"], ClaudeCodeRunner)
     assert isinstance(runners["specification"], ClaudeCodeRunner)
@@ -179,20 +184,43 @@ def test_minimal_claude_build_stage_runners_picks_correct_classes():
     assert metadata["review"]["backend"] == "codex_cli"
 
 
-def test_minimal_claude_review_resolves_to_codex():
+def test_minimal_review_resolves_to_codex():
     """Resolved agent config for the review stage flips backend to codex_cli."""
     from orchestrator.agent_runner import resolve_agent_config
 
-    profile = load_profile("minimal-claude")
+    profile = load_profile("minimal")
     review = next(s for s in profile.stages if s.name == "review")
     cfg = resolve_agent_config(profile.agent, review.agent)
     assert cfg.backend == "codex_cli"
     assert cfg.permission_mode == "workspace-write"
-    # Non-review stage inherits the profile-level backend.
     impl = next(s for s in profile.stages if s.name == "implementation")
     impl_cfg = resolve_agent_config(profile.agent, impl.agent)
     assert impl_cfg.backend == "claude_code"
     assert impl_cfg.model == "claude-opus-4-7"
+
+
+def test_minimal_claude_profile_is_pure_claude():
+    """minimal-claude uses claude_code throughout — no codex review override."""
+    profile = load_profile("minimal-claude")
+    assert profile.name == "minimal-claude"
+    assert profile.agent == {"backend": "claude_code", "model": "claude-opus-4-7"}
+    for stage in profile.stages:
+        assert stage.agent is None, f"{stage.name} should inherit profile-level claude_code"
+
+
+def test_minimal_claude_pr_draft_pins_sonnet():
+    profile = load_profile("minimal-claude")
+    assert profile.pr_draft_agent == {"model": "claude-sonnet-4-6"}
+
+
+def test_minimal_claude_pr_draft_resolves_to_sonnet():
+    """pr_draft agent merges the override over the profile-level claude_code default."""
+    from orchestrator.agent_runner import resolve_agent_config
+
+    profile = load_profile("minimal-claude")
+    cfg = resolve_agent_config(profile.agent, profile.pr_draft_agent)
+    assert cfg.backend == "claude_code"
+    assert cfg.model == "claude-sonnet-4-6"
 
 
 def test_profile_level_agent_parsed(tmp_path):
@@ -241,4 +269,41 @@ def test_profile_agent_must_be_mapping(tmp_path):
     p = tmp_path / "bad.yaml"
     p.write_text(yaml.dump({"name": "p", "agent": "nope", "stages": []}))
     with pytest.raises(ValueError, match="'agent' must be a mapping"):
+        load_profile(str(p))
+
+
+def test_pr_draft_agent_parsed(tmp_path):
+    p = tmp_path / "p.yaml"
+    p.write_text(
+        yaml.dump(
+            {
+                "name": "p",
+                "agent": {"backend": "claude_code", "model": "claude-opus-4-7"},
+                "pr_draft": {"agent": {"model": "claude-sonnet-4-6"}},
+                "stages": [{"stage": "discovery"}],
+            }
+        )
+    )
+    profile = load_profile(str(p))
+    assert profile.pr_draft_agent == {"model": "claude-sonnet-4-6"}
+
+
+def test_pr_draft_absent_yields_none(tmp_path):
+    p = tmp_path / "p.yaml"
+    p.write_text(yaml.dump({"name": "p", "stages": [{"stage": "discovery"}]}))
+    profile = load_profile(str(p))
+    assert profile.pr_draft_agent is None
+
+
+def test_pr_draft_must_be_mapping(tmp_path):
+    p = tmp_path / "bad.yaml"
+    p.write_text(yaml.dump({"name": "p", "pr_draft": ["nope"], "stages": []}))
+    with pytest.raises(ValueError, match="'pr_draft' must be a mapping"):
+        load_profile(str(p))
+
+
+def test_pr_draft_agent_must_be_mapping(tmp_path):
+    p = tmp_path / "bad.yaml"
+    p.write_text(yaml.dump({"name": "p", "pr_draft": {"agent": "nope"}, "stages": []}))
+    with pytest.raises(ValueError, match="'pr_draft.agent' must be a mapping"):
         load_profile(str(p))

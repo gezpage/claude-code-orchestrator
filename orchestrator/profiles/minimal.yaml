@@ -1,4 +1,13 @@
 name: minimal
+
+agent:
+  backend: claude_code
+  model: claude-opus-4-7
+
+pr_draft:
+  agent:
+    model: claude-sonnet-4-6
+
 stages:
   - stage: specification
     prompt: prompts/specification/minimal.md
@@ -18,3 +27,6 @@ stages:
     expansion: prompts
     prompts:
       implementation: prompts/review/implementation.md
+    agent:
+      backend: codex_cli
+      permission_mode: workspace-write

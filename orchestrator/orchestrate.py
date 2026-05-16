@@ -1015,6 +1015,9 @@ def run_pipeline(
     # Resolved once so the finalisation phase honours the configured backend
     # (e.g. codex_cli) instead of silently falling back to the default runner.
     finalisation_agent = resolve_agent_config(profile.agent, None)
+    # pr_draft can carry its own profile-level override so a cheaper model
+    # (e.g. Sonnet) can draft the PR while heavy stages stay on Opus. See ADR-029.
+    pr_draft_agent_config = resolve_agent_config(profile.agent, profile.pr_draft_agent)
     pr_url: str | None = None
 
     # The stage loop and PR finalisation run inside try/finally so the executive
@@ -1165,7 +1168,7 @@ def run_pipeline(
                 base_branch=preflight.base_branch,
                 gh_repo=gh_repo,
                 logger=logger,
-                agent_config=finalisation_agent,
+                agent_config=pr_draft_agent_config,
             )
     finally:
         # Always fires — pass, fail, or blocked. Failures here log a warning and
