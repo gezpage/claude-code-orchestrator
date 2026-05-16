@@ -7,6 +7,37 @@ _STATUS_CLASS: dict[str, str] = {
     "skipped": "skipped",
 }
 
+# Terminal-status precedence: lower numbers win when aggregating multiple
+# statuses (e.g. parent vs children, round-1 sub-node vs final-cycle outcome).
+# Ordering — failed (runner/infra error) is the strongest signal that something
+# is wrong; blocked covers terminal "won't complete" states; changes-requested
+# is a review verdict that requires a fix cycle to resolve; in_progress / passed
+# / skipped / pending represent the run forward to nothing-to-show. The numeric
+# gap between values has no meaning; only the order matters. See ADR-026.
+_STATUS_PRECEDENCE: dict[str, int] = {
+    "failed": 0,
+    "blocked": 1,
+    "changes-requested": 2,
+    "in_progress": 3,
+    "passed": 4,
+    "skipped": 5,
+    "pending": 6,
+}
+
+
+def worst_status(*statuses: str) -> str:
+    """Return the highest-precedence (worst) status among the given values.
+
+    Unknown statuses sort after everything in the table — they never beat a
+    known status because we'd rather render a recognised state than propagate
+    a typo. Empty input returns ``"pending"``.
+    """
+    if not statuses:
+        return "pending"
+    sentinel = max(_STATUS_PRECEDENCE.values()) + 1
+    return min(statuses, key=lambda s: _STATUS_PRECEDENCE.get(s, sentinel))
+
+
 _STATUS_ICON: dict[str, str] = {
     "pending": "-",
     "passed": "✅",

@@ -334,7 +334,7 @@ def _panel_label(node: Node, files: list[Path], href_prefix: str, run_folder: Pa
 
 
 _PANEL_STATUS_TEXT = {
-    "passed": "",
+    "passed": "done",
     "in_progress": "in progress…",
     "blocked": "blocked",
     "failed": "blocked",
@@ -358,7 +358,7 @@ def _panel_body(node: Node, output_file: Path | None, run_folder: Path | None) -
         prose = _extract_output_prose(run_folder / output_file)
         if prose:
             return _escape_mermaid_label(prose)
-    return _PANEL_STATUS_TEXT.get(node.status, "pending") or "pending"
+    return _PANEL_STATUS_TEXT.get(node.status, "pending")
 
 
 _JSON_FENCE_RE = re.compile(r"^```json\n.*?\n```\s*$", re.DOTALL | re.MULTILINE)

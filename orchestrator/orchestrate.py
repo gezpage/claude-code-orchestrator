@@ -22,6 +22,8 @@ from orchestrator.plan import (
     expand_nodes,
     init_plan_md,
     mark_pipeline_done,
+    mark_pr_blocked,
+    resolve_review_subnode_statuses,
     set_pr_node,
     set_pr_notice,
     update_plan_md,
@@ -785,6 +787,9 @@ def _dispatch_prompts(
         if isinstance(final_statuses, dict):
             review_signal["reviewer_statuses"] = final_statuses
             review_signal["changes_requested"] = [r for r, s in final_statuses.items() if s == "changes-requested"]
+            # Re-stamp the round-1 sub-nodes so an approved final cycle does not leave
+            # a red round-1 node beside a green round-N node. See ADR-026.
+            resolve_review_subnode_statuses(run_folder, final_statuses)
         if not result.get("all_passed"):
             ctx.logger.log(
                 stage.name, "ERROR", f"pipeline stopped: review cycle blocked, reviewers={result.get('reviewers', [])}"
@@ -1051,6 +1056,10 @@ def run_pipeline(
             st["blocked_at"] = stage_name
             state_mod.save_state(run_folder, st)
             update_plan_md(run_folder, stage_name, sig["status"])
+            # The PR node is added at init time when create-pr is true; on stage
+            # failure the finalisation phase never runs, so flip it to blocked
+            # rather than leaving it pending forever. See ADR-026.
+            mark_pr_blocked(run_folder)
             logger.log(
                 stage_name, "ERROR", f"pipeline stopped: stage {stage_name} {sig['status']}: {sig.get('message', '')}"
             )
