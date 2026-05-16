@@ -40,7 +40,11 @@ def _add_fix_cycle_node(run_folder: Path, cycle_num: int, reviewers: list[str]) 
     # Carve the failing reviewers out of the existing fan-in edge and remember the downstream target.
     downstream = _strip_sources_from_fanin(graph.edges, source_ids)
 
-    graph.add_subgraph(Subgraph(id=sg_id, display=f"Fix Cycle {round_num}"))
+    # Subgraph label tracks the fix cycle itself (1-indexed), not the review round it
+    # feeds into. round_num = cycle_num + 1 because Round 1 is the initial review before
+    # any fix has run; using round_num here produced misleading labels like "Fix Cycle 3"
+    # after only two fix runs.
+    graph.add_subgraph(Subgraph(id=sg_id, display=f"Fix Cycle {cycle_num}"))
     graph.add_node(
         Node(
             id=fix_node_id,

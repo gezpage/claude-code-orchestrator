@@ -262,6 +262,81 @@ def test_review_md_round_numbering(tmp_path):
     assert "Round 3" in content
 
 
+def test_two_cycle_flow_uses_accurate_fix_cycle_and_review_round_labels(tmp_path):
+    """End-to-end label check for the full 2-cycle flow from #129's acceptance criteria.
+
+    Flow:
+      - review round 1: architecture changes-requested
+      - fix cycle 1
+      - review round 2: architecture changes-requested
+      - fix cycle 2
+      - review round 3: architecture approved
+
+    The historical bug rendered the second fix as ``Fix Cycle 3`` even though only two
+    fix runs occurred. Labels must reflect what actually ran: two fix cycles, three
+    review rounds."""
+    run_folder, log_path = _setup(tmp_path)
+    plan_md = run_folder / "plan.md"
+    plan_md.write_text("# Project\n")
+    # Round-1 review content is normally written by the initial review stage before
+    # review_cycle.run is invoked. Preseed it here so Fix Cycle 1's divider has a host
+    # file to be appended to.
+    review_md = run_folder / "review" / "review-log.md"
+    review_md.parent.mkdir(parents=True, exist_ok=True)
+    review_md.write_text(
+        "---\nreviewer_statuses: {architecture: changes-requested}\n---\n"
+        "## Architecture Review — Round 1\n\nCoupling between modules\n"
+    )
+
+    signal = {
+        "stage": "review",
+        "status": "passed",
+        "reviewer_statuses": {"architecture": "changes-requested"},
+        "reviewer_findings": {"architecture": ["Coupling between modules"]},
+        "changes_requested": ["architecture"],
+    }
+
+    stage_returns = [
+        {
+            "stage": "fix-implementation",
+            "status": "passed",
+            "commit_hashes": ["c1"],
+            "commit_messages": ["fix: first attempt"],
+        },
+        _reviewer_sig("architecture", "changes-requested"),  # round 2
+        {
+            "stage": "fix-implementation",
+            "status": "passed",
+            "commit_hashes": ["c2"],
+            "commit_messages": ["fix: second attempt"],
+        },
+        _reviewer_sig("architecture", "approved"),  # round 3
+    ]
+    ret_iter = iter(stage_returns)
+
+    with patch("orchestrator.review_cycle.run_stage", side_effect=lambda *a, **kw: next(ret_iter)):
+        review_cycle.run(run_folder, "/docs", "proj", "feat/x", signal, log_path)
+
+    review_log = review_md.read_text()
+    # Review section headers use round numbers (2, 3) — round 1 was the initial review.
+    assert "Architecture Review — Round 2" in review_log
+    assert "Architecture Review — Round 3" in review_log
+    # Fix dividers use cycle numbers (1, 2) — there are exactly two fix runs.
+    assert "**Fix Cycle 1:**" in review_log
+    assert "**Fix Cycle 2:**" in review_log
+    assert "Fix Cycle 3" not in review_log  # regression: only two fix runs occurred
+    # Ordering: Fix Cycle 1 sits between Round 2 and the Round 3 re-review.
+    assert review_log.index("Fix Cycle 1") < review_log.index("Round 2")
+    assert review_log.index("Round 2") < review_log.index("Fix Cycle 2")
+    assert review_log.index("Fix Cycle 2") < review_log.index("Round 3")
+
+    # plan.md findings summary attributes the resolution to Fix Cycle 2 (the second fix
+    # run is what unblocked the approving round-3 review).
+    plan_text = plan_md.read_text()
+    assert "Fixed by Fix Cycle 2 (approved in Review Round 3)" in plan_text
+    assert "Fix Cycle 3" not in plan_text
+
+
 # ── review log written to review/review-log.md, not run root ─────────────────
 
 
@@ -483,10 +558,12 @@ def test_fix_divider_injected_between_rounds(tmp_path):
         review_cycle.run(run_folder, "/docs", "proj", "feat/x", signal, log_path)
 
     content = review_md.read_text()
-    assert "Fix Cycle 2" in content
+    # Fix Cycle 1 produced the commits; the subsequent re-review is Review Round 2.
+    assert "Fix Cycle 1" in content
+    assert "Fix Cycle 2" not in content  # off-by-one regression: only one fix ran
     assert "fix: add async dlq test (abc123)" in content
     # Divider appears before the Round 2 section
-    fix_pos = content.index("Fix Cycle 2")
+    fix_pos = content.index("Fix Cycle 1")
     round2_pos = content.index("Round 2")
     assert fix_pos < round2_pos
 
@@ -539,8 +616,10 @@ def test_findings_summary_appended_to_plan_md(tmp_path):
     assert "## Review Findings" in content
     assert "Async onDeadLetter await contract untested" in content
     assert "withRetry has no direct unit tests" in content
-    # resolved_cycle=1 (first loop iteration) → label "Fix Cycle 2" matching diagram convention
-    assert "Fix Cycle 2" in content
+    # resolved_cycle=1 (first loop iteration); the approving review ran in Round 2.
+    assert "Fixed by Fix Cycle 1" in content
+    assert "approved in Review Round 2" in content
+    assert "Fix Cycle 2" not in content  # off-by-one regression: only one fix ran
 
 
 def test_findings_summary_marks_unresolved_after_max_cycles(tmp_path):
