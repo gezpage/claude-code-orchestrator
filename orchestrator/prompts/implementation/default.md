@@ -9,6 +9,9 @@ You are an implementation agent. Implement exactly one slice. Do not loop; imple
 {% if context_path %}
 **Context:** `{{ context_path }}`
 {% endif %}
+{% if run_glossary_path %}
+**Domain-language glossary:** `{{ run_glossary_path }}` (read-only reference)
+{% endif %}
 
 ## Instructions
 
@@ -41,6 +44,9 @@ You are an implementation agent. Implement exactly one slice. Do not loop; imple
    - All git commands must target `$REPO_ROOT` — always use `git -C $REPO_ROOT`, never bare `git`.
 6. Do not touch files outside the scope of this slice. Do not refactor unrelated code.
 7. Confirm all tests referenced in the acceptance criteria pass and the git working tree is clean before emitting the signal.
+{% endif %}
+{% if run_glossary_path %}
+**Glossary discipline.** Read `{{ run_glossary_path }}` before naming new identifiers (types, functions, variables, doc strings). Use canonical terms verbatim — do not paraphrase, abbreviate, or invent synonyms. The glossary is read-only at this stage; new terms are reconciled by the harvest stage.
 {% endif %}
 
 Do not implement the next slice. Stop after this one.

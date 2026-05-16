@@ -11,12 +11,15 @@ You are the **only** implementation agent for this run. Implement the entire fea
 **PRD (source of truth for user intent):** `{{ prd_path }}`
 **Context (binding quality bar + standing constraints):** `{{ context_path }}`
 **Branch:** `{{ branch }}`
+{% if run_glossary_path %}
+**Domain-language glossary:** `{{ run_glossary_path }}` (read-only reference)
+{% endif %}
 
 The plan is operational guidance; the PRD and `context.md` remain authoritative. If the plan and the PRD disagree on what should be built, the **PRD wins** — and if the disagreement is material, emit `blocked` rather than guessing.
 
 ## Instructions
 
-1. Read `{{ context_path }}` first. Treat its quality bar and standing constraints as binding. Read `{{ prd_path }}` for user intent. Read `{{ plan_file }}` as the operational plan — your primary working document, but cross-check it against the PRD whenever a step looks ambiguous.
+1. Read `{{ context_path }}` first. Treat its quality bar and standing constraints as binding. Read `{{ prd_path }}` for user intent. Read `{{ plan_file }}` as the operational plan — your primary working document, but cross-check it against the PRD whenever a step looks ambiguous.{% if run_glossary_path %} Also read the run-local glossary at `{{ run_glossary_path }}` — use canonical terms verbatim when naming new identifiers and writing documentation. Do not paraphrase or coin synonyms. The glossary is read-only at this stage; new terms are reconciled by the harvest stage.{% endif %}
 
 2. **Re-implementation guard.** Run `git -C $REPO_ROOT log --oneline {{ branch }}` and inspect recent commits. If the plan is already implemented on this branch and the tests called out in **Acceptance criteria** and **Testing expectations** all pass when you run them, emit the signal with the existing commit hashes and stop — do not re-implement.
 
