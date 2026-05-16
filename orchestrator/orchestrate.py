@@ -40,7 +40,7 @@ class _PipelineContext:
     def runner_for(self, stage_name: str) -> AgentRunner | None:
         # Returns None for stages without a runner (e.g. deterministic stages or test
         # contexts that patch run_stage at the call site). run_stage falls back to its
-        # default ClaudeCodePrintRunner when runner=None.
+        # default ClaudeCodeRunner when runner=None.
         return self.runners.get(stage_name)
 
 
@@ -1079,7 +1079,7 @@ def run_pipeline(
         # pr_draft is not a profile stage, so _build_stage_runners does not produce a
         # runner for it. Resolve one from the profile-level agent config so the
         # finalisation phase honours the configured backend (e.g. codex_cli) instead
-        # of silently falling back to the default ClaudeCodePrintRunner. See ADR-019.
+        # of silently falling back to the default ClaudeCodeRunner. See ADR-019.
         _finalize_pr(
             run_folder=run_folder,
             docs_root=docs_root,

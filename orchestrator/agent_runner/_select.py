@@ -2,15 +2,14 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from orchestrator.agent_runner._claude import ClaudeCodePrintRunner
-from orchestrator.agent_runner._claude_auto import ClaudeCodeAutoRunner
+from orchestrator.agent_runner._claude import ClaudeCodeRunner
 from orchestrator.agent_runner._codex import CodexCliRunner
 from orchestrator.agent_runner._protocol import AgentRunner
 
 
 @dataclass(frozen=True)
 class AgentConfig:
-    backend: str = "claude_code_print"
+    backend: str = "claude_code"
     model: str | None = None
     sterile_context: bool = True
     timeout_seconds: int | None = None
@@ -18,7 +17,7 @@ class AgentConfig:
     output_mode: str = "text"
 
 
-_KNOWN_BACKENDS = frozenset({"claude_code_print", "claude_code_auto", "codex_cli"})
+_KNOWN_BACKENDS = frozenset({"claude_code", "codex_cli"})
 
 # Keys whose values are interpreted by the backend's own CLI and cannot be assumed
 # portable across backends. When a stage switches backend, profile-level values for
@@ -56,15 +55,8 @@ def resolve_agent_config(profile_agent: dict | None, stage_agent: dict | None) -
 def build_runner(config: AgentConfig) -> AgentRunner:
     if config.backend not in _KNOWN_BACKENDS:
         raise ValueError(f"Unknown agent backend {config.backend!r}; supported: {sorted(_KNOWN_BACKENDS)}")
-    if config.backend == "claude_code_print":
-        return ClaudeCodePrintRunner(
-            sterile_context=config.sterile_context,
-            model=config.model,
-            timeout_seconds=config.timeout_seconds,
-            output_mode=config.output_mode,
-        )
-    if config.backend == "claude_code_auto":
-        return ClaudeCodeAutoRunner(
+    if config.backend == "claude_code":
+        return ClaudeCodeRunner(
             sterile_context=config.sterile_context,
             model=config.model,
             timeout_seconds=config.timeout_seconds,

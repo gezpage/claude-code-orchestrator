@@ -11,13 +11,16 @@ from orchestrator.agent_runner._progress import (
 from orchestrator.agent_runner._protocol import AgentRunner, AgentRunRequest, AgentRunResult
 
 
-class ClaudeCodePrintRunner(AgentRunner):
-    """Dispatch via the `claude` CLI for unattended stage runs.
+class ClaudeCodeRunner(AgentRunner):
+    """Dispatch via the `claude` CLI with `--permission-mode auto`.
 
-    `--dangerously-skip-permissions` is mandatory (ADR-003) — stage agents cannot
-    pause on permission prompts. `-p` and `--bare` are intentionally absent: see
-    ADR-022. `--bare` forces `ANTHROPIC_API_KEY`-only auth, which excludes OAuth /
-    keychain logins; `-p` is unnecessary because subprocess-piped stdout already
+    `--dangerously-skip-permissions` is intentionally absent — see ADR-025,
+    which supersedes ADR-003. `--permission-mode auto` is the next-most-
+    permissive mode short of `bypassPermissions` and is sufficient for
+    unattended pipeline dispatch in practice while keeping Claude's permission
+    system engaged. `-p` and `--bare` are also absent (ADR-022): `--bare`
+    forces `ANTHROPIC_API_KEY`-only auth, which excludes OAuth / keychain
+    logins; `-p` is unnecessary because subprocess-piped stdout already
     triggers Claude Code's non-interactive mode. `ANTHROPIC_API_KEY` /
     `ANTHROPIC_AUTH_TOKEN` are stripped from the forwarded env so a stale or
     invalid external key in the caller's shell never overrides the user's
@@ -26,7 +29,9 @@ class ClaudeCodePrintRunner(AgentRunner):
     When `sterile_context=True` (the default), `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1`
     suppresses ambient auto-memory and `--strict-mcp-config --mcp-config
     '{"mcpServers":{}}'` suppresses every MCP server the user has configured
-    globally or in `.mcp.json`. See ADR-023.
+    globally or in `.mcp.json`. See ADR-023. Hooks, LSP, plugin sync,
+    keychain reads and `CLAUDE.md` auto-discovery remain active; callers
+    needing strict reproducibility should prefer `codex_cli`.
 
     When the request carries a ``progress_callback`` the runner switches the
     CLI to ``--output-format stream-json --verbose`` and forwards each parsed
@@ -35,7 +40,7 @@ class ClaudeCodePrintRunner(AgentRunner):
     extraction is unaffected. See ADR-024.
     """
 
-    backend_name = "claude_code_print"
+    backend_name = "claude_code"
 
     def __init__(
         self,
@@ -51,7 +56,7 @@ class ClaudeCodePrintRunner(AgentRunner):
         self._output_mode = output_mode
 
     def run(self, request: AgentRunRequest) -> AgentRunResult:
-        cmd = ["claude", request.prompt, "--dangerously-skip-permissions"]
+        cmd = ["claude", request.prompt, "--permission-mode", "auto"]
         model = request.model or self._model
         timeout_seconds = request.timeout_seconds if request.timeout_seconds is not None else self._timeout_seconds
         requested_output_mode = request.output_mode if request.output_mode != "text" else self._output_mode
@@ -98,7 +103,7 @@ def _run_claude_subprocess(
     progress_callback,
     backend_name: str,
 ) -> AgentRunResult:
-    """Shared subprocess driver for both Claude runners.
+    """Subprocess driver for the Claude runner.
 
     In ``streaming`` mode the runner expects JSONL output from claude: each line is
     parsed into ``ProgressEvent``s (forwarded to ``progress_callback``) and the

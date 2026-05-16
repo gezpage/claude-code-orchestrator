@@ -142,10 +142,10 @@ def test_minimal_codex_implementation_overrides_permission_mode():
 
 
 def test_minimal_claude_profile_loads():
-    """minimal-claude uses claude_code_auto for non-review stages, codex_cli for review."""
+    """minimal-claude uses claude_code for non-review stages, codex_cli for review."""
     profile = load_profile("minimal-claude")
     assert profile.name == "minimal-claude"
-    assert profile.agent == {"backend": "claude_code_auto", "model": "claude-opus-4-7"}
+    assert profile.agent == {"backend": "claude_code", "model": "claude-opus-4-7"}
     assert [s.name for s in profile.stages] == [
         "specification",
         "decomposition",
@@ -155,7 +155,7 @@ def test_minimal_claude_profile_loads():
     ]
     review = next(s for s in profile.stages if s.name == "review")
     assert review.agent == {"backend": "codex_cli", "permission_mode": "read-only"}
-    # Non-review stages inherit profile-level claude_code_auto.
+    # Non-review stages inherit profile-level claude_code.
     for stage_name in ("specification", "decomposition", "implementation"):
         stage = next(s for s in profile.stages if s.name == stage_name)
         assert stage.agent is None
@@ -164,18 +164,18 @@ def test_minimal_claude_profile_loads():
 def test_minimal_claude_build_stage_runners_picks_correct_classes():
     """Smoke test the full path: load_profile → _build_stage_runners returns the
     right runner class per stage. Catches regressions in the registry wiring."""
-    from orchestrator.agent_runner import ClaudeCodeAutoRunner, CodexCliRunner
+    from orchestrator.agent_runner import ClaudeCodeRunner, CodexCliRunner
     from orchestrator.orchestrate import _build_stage_runners
 
     profile = load_profile("minimal-claude")
     runners, metadata = _build_stage_runners(profile)
-    assert isinstance(runners["implementation"], ClaudeCodeAutoRunner)
-    assert isinstance(runners["specification"], ClaudeCodeAutoRunner)
-    assert isinstance(runners["decomposition"], ClaudeCodeAutoRunner)
+    assert isinstance(runners["implementation"], ClaudeCodeRunner)
+    assert isinstance(runners["specification"], ClaudeCodeRunner)
+    assert isinstance(runners["decomposition"], ClaudeCodeRunner)
     assert isinstance(runners["review"], CodexCliRunner)
     assert "verification" not in runners  # deterministic
     assert metadata["verification"]["backend"] == "deterministic"
-    assert metadata["implementation"]["backend"] == "claude_code_auto"
+    assert metadata["implementation"]["backend"] == "claude_code"
     assert metadata["review"]["backend"] == "codex_cli"
 
 
@@ -191,7 +191,7 @@ def test_minimal_claude_review_resolves_to_codex():
     # Non-review stage inherits the profile-level backend.
     impl = next(s for s in profile.stages if s.name == "implementation")
     impl_cfg = resolve_agent_config(profile.agent, impl.agent)
-    assert impl_cfg.backend == "claude_code_auto"
+    assert impl_cfg.backend == "claude_code"
     assert impl_cfg.model == "claude-opus-4-7"
 
 
@@ -201,13 +201,13 @@ def test_profile_level_agent_parsed(tmp_path):
         yaml.dump(
             {
                 "name": "p",
-                "agent": {"backend": "claude_code_print", "model": "opus", "sterile_context": True},
+                "agent": {"backend": "claude_code", "model": "opus", "sterile_context": True},
                 "stages": [{"stage": "discovery"}],
             }
         )
     )
     profile = load_profile(str(p))
-    assert profile.agent == {"backend": "claude_code_print", "model": "opus", "sterile_context": True}
+    assert profile.agent == {"backend": "claude_code", "model": "opus", "sterile_context": True}
     assert profile.stages[0].agent is None
 
 

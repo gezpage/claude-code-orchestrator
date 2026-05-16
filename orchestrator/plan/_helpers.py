@@ -52,8 +52,7 @@ def _node_label(
 
 
 _BACKEND_DISPLAY = {
-    "claude_code_print": "claude",
-    "claude_code_auto": "claude",
+    "claude_code": "claude",
     "codex_cli": "codex",
     "deterministic": "deterministic",
     "interactive": "interactive",

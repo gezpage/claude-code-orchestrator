@@ -5,7 +5,7 @@ from unittest.mock import MagicMock, patch
 
 from orchestrator import orchestrate
 from orchestrator._github import GhError
-from orchestrator.agent_runner import AgentConfig, ClaudeCodePrintRunner, CodexCliRunner
+from orchestrator.agent_runner import AgentConfig, ClaudeCodeRunner, CodexCliRunner
 
 
 def _make_run_folder(tmp_path):
@@ -18,7 +18,7 @@ def _make_run_folder(tmp_path):
 
 
 def _claude_agent_config():
-    return AgentConfig(backend="claude_code_print", model="test")
+    return AgentConfig(backend="claude_code", model="test")
 
 
 def test_finalize_pr_happy_path(tmp_path):
@@ -57,7 +57,7 @@ def test_finalize_pr_happy_path(tmp_path):
     # The configured backend's runner must be threaded into run_stage so the
     # finalisation phase honours the profile, not the run_stage default.
     runner_arg = mock_run_stage.call_args.kwargs.get("runner")
-    assert isinstance(runner_arg, ClaudeCodePrintRunner)
+    assert isinstance(runner_arg, ClaudeCodeRunner)
     plan_text = (rf / "plan.md").read_text()
     assert "https://github.com/me/r/pull/7" in plan_text
     assert "will be created on completion" not in plan_text

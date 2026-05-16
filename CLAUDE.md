@@ -8,9 +8,9 @@ Developer-facing reference. Read before touching any orchestrator code.
 
 - **All autonomous stage dispatch goes through an `AgentRunner`.** `run_stage()` calls `runner.run(AgentRunRequest(...))` — it does not invoke `claude` or any CLI directly. New backends are added by implementing the Protocol in `orchestrator/agent_runner/`, not by editing call sites. See ADR-018.
 
-- **`ClaudeCodePrintRunner` passes `--dangerously-skip-permissions` and never passes `--bare` or `-p`.** `--dangerously-skip-permissions` is the ADR-003 invariant — removing it would re-enable permission prompts and hang unattended dispatch. `--bare` and `-p` were the ADR-012 / ADR-018 invariants but have been **reversed** in ADR-022: `--bare` forces `ANTHROPIC_API_KEY`-only auth (excluding OAuth/keychain) and `-p` is redundant under piped stdout. Both Claude runners also strip `ANTHROPIC_API_KEY` and `ANTHROPIC_AUTH_TOKEN` from the forwarded env so a stale external key cannot override keychain auth. See ADR-022.
+- **`ClaudeCodeRunner` dispatches with `--permission-mode auto` and never passes `--dangerously-skip-permissions`, `--bare`, or `-p`.** `--permission-mode auto` keeps Claude's permission system engaged (next-most-permissive mode short of `bypassPermissions`); ADR-025 supersedes the historical ADR-003 invariant that mandated `--dangerously-skip-permissions`. `--bare` and `-p` were the ADR-012 / ADR-018 invariants but were **reversed** in ADR-022: `--bare` forces `ANTHROPIC_API_KEY`-only auth (excluding OAuth/keychain) and `-p` is redundant under piped stdout. The runner also strips `ANTHROPIC_API_KEY` and `ANTHROPIC_AUTH_TOKEN` from the forwarded env so a stale external key cannot override keychain auth. See ADR-022 and ADR-025.
 
-- **Sterile context is the default for stage runners.** Both Claude runners set `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1` and pass `--strict-mcp-config --mcp-config '{"mcpServers":{}}'` unless a profile opts out with `agent.sterile_context: false`. Ambient auto-memory and the user's globally-configured MCP servers are not allowed to leak into pipeline runs by default. See ADR-018 and ADR-023.
+- **Sterile context is the default for stage runners.** The Claude runner sets `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1` and passes `--strict-mcp-config --mcp-config '{"mcpServers":{}}'` unless a profile opts out with `agent.sterile_context: false`. Ambient auto-memory and the user's globally-configured MCP servers are not allowed to leak into pipeline runs by default. See ADR-018 and ADR-023.
 
 - **The main orchestration session never reads stage output file contents.** `orchestrate.py` receives file paths and status values via signal JSON only. It must not `open()` or `Read` any stage output file. Adding a file read to `orchestrate.py` violates the token-minimisation invariant and will cause unbounded context growth across long pipelines. See ADR-004.
 
@@ -18,7 +18,7 @@ Developer-facing reference. Read before touching any orchestrator code.
 
 - **`workflow/` paths are fixed convention — do not add config for them.** Python derives all orchestrator paths from `{docs-root}/projects/{project}/workflow/`. Do not introduce a `project.yaml.folders` key or any path override mechanism. See ADR-006.
 
-- **Interactive stages (`mode: interactive`) are dispatched through `run_interactive_stage()` in `run_stage.py` — not `run_stage()`.** Python launches an interactive `claude` session (no `--bare`, no `--dangerously-skip-permissions`), waits for it to exit, then checks for the declared `artifact` file. Interactive stages do not go through the `AgentRunner` seam; the ADR-018 runner invariants apply only to `run_stage()`. See ADR-007.
+- **Interactive stages (`mode: interactive`) are dispatched through `run_interactive_stage()` in `run_stage.py` — not `run_stage()`.** Python launches an interactive `claude` session (no `--permission-mode`, no `--bare`), waits for it to exit, then checks for the declared `artifact` file. Interactive stages do not go through the `AgentRunner` seam; the ADR-018 runner invariants apply only to `run_stage()`. See ADR-007.
 
 - **Stage output schemas are the interface contract — they belong to the stage, not the implementation.** All implementations of a stage must satisfy the same schema. See ADR-008.
 
@@ -30,7 +30,7 @@ Developer-facing reference. Read before touching any orchestrator code.
 
 - **`_render.py` materialises `{id}_prompt` and `{id}_panel` partner nodes around each rect-shape stage at render time, plus a single `overview` node before the first stage.** Edge endpoints are rewritten on serialisation (`A → B` becomes `A_panel --> B_prompt`; `Start → first` is split through `overview`; chain edges are broken into per-pair edges). The graph model itself contains no prompt/panel/overview nodes — they exist only in the rendered output. New behaviour around stage edges goes through this rewriting, not through new graph edges. See ADR-020.
 
-- **Deterministic stages (`mode: deterministic`) are dispatched through `run_deterministic_stage()` in `run_stage.py` — not `run_stage()`.** They execute Python in-process and never invoke Claude. The `--bare` / `--dangerously-skip-permissions` invariants apply only to `run_stage()` and have no meaning for deterministic stages. See ADR-017.
+- **Deterministic stages (`mode: deterministic`) are dispatched through `run_deterministic_stage()` in `run_stage.py` — not `run_stage()`.** They execute Python in-process and never invoke Claude. The runner CLI invariants (`--permission-mode auto`, sterile context, etc.) apply only to `run_stage()` and have no meaning for deterministic stages. See ADR-017.
 
 - **Toolchain-specific verification logic lives in `orchestrator/verifiers/recipes/` (data) and `orchestrator/verifiers/probes/` (Python).** Orchestration code (`orchestrate.py`, `run_stage.py`, profile parsing) must contain no `if node` / `if go` / `if python` branches. Adding a new ecosystem means adding a recipe and any probes it needs — nothing else. See ADR-017.
 
@@ -38,7 +38,7 @@ Developer-facing reference. Read before touching any orchestrator code.
 
 - **PR creation is a post-pipeline finalisation step, not a profile stage.** It runs only when `create-pr` is true and origin is a recognised GitHub repo. The `pr_draft` Claude stage that produces title/body, plus the `gh pr create` call, execute after the stage loop completes. Failures in this phase log warnings and write a manual-command fallback into `plan.md`; they do not change the pipeline exit status. See ADR-019.
 
-- **`run_stage()` passes a `progress_callback` to every `AgentRunner.run()` call.** When the runner supports streaming (both Claude runners do), each parsed event becomes one INFO line in `run.log` so long-running stages emit live "tool X / text Y" breadcrumbs instead of going silent. Callbacks are best-effort — runners must swallow callback exceptions so a logger glitch cannot abort a stage. See ADR-024.
+- **`run_stage()` passes a `progress_callback` to every `AgentRunner.run()` call.** When the runner supports streaming (the Claude runner does), each parsed event becomes one INFO line in `run.log` so long-running stages emit live "tool X / text Y" breadcrumbs instead of going silent. Callbacks are best-effort — runners must swallow callback exceptions so a logger glitch cannot abort a stage. See ADR-024.
 
 ---
 

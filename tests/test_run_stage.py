@@ -33,8 +33,8 @@ def test_happy_path(tmp_path):
 
 
 def test_default_runner_passes_required_flags(tmp_path, monkeypatch):
-    """The default ClaudeCodePrintRunner passes --dangerously-skip-permissions (ADR-003)
-    and never passes --bare or -p (ADR-022)."""
+    """The default ClaudeCodeRunner passes --permission-mode auto (ADR-025) and never
+    passes --dangerously-skip-permissions, --bare, or -p (ADR-022)."""
     from orchestrator.agent_runner import _claude as claude_mod
 
     run_folder, log_path = _setup_run_folder(tmp_path)
@@ -52,7 +52,9 @@ def test_default_runner_passes_required_flags(tmp_path, monkeypatch):
     monkeypatch.setenv("ANTHROPIC_API_KEY", "stale-key")
     monkeypatch.setattr(claude_mod.subprocess, "Popen", _FakePopen)
     run_stage("discovery", "default", VARS, run_folder, str(tmp_path), "myproject", str(log_path))
-    assert "--dangerously-skip-permissions" in captured["cmd"]
+    assert "--permission-mode" in captured["cmd"]
+    assert "auto" in captured["cmd"]
+    assert "--dangerously-skip-permissions" not in captured["cmd"]
     assert "--bare" not in captured["cmd"]
     assert "-p" not in captured["cmd"]
     # Sterile context is the default — auto-memory env must be set.

@@ -1,15 +1,23 @@
 ---
 status: accepted
 date: 2026-05-15
-affects: [agent_runner/_claude.py, agent_runner/_claude_auto.py]
+affects: [agent_runner/_claude.py]
 supersedes: [ADR-012]
 amends: [ADR-018]
+amended_by: [ADR-025]
 ---
 
 # ADR-022: Claude Runners Use OAuth/Keychain Auth Only
 
-**Status:** Accepted
+**Status:** Accepted (amended by [ADR-025](ADR-025-remove-dangerously-skip-permissions.md))
 **Date:** 2026-05-15
+
+> **Note.** The "Print" vs "Auto" runner split this ADR describes has since
+> been removed by [ADR-025](ADR-025-remove-dangerously-skip-permissions.md).
+> `ClaudeCodePrintRunner` is gone and `ClaudeCodeAutoRunner` has been renamed
+> to `ClaudeCodeRunner` (backend `claude_code`). The OAuth/keychain auth
+> path and env-var stripping described below apply to the surviving runner
+> unchanged.
 
 ## Context
 
