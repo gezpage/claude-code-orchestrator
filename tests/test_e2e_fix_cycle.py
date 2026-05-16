@@ -76,3 +76,11 @@ def test_fix_cycle_resolves_architecture_changes(tmp_path):
     assert "Review Findings" in plan_md
     assert "Coupling between dispatcher and review_cycle" in plan_md
     assert "Fixed in Fix Cycle" in plan_md
+
+    # The aggregate review signal in _state.yaml must reflect the *terminal* re-review
+    # outcome, not the initial round-1 verdict. Regression for #127: stale
+    # `changes-requested` / non-empty `changes_requested` was being persisted even when
+    # the round-2 review approved.
+    review_signal = state["signals"]["review"]
+    assert review_signal["reviewer_statuses"]["architecture"] == "approved"
+    assert review_signal["changes_requested"] == []

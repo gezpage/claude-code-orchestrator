@@ -777,6 +777,14 @@ def _dispatch_prompts(
             implementation_runner=ctx.runner_for("implementation"),
             review_runner=ctx.runner_for(stage.name),
         )
+        # Overwrite the aggregate review signal with the cycle's final reviewer_statuses
+        # so _state.yaml and plan.md reflect the terminal outcome rather than the initial
+        # round-1 verdicts. Without this, a successful re-review still shows
+        # `changes_requested` in the persisted signal.
+        final_statuses = result.get("reviewer_statuses")
+        if isinstance(final_statuses, dict):
+            review_signal["reviewer_statuses"] = final_statuses
+            review_signal["changes_requested"] = [r for r, s in final_statuses.items() if s == "changes-requested"]
         if not result.get("all_passed"):
             ctx.logger.log(
                 stage.name, "ERROR", f"pipeline stopped: review cycle blocked, reviewers={result.get('reviewers', [])}"

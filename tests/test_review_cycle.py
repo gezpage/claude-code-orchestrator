@@ -66,7 +66,8 @@ def test_all_passed_immediately(tmp_path):
     with patch("orchestrator.review_cycle.run_stage") as mock_rs:
         result = review_cycle.run(run_folder, "/docs", "proj", "feat/x", signal, log_path)
 
-    assert result == {"all_passed": True}
+    assert result["all_passed"] is True
+    assert result["reviewer_statuses"] == {"architecture": "approved", "tests": "approved"}
     mock_rs.assert_not_called()
 
 
@@ -86,7 +87,8 @@ def test_one_cycle_resolves(tmp_path):
     with patch("orchestrator.review_cycle.run_stage", side_effect=lambda *a, **kw: next(ret_iter)) as mock_rs:
         result = review_cycle.run(run_folder, "/docs", "proj", "feat/x", signal, log_path)
 
-    assert result == {"all_passed": True}
+    assert result["all_passed"] is True
+    assert result["reviewer_statuses"] == {"implementation": "approved"}
     assert mock_rs.call_count == 2
     # Verify only the changes-requested reviewer was re-run
     reviewer_call = mock_rs.call_args_list[1]
@@ -118,7 +120,8 @@ def test_fix_cycle_reuses_supplied_stage_runners(tmp_path):
             review_runner=review_runner,
         )
 
-    assert result == {"all_passed": True}
+    assert result["all_passed"] is True
+    assert result["reviewer_statuses"] == {"implementation": "approved"}
     assert mock_rs.call_args_list[0].kwargs["runner"] is implementation_runner
     assert mock_rs.call_args_list[1].kwargs["runner"] is review_runner
 
@@ -141,7 +144,8 @@ def test_two_cycles_resolve(tmp_path):
     with patch("orchestrator.review_cycle.run_stage", side_effect=lambda *a, **kw: next(ret_iter)):
         result = review_cycle.run(run_folder, "/docs", "proj", "feat/x", signal, log_path)
 
-    assert result == {"all_passed": True}
+    assert result["all_passed"] is True
+    assert result["reviewer_statuses"] == {"architecture": "approved"}
 
 
 # ── two cycles fail → blocked ─────────────────────────────────────────────────
@@ -166,6 +170,9 @@ def test_two_cycles_fail_blocked(tmp_path):
     assert result["all_passed"] is False
     assert result["blocked"] is True
     assert "tests" in result["reviewers"]
+    # Terminal reviewer_statuses must come back so the dispatcher can overwrite stale state
+    # in plan.md / _state.yaml rather than leave the round-1 verdict in place.
+    assert result["reviewer_statuses"] == {"tests": "changes-requested"}
     # Exactly 2 fix + 2 reviewer calls = 4 total; third cycle never dispatched
     assert mock_rs.call_count == 4
 
@@ -221,7 +228,12 @@ def test_only_failed_reviewers_rerun(tmp_path):
     with patch("orchestrator.review_cycle.run_stage", side_effect=tracking_stage):
         result = review_cycle.run(run_folder, "/docs", "proj", "feat/x", signal, log_path)
 
-    assert result == {"all_passed": True}
+    assert result["all_passed"] is True
+    assert result["reviewer_statuses"] == {
+        "architecture": "approved",
+        "implementation": "approved",
+        "tests": "approved",
+    }
     assert called_reviewers == ["implementation"], f"Only 'implementation' should be re-run, got: {called_reviewers}"
     assert "architecture" not in called_reviewers
     assert "tests" not in called_reviewers
@@ -490,7 +502,8 @@ def test_fix_divider_not_injected_when_review_log_absent(tmp_path):
     with patch("orchestrator.review_cycle.run_stage", side_effect=lambda *a, **kw: next(ret_iter)):
         result = review_cycle.run(run_folder, "/docs", "proj", "feat/x", signal, log_path)
 
-    assert result == {"all_passed": True}
+    assert result["all_passed"] is True
+    assert result["reviewer_statuses"] == {"tests": "approved"}
 
 
 # ── findings summary written to plan.md ──────────────────────────────────────
@@ -973,7 +986,8 @@ def test_actual_commits_override_agent_self_report(tmp_path):
     with patch("orchestrator.review_cycle.run_stage", side_effect=fake_stage):
         result = review_cycle.run(run_folder, "/docs", "proj", "feat/x", signal, log_path, repo_root=str(repo))
 
-    assert result == {"all_passed": True}
+    assert result["all_passed"] is True
+    assert result["reviewer_statuses"] == {"implementation": "approved"}
     # Verify the diff file was written with real diff content for the recovered commit.
     diff_path = run_folder / "review" / "diff-round-2.patch"
     assert diff_path.exists()

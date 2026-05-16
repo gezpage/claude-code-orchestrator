@@ -1662,6 +1662,42 @@ def test_prompts_passes_stage_runners_to_review_cycle(tmp_path):
     assert mock_cycle.call_args.kwargs["review_runner"] is review_runner
 
 
+def test_prompts_returns_final_reviewer_statuses_after_successful_cycle(tmp_path):
+    """After a fix cycle resolves changes-requested, the aggregate review signal must reflect the
+    terminal reviewer_statuses — not the initial round-1 verdict. Regression for #127: stale
+    `changes-requested` was being persisted to _state.yaml even after a successful re-review."""
+    from orchestrator.orchestrate import _dispatch_prompts
+
+    stage = StageConfig(
+        name="review",
+        expansion=ExpansionKind.PROMPTS,
+        prompts={"implementation": "prompts/review/implementation.md"},
+    )
+    ctx = _make_ctx(tmp_path)
+    run_folder = _make_run_folder(tmp_path)
+    initial_review_sig = {
+        "status": "passed",
+        "reviewer_statuses": {"implementation": "changes-requested"},
+        "changes_requested": ["implementation"],
+    }
+
+    with (
+        patch("orchestrator.orchestrate.run_stage", return_value=initial_review_sig),
+        patch("orchestrator.orchestrate.update_plan_md"),
+        patch("orchestrator.orchestrate.subprocess.run", return_value=_git_ok()),
+        patch("orchestrator.orchestrate.review_cycle_mod.is_valid_diff_file", return_value=True),
+        patch(
+            "orchestrator.orchestrate.review_cycle_mod.run",
+            return_value={"all_passed": True, "reviewer_statuses": {"implementation": "approved"}},
+        ),
+    ):
+        result = _dispatch_prompts(stage, {"repo_root": "/tmp"}, run_folder, ctx, {})
+
+    assert result["status"] == "passed"
+    assert result["reviewer_statuses"] == {"implementation": "approved"}
+    assert result["changes_requested"] == []
+
+
 def test_prompts_review_cycle_failure_returns_blocked_signal(tmp_path):
     """When review_cycle.run returns all_passed=False, the dispatcher returns blocked."""
     from orchestrator.orchestrate import _dispatch_prompts

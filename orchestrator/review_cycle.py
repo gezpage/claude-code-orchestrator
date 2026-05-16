@@ -284,7 +284,7 @@ def run(
     accepted_risks: dict[str, list[str]] = dict(review_signal.get("reviewer_non_blocking_findings", {}) or {})
 
     if not changes_requested:
-        return {"all_passed": True}
+        return {"all_passed": True, "reviewer_statuses": reviewer_statuses}
 
     review_md_path = run_folder / "review" / "review-log.md"
     review_md_path.parent.mkdir(parents=True, exist_ok=True)
@@ -377,6 +377,7 @@ def run(
                 "all_passed": False,
                 "blocked": True,
                 "reviewers": changes_requested,
+                "reviewer_statuses": reviewer_statuses,
                 "message": msg,
             }
 
@@ -437,7 +438,12 @@ def run(
             append_findings_summary(
                 run_folder / "plan.md", findings_map, reviewer_statuses, accepted_risks=accepted_risks
             )
-            return {"all_passed": True}
+            return {"all_passed": True, "reviewer_statuses": reviewer_statuses}
 
     append_findings_summary(run_folder / "plan.md", findings_map, reviewer_statuses, accepted_risks=accepted_risks)
-    return {"all_passed": False, "blocked": True, "reviewers": changes_requested}
+    return {
+        "all_passed": False,
+        "blocked": True,
+        "reviewers": changes_requested,
+        "reviewer_statuses": reviewer_statuses,
+    }
