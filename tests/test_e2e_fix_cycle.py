@@ -75,7 +75,9 @@ def test_fix_cycle_resolves_architecture_changes(tmp_path):
     plan_md = (run_folder / "plan.md").read_text()
     assert "Review Findings" in plan_md
     assert "Coupling between dispatcher and review_cycle" in plan_md
-    assert "Fixed in Fix Cycle" in plan_md
+    # The finding was raised in Round 1 and resolved after Fix Cycle 1 / Review Round 2.
+    assert "Fixed by Fix Cycle 1" in plan_md
+    assert "approved in Review Round 2" in plan_md
 
     # The aggregate review signal in _state.yaml must reflect the *terminal* re-review
     # outcome, not the initial round-1 verdict. Regression for #127: stale

@@ -497,6 +497,28 @@ def test_add_fix_cycle_node_cycle2_sources_previous_round(tmp_path):
     assert "fix_impl_2_panel --> review_tests_3_prompt" in content
 
 
+def test_add_fix_cycle_node_subgraph_label_uses_cycle_num(tmp_path):
+    """Subgraph display must read "Fix Cycle 1"/"Fix Cycle 2", not Round numbers (#129).
+
+    The historical bug labelled the subgraph as ``Fix Cycle {round_num}`` where
+    round_num = cycle_num + 1, producing ``Fix Cycle 3`` after only two fix runs.
+    Subgraphs are not rendered to mermaid (see ADR-020), so this asserts on the
+    persisted graph model in _plan_graph.yaml — that is the only place the label
+    survives, and it must still be correct for future renderers and tooling."""
+    from orchestrator.plan._graph import load_graph
+
+    run_folder = _make_run_folder(tmp_path)
+    init_plan_md(run_folder, _profile_with_review())
+    add_fix_cycle_node(run_folder, cycle_num=1, reviewers=["tests"])
+    add_fix_cycle_node(run_folder, cycle_num=2, reviewers=["tests"])
+    graph = load_graph(run_folder)
+    assert graph is not None
+    displays = {sg.display for sg in graph.subgraphs.values()}
+    assert "Fix Cycle 1" in displays
+    assert "Fix Cycle 2" in displays
+    assert "Fix Cycle 3" not in displays
+
+
 def test_add_fix_cycle_node_multiple_reviewers(tmp_path):
     run_folder = _make_run_folder(tmp_path)
     profile = Profile(

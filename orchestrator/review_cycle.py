@@ -189,11 +189,16 @@ def is_valid_diff_file(path: str) -> bool:
 
 
 def _inject_fix_divider(review_md_path: Path, cycle_num: int, commit_messages: list[str]) -> None:
-    """Insert a fix-cycle commit marker into review-log.md before the next review round."""
+    """Insert a fix-cycle commit marker into review-log.md before the next review round.
+
+    ``cycle_num`` is the 1-indexed fix cycle that produced these commits (1, 2). The
+    label here intentionally tracks the fix run (Fix Cycle N), not the next review round
+    (Review Round N+1) — conflating the two has caused user-facing labels like
+    ``Fix Cycle 3`` to appear after only two fix runs."""
     if not review_md_path.exists():
         return
     commits_str = ", ".join(f"`{c}`" for c in commit_messages) if commit_messages else "no commits"
-    divider = f"\n---\n**Fix Cycle {cycle_num + 1}:** {commits_str}\n\n---\n"
+    divider = f"\n---\n**Fix Cycle {cycle_num}:** {commits_str}\n\n---\n"
     review_md_path.write_text(review_md_path.read_text() + divider)
 
 
@@ -222,7 +227,11 @@ def append_findings_summary(
         lines.append(f"**{reviewer}:**\n")
         for text, resolved_cycle in findings:
             if resolved_cycle is not None:
-                lines.append(f"- {text} → Fixed in Fix Cycle {resolved_cycle + 1}")
+                # resolved_cycle is the 1-indexed fix cycle that produced the commits the
+                # reviewer then approved; the approving review ran in Review Round N+1.
+                lines.append(
+                    f"- {text} → Fixed by Fix Cycle {resolved_cycle} (approved in Review Round {resolved_cycle + 1})"
+                )
             else:
                 lines.append(f"- {text} → Unresolved")
         lines.append("")
