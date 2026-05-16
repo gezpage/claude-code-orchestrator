@@ -305,5 +305,5 @@ def test_pr_draft_must_be_mapping(tmp_path):
 def test_pr_draft_agent_must_be_mapping(tmp_path):
     p = tmp_path / "bad.yaml"
     p.write_text(yaml.dump({"name": "p", "pr_draft": {"agent": "nope"}, "stages": []}))
-    with pytest.raises(ValueError, match="'pr_draft.agent' must be a mapping"):
+    with pytest.raises(ValueError, match=r"'pr_draft\.agent' must be a mapping"):
         load_profile(str(p))
