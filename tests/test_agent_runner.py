@@ -286,6 +286,10 @@ def test_codex_runner_command_construction(monkeypatch):
     assert "--sandbox" in cmd
     assert "workspace-write" in cmd
     assert "--full-auto" not in cmd
+    # Non-full-auto sandbox modes must pair with --ask-for-approval never, otherwise
+    # codex exec hangs/rejects on the implicit approval gate (see CodexCliRunner docstring).
+    assert "--ask-for-approval" in cmd
+    assert "never" in cmd
 
 
 def test_codex_runner_sandbox_mode_mapping(monkeypatch):
@@ -298,6 +302,8 @@ def test_codex_runner_sandbox_mode_mapping(monkeypatch):
     assert "--sandbox" in cmd
     assert "read-only" in cmd
     assert "--full-auto" not in cmd
+    assert "--ask-for-approval" in cmd
+    assert "never" in cmd
 
 
 def test_codex_runner_full_auto_opt_in(monkeypatch):
@@ -311,6 +317,9 @@ def test_codex_runner_full_auto_opt_in(monkeypatch):
     assert "--dangerously-bypass-approvals-and-sandbox" in cmd
     assert "--full-auto" not in cmd
     assert "--sandbox" not in cmd
+    # --dangerously-bypass-approvals-and-sandbox already implies "no approval";
+    # don't add a redundant --ask-for-approval.
+    assert "--ask-for-approval" not in cmd
 
 
 def test_codex_runner_danger_full_access_uses_sandbox_flag(monkeypatch):
@@ -323,6 +332,8 @@ def test_codex_runner_danger_full_access_uses_sandbox_flag(monkeypatch):
     assert "--sandbox" in cmd
     assert "danger-full-access" in cmd
     assert "--dangerously-bypass-approvals-and-sandbox" not in cmd
+    assert "--ask-for-approval" in cmd
+    assert "never" in cmd
 
 
 def test_codex_runner_model_flag(monkeypatch):

@@ -18,6 +18,16 @@ class CodexCliRunner(AgentRunner):
     the agent can write `.git/` (needed when a stage must commit). The explicit
     `full-auto` alias maps to `--dangerously-bypass-approvals-and-sandbox` (the
     current Codex flag for "no sandbox, no approvals") and is never the default.
+
+    `--ask-for-approval never` is also passed in every non-`full-auto` branch:
+    codex has two independent gates (sandbox + approval), and the sandbox flag
+    alone is not sufficient for unattended runs. Without `never`, codex escalates
+    out-of-workspace writes (and other sandbox-allowed-but-flagged operations) to
+    a human, which deadlocks `codex exec` and surfaces as `error=patch rejected:
+    rejected by user approval settings`. `full-auto` already implies "no
+    approval" via `--dangerously-bypass-approvals-and-sandbox`, so it does not
+    receive the flag.
+
     `sterile_context` is currently a no-op for this backend — codex has no
     equivalent of CLAUDE_CODE_DISABLE_AUTO_MEMORY, but the constructor accepts the
     flag so the selector can pass it uniformly.
@@ -50,9 +60,9 @@ class CodexCliRunner(AgentRunner):
             # Codex CLI replaced --full-auto with --dangerously-bypass-approvals-and-sandbox.
             cmd += ["--dangerously-bypass-approvals-and-sandbox"]
         elif mode in self._SANDBOX_MODES:
-            cmd += ["--sandbox", mode]
+            cmd += ["--sandbox", mode, "--ask-for-approval", "never"]
         else:
-            cmd += ["--sandbox", self._DEFAULT_SANDBOX]
+            cmd += ["--sandbox", self._DEFAULT_SANDBOX, "--ask-for-approval", "never"]
         model = request.model or self._model
         timeout_seconds = request.timeout_seconds if request.timeout_seconds is not None else self._timeout_seconds
         workspace_root = request.workspace_root or request.cwd
