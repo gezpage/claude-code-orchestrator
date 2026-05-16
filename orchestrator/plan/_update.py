@@ -187,6 +187,13 @@ def resolve_review_subnode_statuses(
 ) -> None:
     """Re-stamp round-1 review sub-nodes with the final cycle outcome.
 
+    This is *terminal-verdict restamping*, not status aggregation. The round-1
+    blocked stamp is stale signal once a later fix cycle has produced a final
+    verdict; an ``approved`` final intentionally replaces it rather than being
+    combined with it via :func:`worst_status`. Calling ``worst_status`` here
+    would preserve the stale ``blocked`` and defeat the whole point of the
+    helper. See ADR-026.
+
     A reviewer that initially returned ``changes-requested`` is recorded on the
     round-1 sub-node (``review_{reviewer}``) as ``blocked``; when a later fix
     cycle re-review approves, only the round-N sub-node is updated to
@@ -195,10 +202,8 @@ def resolve_review_subnode_statuses(
 
     Mapping rule:
     - ``approved`` final verdict → round-1 sub-node becomes ``passed``.
-    - ``changes-requested`` final verdict → round-1 sub-node stays ``blocked``
-      (the precedence resolver picks the worst between current and final, and
-      blocked beats changes-requested in :func:`worst_status`).
-    Unknown verdicts are left untouched. See ADR-026.
+    - ``changes-requested`` final verdict → round-1 sub-node stays ``blocked``.
+    Unknown verdicts are left untouched.
     """
     with _plan_lock:
         run_folder = Path(run_folder)

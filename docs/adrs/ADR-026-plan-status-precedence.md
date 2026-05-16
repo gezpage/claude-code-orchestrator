@@ -54,20 +54,28 @@ Lower numbers win. `worst_status(*statuses)` in `orchestrator/plan/_constants`
 returns the highest-precedence value; unknown statuses sort after every known
 one so a typo cannot beat a recognised state.
 
-Three concrete applications, all consuming the precedence table:
+Three concrete applications target the three contradictions above. The first
+two are *terminal-state restamping*, not aggregation — they intentionally
+replace stale signal with the verdict that supersedes it. Aggregation
+(combining several live statuses into one rendered state) is what
+`worst_status` is for; restamping is the orthogonal operation.
 
 - **`resolve_review_subnode_statuses(run_folder, final_reviewer_statuses)`**
   re-stamps the round-1 `review_{reviewer}` sub-node with the final cycle
   verdict (`approved` → `passed`, `changes-requested` → `blocked`). Called
   from `orchestrate._dispatch_prompts` after `review_cycle.run` returns.
+  Restamping, not aggregation: a later approved verdict intentionally
+  replaces the stale round-1 blocked stamp.
 - **`mark_pr_blocked(run_folder)`** flips the init-time PR node to `blocked`
   when the pipeline aborts before `_finalize_pr`. Called from the failure
   branch in `run_pipeline` alongside the stage-level `update_plan_md(...,
-  "blocked")`.
+  "blocked")`. Also restamping: the pending stamp is correct at init time
+  and stale once the pipeline has aborted.
 - **`_PANEL_STATUS_TEXT["passed"]`** is now the string `"done"` instead of `""`,
   and the panel-body fallback returns the table value directly rather than
   using `or "pending"`. A passed stage with no output prose now renders
-  "done" — never "pending".
+  "done" — never "pending". This is a pure rendering fix; it does not touch
+  the underlying status.
 
 The precedence table is the single source of truth. Any future code that needs
 to combine statuses (parent stage vs. children, multiple sub-reviewers
