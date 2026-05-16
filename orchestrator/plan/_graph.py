@@ -47,6 +47,9 @@ class Node:
     css_class: str = "pending"
     subgraph: str | None = None
     raw_label: str | None = None  # if set, used verbatim instead of the composed label
+    # Optional second line rendered below a raw_label title (e.g. "Profile: Full"
+    # under "▶ Start"). Plain text, not wrapped in the big-title span.
+    subtitle: str = ""
     # External URL surfaced as a prominent link in the node's output panel. Set
     # by ``set_pr_node`` once the GitHub PR is created so the URL renders inside
     # the pr stage's panel — independent of any output file the stage produced.

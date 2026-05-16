@@ -142,10 +142,15 @@ def _synthesise(
     # are convention-driven: keyed on field name, not stage name, so they kick
     # in for any future stage whose schema declares the same field.
     if "tracks" in props:
-        track_name = "track-a"
-        prompt_file = output_dir / f"{track_name}-prompt{tag}.md"
-        prompt_file.write_text(f"# Discovery Track — {track_name}\n\nGather context.\n")
-        sig["tracks"] = [{"name": track_name, "prompt_file": str(prompt_file), "focus": "auto"}]
+        # Three tracks (vs the historical one) so the rendered discovery
+        # fan-out exercises the parallel-dispatch path the orchestrator takes
+        # whenever a planning agent returns 2+ tracks.
+        tracks = []
+        for track_name in ("track-a", "track-b", "track-c"):
+            prompt_file = output_dir / f"{track_name}-prompt{tag}.md"
+            prompt_file.write_text(f"# Discovery Track — {track_name}\n\nGather context.\n")
+            tracks.append({"name": track_name, "prompt_file": str(prompt_file), "focus": "auto"})
+        sig["tracks"] = tracks
 
     if "slice_files" in props:
         sf_paths = []
@@ -154,6 +159,10 @@ def _synthesise(
             p.write_text(f"# S-{i:02d} auto slice\n")
             sf_paths.append(str(p))
         sig["slice_files"] = sf_paths
+        # Emit one parallel wave containing both slices so the rendered
+        # diagram exercises the slice fan-out path (vs sequential default).
+        if "slice_groups" in props:
+            sig["slice_groups"] = [sf_paths]
 
     if "commit_hashes" in props:
         sig["commit_hashes"] = [f"c0mm{call_idx + 1:04d}"]

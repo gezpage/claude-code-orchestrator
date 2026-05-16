@@ -135,7 +135,10 @@ def render_block(graph: Graph, run_folder: Path | None = None) -> str:
         lines.append(f"    class {_OVERVIEW_NODE_ID} input")
 
     if bold_indices:
-        lines.append(f"    linkStyle {','.join(str(i) for i in bold_indices)} stroke-width:3px,stroke:#34d399")
+        # #9ca3af (gray-400) reads as an emphasized trail against both the
+        # dark-gray dark-mode background and the light-gray light-mode background
+        # while staying neutral; stroke-width 3 carries the "completed" emphasis.
+        lines.append(f"    linkStyle {','.join(str(i) for i in bold_indices)} stroke-width:3px,stroke:#9ca3af")
 
     lines.append("```")
     block = "\n".join(lines) + "\n"
@@ -274,11 +277,16 @@ def _label_for(node: Node) -> str:
     if node.raw_label is not None:
         # raw_label nodes (Start/Done/interactive gates) carry a hand-crafted top
         # line. Wrap it in the same big-title span the composed labels use so
-        # node titles look consistent across the diagram, then append Mode below
-        # if present.
+        # node titles look consistent across the diagram, then append any subtitle
+        # and Mode below at plain text size.
         title = f"<span style='{_TITLE_STYLE};'>{node.raw_label}</span>"
+        extras: list[str] = []
+        if node.subtitle:
+            extras.append(node.subtitle)
         if node.mode:
-            return f"{title}<br/>Mode: {node.mode}"
+            extras.append(f"Mode: {node.mode}")
+        if extras:
+            return title + "<br/>" + "<br/>".join(extras)
         return title
     return _node_label(
         node.display,

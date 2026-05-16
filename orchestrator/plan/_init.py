@@ -31,7 +31,16 @@ def build_initial_graph(
     create_pr: bool = False,
 ) -> Graph:
     graph = Graph(init_directive=_INIT_DIRECTIVE)
-    graph.add_node(Node(id="Start", shape="stadium", raw_label="▶ Start", css_class="startend"))
+    profile_subtitle = f"Profile: {profile.name.replace('-', ' ').title()}" if profile.name else ""
+    graph.add_node(
+        Node(
+            id="Start",
+            shape="stadium",
+            raw_label="▶ Start",
+            subtitle=profile_subtitle,
+            css_class="startend",
+        )
+    )
 
     chain_ids: list[str] = []
     parents: dict[str, list[str]] = {}
