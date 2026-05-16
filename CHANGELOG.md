@@ -8,6 +8,7 @@ Format: [Unreleased] at the top, dated releases below, newest first.
 ## [Unreleased]
 
 ### Added
+- 2026-05-16: Streaming progress events for Claude stage runs. When `run_stage` dispatches a Claude runner, each tool call and assistant text chunk is surfaced as one INFO line in `run.log` (and on the operator's terminal) as it happens, instead of going silent for the whole stage. The runners flip the underlying CLI to `--output-format stream-json --verbose` when a `progress_callback` is set on the request; `result.stdout` is reconstructed from the final `result` event so SIGNAL_JSON extraction is unchanged. See ADR-024.
 - 2026-05-15: New `claude_code_auto` backend (`claude -p --permission-mode auto`) and bundled `minimal-claude` profile (claude_code_auto for non-review stages, codex_cli for review). Transitional Claude path for environments without `ANTHROPIC_API_KEY`; `--bare` is intentionally absent, sterile-context still suppresses ambient auto-memory.
 - 2026-05-15: `verification_status: "failed"` now triggers a `fix-verification` cycle before the review stage. The cycle dispatches a fix agent with `VERIFY.md` and `verify.json` as its primary inputs, then re-runs deterministic verification. If the fix makes no commits or re-verification still fails, the pipeline blocks immediately rather than falling through to review in a broken state. This reserves the two review fix cycles for code-quality issues rather than toolchain-setup problems. See ADR-021.
 

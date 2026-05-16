@@ -1,9 +1,8 @@
 from __future__ import annotations
 
 import os
-import subprocess
-import time
 
+from orchestrator.agent_runner._claude import _run_claude_subprocess
 from orchestrator.agent_runner._protocol import AgentRunner, AgentRunRequest, AgentRunResult
 
 
@@ -25,6 +24,9 @@ class ClaudeCodeAutoRunner(AgentRunner):
     `--strict-mcp-config --mcp-config '{"mcpServers":{}}'` suppresses every MCP
     server (ADR-023). Callers needing strict reproducibility should prefer
     `codex_cli`.
+
+    Streaming progress events are supported on the same terms as
+    ``ClaudeCodePrintRunner`` — see ADR-024.
     """
 
     backend_name = "claude_code_auto"
@@ -45,12 +47,16 @@ class ClaudeCodeAutoRunner(AgentRunner):
     def run(self, request: AgentRunRequest) -> AgentRunResult:
         cmd = ["claude", request.prompt, "--permission-mode", "auto"]
         model = request.model or self._model
-        output_mode = request.output_mode if request.output_mode != "text" else self._output_mode
         timeout_seconds = request.timeout_seconds if request.timeout_seconds is not None else self._timeout_seconds
+        requested_output_mode = request.output_mode if request.output_mode != "text" else self._output_mode
+        streaming = request.progress_callback is not None or requested_output_mode == "stream-json"
+        effective_output_mode = "stream-json" if streaming else requested_output_mode
         if model:
             cmd += ["--model", model]
-        if output_mode and output_mode != "text":
-            cmd += ["--output-format", output_mode]
+        if effective_output_mode and effective_output_mode != "text":
+            cmd += ["--output-format", effective_output_mode]
+        if streaming:
+            cmd += ["--verbose"]
         if self._sterile_context:
             # ADR-023: suppress every globally / project-configured MCP server.
             cmd += ["--strict-mcp-config", "--mcp-config", '{"mcpServers":{}}']
@@ -64,42 +70,12 @@ class ClaudeCodeAutoRunner(AgentRunner):
         if request.env:
             env.update(request.env)
 
-        t0 = time.monotonic()
-        timed_out = False
-        exit_code: int | None = None
-        chunks: list[str] = []
-
-        proc = subprocess.Popen(
-            cmd,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-            cwd=request.cwd,
+        return _run_claude_subprocess(
+            cmd=cmd,
             env=env,
-        )
-        try:
-            if proc.stdout is None:
-                raise RuntimeError("Popen stdout is None — subprocess was not opened with PIPE")
-            for line in proc.stdout:
-                print(line, end="", flush=True)  # noqa: T201
-                chunks.append(line)
-            try:
-                exit_code = proc.wait(timeout=timeout_seconds)
-            except subprocess.TimeoutExpired:
-                proc.kill()
-                proc.wait()
-                timed_out = True
-        finally:
-            duration = time.monotonic() - t0
-
-        stdout = "".join(chunks)
-
-        return AgentRunResult(
-            backend=self.backend_name,
-            stdout=stdout,
-            stderr="",
-            exit_code=exit_code,
-            duration_seconds=duration,
-            timed_out=timed_out,
-            command=cmd,
+            cwd=request.cwd,
+            timeout_seconds=timeout_seconds,
+            streaming=streaming,
+            progress_callback=request.progress_callback,
+            backend_name=self.backend_name,
         )

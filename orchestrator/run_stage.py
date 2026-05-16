@@ -11,6 +11,7 @@ from orchestrator.agent_runner import (
     AgentRunner,
     AgentRunRequest,
     ClaudeCodePrintRunner,
+    ProgressEvent,
 )
 from orchestrator.logger import OrchestratorLogger
 from orchestrator.plan import rerender_plan_md
@@ -107,6 +108,30 @@ def _default_runner() -> AgentRunner:
     return ClaudeCodePrintRunner(sterile_context=True)
 
 
+def _make_progress_callback(logger: OrchestratorLogger, stage: str):
+    """Build a callback that logs streaming runner events into run.log.
+
+    Kept lightweight: every event becomes one INFO line. The runner already
+    swallows callback exceptions so a logger glitch can't break a stage. See
+    ADR-024.
+    """
+
+    def _on_event(event: ProgressEvent) -> None:
+        summary = event.summary.strip()
+        if not summary:
+            return
+        if event.kind == "tool_use":
+            logger.log(stage, "INFO", f"▸ {summary}")
+        elif event.kind == "assistant_text":
+            logger.log(stage, "INFO", f"… {summary}")
+        elif event.kind == "error":
+            logger.log(stage, "WARN", summary)
+        else:
+            logger.log(stage, "DEBUG", summary)
+
+    return _on_event
+
+
 def _runner_failure_signal(stage: str, result) -> dict | None:
     """If the runner reported timeout or a non-zero exit, return a blocked signal.
 
@@ -165,6 +190,7 @@ def run_stage(
     # — otherwise it only appears after the stage finishes and update_plan_md re-renders.
     rerender_plan_md(run_folder)
 
+    progress_callback = _make_progress_callback(logger, stage)
     t0 = time.monotonic()
     result = runner.run(
         AgentRunRequest(
@@ -173,6 +199,7 @@ def run_stage(
             cwd=cwd,
             workspace_root=cwd or docs_root,
             writable_roots=_agent_writable_roots(docs_root, run_folder, variables),
+            progress_callback=progress_callback,
         )
     )
     stdout = result.stdout
@@ -204,6 +231,7 @@ def run_stage(
                 cwd=cwd,
                 workspace_root=cwd or docs_root,
                 writable_roots=_agent_writable_roots(docs_root, run_folder, variables),
+                progress_callback=progress_callback,
             )
         )
         if failure := _runner_failure_signal(stage, retry_result):

@@ -4,6 +4,10 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Protocol
 
+from orchestrator.agent_runner._progress import ProgressCallback, ProgressEvent
+
+__all__ = ["AgentRunRequest", "AgentRunResult", "AgentRunner", "ProgressCallback", "ProgressEvent"]
+
 
 @dataclass(frozen=True)
 class AgentRunRequest:
@@ -17,6 +21,12 @@ class AgentRunRequest:
     model: str | None = None
     permission_mode: str | None = None
     output_mode: str = "text"
+    # Optional sink for streaming ProgressEvents emitted by the runner as the agent
+    # works. When set, runners that support streaming (currently both Claude
+    # runners) flip the underlying CLI into ``--output-format stream-json --verbose``
+    # so long-running stages can surface "tool X / text Y" breadcrumbs in run.log
+    # instead of going silent. See ADR-024.
+    progress_callback: ProgressCallback | None = None
 
 
 @dataclass(frozen=True)

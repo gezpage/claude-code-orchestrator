@@ -38,6 +38,8 @@ Developer-facing reference. Read before touching any orchestrator code.
 
 - **PR creation is a post-pipeline finalisation step, not a profile stage.** It runs only when `create-pr` is true and origin is a recognised GitHub repo. The `pr_draft` Claude stage that produces title/body, plus the `gh pr create` call, execute after the stage loop completes. Failures in this phase log warnings and write a manual-command fallback into `plan.md`; they do not change the pipeline exit status. See ADR-019.
 
+- **`run_stage()` passes a `progress_callback` to every `AgentRunner.run()` call.** When the runner supports streaming (both Claude runners do), each parsed event becomes one INFO line in `run.log` so long-running stages emit live "tool X / text Y" breadcrumbs instead of going silent. Callbacks are best-effort — runners must swallow callback exceptions so a logger glitch cannot abort a stage. See ADR-024.
+
 ---
 
 ## Path Resolution Rules
