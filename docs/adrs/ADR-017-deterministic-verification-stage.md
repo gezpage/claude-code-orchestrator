@@ -9,6 +9,16 @@ affects: [orchestrator/verifiers/, orchestrator/run_stage.py, orchestrator/profi
 **Status:** Accepted
 **Date:** 2026-05-14
 
+> **Note.** Where the Decision and Consequences sections below refer to the
+> `--bare` (ADR-012) and `--dangerously-skip-permissions` (ADR-003) flags as
+> `run_stage()` invariants, both flags have since been removed from the
+> Claude runner — see [ADR-022](ADR-022-claude-runners-oauth-only.md) and
+> [ADR-025](ADR-025-remove-dangerously-skip-permissions.md). The current
+> `run_stage()` invariant is `--permission-mode auto` plus sterile context
+> (`CLAUDE_CODE_DISABLE_AUTO_MEMORY=1` and an empty MCP config). The point
+> still holds: those runner invariants are scoped to `run_stage()` and have
+> no meaning for deterministic stages, which never invoke Claude.
+
 ## Context
 
 Pipeline health to date has been judged almost entirely by Claude reviewers
