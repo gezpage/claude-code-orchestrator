@@ -20,9 +20,11 @@ class ClaudeCodeAutoRunner(AgentRunner):
     (next-most-permissive short of `bypassPermissions`) instead of using
     `--dangerously-skip-permissions`. Both runners share the same isolation
     profile — hooks, LSP, plugin sync, keychain reads and CLAUDE.md
-    auto-discovery are all active. `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1` is set
-    by default (sterile_context) so ambient auto-memory is suppressed; callers
-    needing strict reproducibility should prefer `codex_cli`.
+    auto-discovery are all active. When `sterile_context=True` (the default),
+    `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1` suppresses ambient auto-memory and
+    `--strict-mcp-config --mcp-config '{"mcpServers":{}}'` suppresses every MCP
+    server (ADR-023). Callers needing strict reproducibility should prefer
+    `codex_cli`.
     """
 
     backend_name = "claude_code_auto"
@@ -49,6 +51,9 @@ class ClaudeCodeAutoRunner(AgentRunner):
             cmd += ["--model", model]
         if output_mode and output_mode != "text":
             cmd += ["--output-format", output_mode]
+        if self._sterile_context:
+            # ADR-023: suppress every globally / project-configured MCP server.
+            cmd += ["--strict-mcp-config", "--mcp-config", '{"mcpServers":{}}']
 
         env = os.environ.copy()
         # Force keychain/OAuth auth — see ADR-022.

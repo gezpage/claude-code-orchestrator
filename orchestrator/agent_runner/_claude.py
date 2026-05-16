@@ -18,6 +18,11 @@ class ClaudeCodePrintRunner(AgentRunner):
     `ANTHROPIC_AUTH_TOKEN` are stripped from the forwarded env so a stale or
     invalid external key in the caller's shell never overrides the user's
     keychain auth.
+
+    When `sterile_context=True` (the default), `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1`
+    suppresses ambient auto-memory and `--strict-mcp-config --mcp-config
+    '{"mcpServers":{}}'` suppresses every MCP server the user has configured
+    globally or in `.mcp.json`. See ADR-023.
     """
 
     backend_name = "claude_code_print"
@@ -44,6 +49,9 @@ class ClaudeCodePrintRunner(AgentRunner):
             cmd += ["--model", model]
         if output_mode and output_mode != "text":
             cmd += ["--output-format", output_mode]
+        if self._sterile_context:
+            # ADR-023: suppress every globally / project-configured MCP server.
+            cmd += ["--strict-mcp-config", "--mcp-config", '{"mcpServers":{}}']
 
         env = os.environ.copy()
         # Force keychain/OAuth auth — see ADR-022.

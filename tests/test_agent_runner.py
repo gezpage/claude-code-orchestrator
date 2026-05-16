@@ -52,6 +52,22 @@ def test_claude_runner_command_construction(monkeypatch):
     # ADR-022: --bare and -p are intentionally absent (OAuth/keychain auth path).
     assert "--bare" not in cmd
     assert "-p" not in cmd
+    # ADR-023: sterile_context also suppresses every MCP server.
+    assert "--strict-mcp-config" in cmd
+    assert "--mcp-config" in cmd
+    assert '{"mcpServers":{}}' in cmd
+
+
+def test_claude_runner_mcp_suppression_absent_when_sterile_disabled(monkeypatch):
+    from orchestrator.agent_runner import _claude as claude_mod
+
+    captured = _stub_popen(monkeypatch, claude_mod)
+    runner = ClaudeCodePrintRunner(sterile_context=False)
+    runner.run(AgentRunRequest(prompt="x"))
+    cmd = captured["cmd"]
+    # Opting out of sterile_context re-enables the user's configured MCP servers.
+    assert "--strict-mcp-config" not in cmd
+    assert "--mcp-config" not in cmd
 
 
 def test_claude_runner_strips_anthropic_api_key_env(monkeypatch):
@@ -160,6 +176,21 @@ def test_claude_code_auto_runner_builds_expected_command(monkeypatch):
     assert "--bare" not in cmd
     assert "-p" not in cmd
     assert "--dangerously-skip-permissions" not in cmd
+    # ADR-023: sterile_context (default) suppresses every MCP server.
+    assert "--strict-mcp-config" in cmd
+    assert "--mcp-config" in cmd
+    assert '{"mcpServers":{}}' in cmd
+
+
+def test_claude_code_auto_runner_mcp_suppression_absent_when_sterile_disabled(monkeypatch):
+    from orchestrator.agent_runner import _claude_auto as auto_mod
+
+    captured = _stub_popen(monkeypatch, auto_mod)
+    runner = ClaudeCodeAutoRunner(sterile_context=False)
+    runner.run(AgentRunRequest(prompt="x"))
+    cmd = captured["cmd"]
+    assert "--strict-mcp-config" not in cmd
+    assert "--mcp-config" not in cmd
 
 
 def test_claude_code_auto_runner_strips_anthropic_api_key_env(monkeypatch):
