@@ -154,7 +154,7 @@ def test_minimal_claude_profile_loads():
         "review",
     ]
     review = next(s for s in profile.stages if s.name == "review")
-    assert review.agent == {"backend": "codex_cli", "permission_mode": "read-only"}
+    assert review.agent == {"backend": "codex_cli", "permission_mode": "workspace-write"}
     # Non-review stages inherit profile-level claude_code.
     for stage_name in ("specification", "decomposition", "implementation"):
         stage = next(s for s in profile.stages if s.name == stage_name)
@@ -187,7 +187,7 @@ def test_minimal_claude_review_resolves_to_codex():
     review = next(s for s in profile.stages if s.name == "review")
     cfg = resolve_agent_config(profile.agent, review.agent)
     assert cfg.backend == "codex_cli"
-    assert cfg.permission_mode == "read-only"
+    assert cfg.permission_mode == "workspace-write"
     # Non-review stage inherits the profile-level backend.
     impl = next(s for s in profile.stages if s.name == "implementation")
     impl_cfg = resolve_agent_config(profile.agent, impl.agent)
