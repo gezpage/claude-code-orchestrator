@@ -4,6 +4,7 @@ from orchestrator.plan import (
     add_fix_cycle_node,
     expand_nodes,
     init_plan_md,
+    mark_pipeline_done,
     rerender_plan_md,
     set_pr_node,
     update_plan_md,
@@ -810,15 +811,15 @@ def test_panel_shows_prose_from_output_file(tmp_path):
     assert "&quot;status&quot;: &quot;ok&quot;" not in content
 
 
-def test_panel_butted_to_stage_with_invisible_link(tmp_path):
-    """The stage → panel chain edge is invisible (~~~) so they butt up visually,
-    not separated by an arrow."""
+def test_stage_to_panel_visible_arrow(tmp_path):
+    """The stage → panel chain edge renders as a visible arrow so the data-flow
+    (stage produces the panel output) reads clearly in the diagram."""
     run_folder = _make_run_folder(tmp_path)
     profile = _simple_profile("specification")
     init_plan_md(run_folder, profile)
     content = (run_folder / "plan.md").read_text()
-    assert "specification ~~~ specification_panel" in content
-    assert "specification --> specification_panel" not in content
+    assert "specification --> specification_panel" in content
+    assert "specification ~~~ specification_panel" not in content
 
 
 def test_panel_prose_escapes_html_and_mermaid_breaking_chars(tmp_path):
@@ -951,3 +952,82 @@ def test_set_pr_node_splices_after_fix_cycle_predecessor(tmp_path):
     # Nothing else should still point directly at Done.
     assert "review_tests_2_panel --> Done" not in content
     assert "review_tests_panel --> Done" not in content
+
+
+# --- create_pr=True at init time ---
+
+
+def test_init_plan_md_renders_pr_stage_when_create_pr_true(tmp_path):
+    """With create_pr=True, the PR stage node appears in the diagram alongside
+    other stages (rect shape, prompt/panel partners) — spliced between the last
+    stage and Done."""
+    run_folder = _make_run_folder(tmp_path)
+    profile = _simple_profile("specification", "implementation")
+    init_plan_md(run_folder, profile, create_pr=True)
+    content = (run_folder / "plan.md").read_text()
+    # The pr node is a rect-shape stage (not stadium), with a panel partner.
+    assert "pr[" in content
+    assert "pr([" not in content
+    assert "pr --> pr_panel" in content
+    # Last stage panel flows into pr; pr_panel flows into Done.
+    assert "implementation_panel --> pr" in content
+    assert "pr_panel --> Done" in content
+    # Direct last-stage→Done edge must not survive the splice.
+    assert "implementation_panel --> Done" not in content
+
+
+def test_init_plan_md_omits_pr_stage_when_create_pr_false(tmp_path):
+    """With create_pr=False (default), no PR node is added to the diagram."""
+    run_folder = _make_run_folder(tmp_path)
+    profile = _simple_profile("specification", "implementation")
+    init_plan_md(run_folder, profile)
+    content = (run_folder / "plan.md").read_text()
+    assert "pr[" not in content
+    assert "pr_panel" not in content
+
+
+def test_set_pr_node_updates_existing_pr_stage_panel(tmp_path):
+    """When the PR stage was added at init time (create_pr=True), set_pr_node
+    only stamps the URL into the existing node's panel — it does not splice a
+    new stadium box."""
+    run_folder = _make_run_folder(tmp_path)
+    profile = _simple_profile("specification")
+    init_plan_md(run_folder, profile, create_pr=True)
+    set_pr_node(run_folder, "https://github.com/example/repo/pull/42")
+    content = (run_folder / "plan.md").read_text()
+    assert "https://github.com/example/repo/pull/42" in content
+    # No legacy stadium PR node introduced; the rect-shape stage persists.
+    assert "pr([" not in content
+    assert "pr[" in content
+    # PR node is now in 'complete' class.
+    assert "class pr complete" in content
+
+
+def test_bold_link_style_appears_for_passed_stages(tmp_path):
+    """Once a stage transitions to passed, the edges on its completed path
+    render with a thicker stroke via a linkStyle directive."""
+    run_folder = _make_run_folder(tmp_path)
+    profile = _simple_profile("specification", "implementation")
+    init_plan_md(run_folder, profile)
+    # No passed stages yet → no linkStyle directive in the rendered block.
+    assert "linkStyle" not in (run_folder / "plan.md").read_text()
+
+    update_plan_md(run_folder, "specification", "passed", elapsed_secs=10)
+    content = (run_folder / "plan.md").read_text()
+    assert "linkStyle" in content
+    assert "stroke-width:3px" in content
+
+
+def test_mark_pipeline_done_flips_done_node_to_complete(tmp_path):
+    """When the pipeline reaches Done successfully, mark_pipeline_done flips
+    Done from the startend class into the green 'complete' class."""
+    run_folder = _make_run_folder(tmp_path)
+    profile = _simple_profile("specification")
+    init_plan_md(run_folder, profile)
+    # Before: Done is in the startend class.
+    assert "class Done startend" in (run_folder / "plan.md").read_text()
+
+    mark_pipeline_done(run_folder)
+    content = (run_folder / "plan.md").read_text()
+    assert "class Done complete" in content
+    assert "class Done startend" not in content
