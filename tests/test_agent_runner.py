@@ -299,8 +299,13 @@ def test_codex_runner_workspace_roots_and_last_message(monkeypatch, tmp_path):
     cmd = captured["cmd"]
     assert "--cd" in cmd
     assert str(tmp_path / "repo") in cmd
-    assert "--add-dir" in cmd
-    assert str(tmp_path / "docs") in cmd
+    # writable_roots outside --cd are passed via -c sandbox_workspace_write.writable_roots
+    # rather than --add-dir (which doesn't satisfy apply_patch's project check).
+    assert "--add-dir" not in cmd
+    docs_path = str(tmp_path / "docs")
+    assert any(arg.startswith("sandbox_workspace_write.writable_roots=") and docs_path in arg for arg in cmd)
+    # The workspace_root must NOT be duplicated into writable_roots (it's already --cd).
+    assert all(f'"{tmp_path / "repo"}"' not in arg for arg in cmd if arg.startswith("sandbox_workspace_write."))
     assert result.stdout == 'SIGNAL_JSON: {"stage":"x","status":"passed"}'
 
 

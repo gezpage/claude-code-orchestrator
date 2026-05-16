@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import subprocess
 import tempfile
@@ -71,13 +72,26 @@ class CodexCliRunner(AgentRunner):
         workspace_root = request.workspace_root or request.cwd
         if workspace_root:
             cmd += ["--cd", workspace_root, "--skip-git-repo-check"]
+        # Writable roots outside `--cd` are extended via the config override
+        # `sandbox_workspace_write.writable_roots`, not via the `--add-dir` CLI
+        # flag. Empirically (codex v0.130.0), `--add-dir` extends the OS-level
+        # sandbox seatbelt rules but the `apply_patch` tool still rejects writes
+        # outside `--cd` with `error=patch rejected: writing outside of the
+        # project; rejected by user approval settings`. The TOML config key,
+        # by contrast, extends both layers — sandbox writability *and* the
+        # apply_patch project check. Without it, a reviewer stage running with
+        # cwd=repo_root cannot append its verdict to the run-folder review-log.md.
+        extra_roots: list[str] = []
         seen_roots = {str(Path(workspace_root).resolve())} if workspace_root else set()
         for root in request.writable_roots:
             resolved = str(Path(root).resolve())
             if resolved in seen_roots:
                 continue
             seen_roots.add(resolved)
-            cmd += ["--add-dir", root]
+            extra_roots.append(root)
+        if extra_roots:
+            toml_array = "[" + ", ".join(json.dumps(p) for p in extra_roots) + "]"
+            cmd += ["-c", f"sandbox_workspace_write.writable_roots={toml_array}"]
         if model:
             cmd += ["-m", model]
 

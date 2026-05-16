@@ -8,6 +8,7 @@ Format: [Unreleased] at the top, dated releases below, newest first.
 ## [Unreleased]
 
 ### Fixed
+- 2026-05-16: `CodexCliRunner` now passes writable roots via the `-c sandbox_workspace_write.writable_roots=[…]` config override instead of `--add-dir`. Empirically the `--add-dir` flag extends the OS sandbox label but does not satisfy `apply_patch`'s independent "writing outside of the project" check, so the codex reviewer (cwd=repo_root, run folder elsewhere) still had its review prose dropped with `error=patch rejected: writing outside of the project; rejected by user approval settings`. The TOML config key extends both layers.
 - 2026-05-16: `minimal-claude` review stage now runs the codex reviewer with `permission_mode: workspace-write` instead of `read-only`. The review prompt instructs codex to append its detailed verdict to `review-log.md`; under `read-only` that write was rejected by the sandbox and the reviewer's prose was silently lost, leaving only the one-line SIGNAL_JSON for the fix-implementation agent to act on.
 
 ### Changed
