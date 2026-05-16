@@ -60,9 +60,9 @@ def test_full_profile_e2e_happy_path(tmp_path):
     }
     assert signals["review"]["changes_requested"] == []
 
-    # planning + 1 track + alignment + spec + decomp + 2 impl + qa + 3 reviewers + harvest
-    # + executive_summary finalisation = 13.
-    assert fake.call_count == 13
+    # planning + 3 tracks + alignment + spec + decomp + 2 impl + qa + 3 reviewers + harvest
+    # + executive_summary finalisation = 15.
+    assert fake.call_count == 15
 
     assert (run_folder / "plan.md").exists()
     plan_md = (run_folder / "plan.md").read_text().lower()

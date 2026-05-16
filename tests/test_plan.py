@@ -50,6 +50,24 @@ def test_init_plan_md_creates_file(tmp_path):
     assert "classDef pending" in content
 
 
+def test_init_plan_md_start_shows_profile_name(tmp_path):
+    run_folder = _make_run_folder(tmp_path)
+    profile = Profile(
+        name="full",
+        stages=(StageConfig(name="discovery", prompt="prompts/discovery/default.md"),),
+    )
+    init_plan_md(run_folder, profile)
+    content = (run_folder / "plan.md").read_text()
+    # Start carries "▶ Start" inside the title span; profile name renders below
+    # at plain-text size so it doesn't compete with the title.
+    assert "▶ Start" in content
+    assert "Profile: Full" in content
+    # Subtitle is appended below the title span, not inside it.
+    title_idx = content.find("▶ Start")
+    profile_idx = content.find("Profile: Full")
+    assert 0 < title_idx < profile_idx
+
+
 def test_init_plan_md_idempotent(tmp_path):
     run_folder = _make_run_folder(tmp_path)
     profile = _simple_profile("discovery")

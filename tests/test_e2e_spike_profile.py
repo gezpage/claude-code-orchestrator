@@ -47,8 +47,8 @@ def test_spike_profile_e2e_happy_path(tmp_path):
     signals = state.get("signals", {})
     assert signals["discovery"]["findings_files"], "discovery did not surface findings_files"
 
-    # planning prompt + 1 track + executive_summary finalisation = 3
-    assert fake.call_count == 3
+    # planning prompt + 3 tracks + executive_summary finalisation = 5
+    assert fake.call_count == 5
 
     assert (run_folder / "plan.md").exists()
     plan_md = (run_folder / "plan.md").read_text().lower()
