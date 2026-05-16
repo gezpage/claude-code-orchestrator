@@ -42,6 +42,8 @@ Developer-facing reference. Read before touching any orchestrator code.
 
 - **`plan.md` status aggregation goes through `worst_status` from `orchestrator/plan/_constants`.** The precedence ordering is `failed > blocked > changes-requested > in_progress > passed > skipped > pending` (lower wins). Concretely: round-1 review sub-nodes are re-stamped via `resolve_review_subnode_statuses` after a fix cycle so they cannot contradict the final verdict; the init-time PR node is flipped via `mark_pr_blocked` when the pipeline fails before finalisation; the panel-body fallback returns the table value (passed → `"done"`) so a passed stage never surfaces as `"pending"`. Adding a new ad-hoc precedence rule instead of using `worst_status` violates this invariant. See ADR-026.
 
+- **Domain-language reconciliation is append-only and lives in `orchestrator/glossary.py`.** When a project opts in via `project.yaml` `domain_language.path`, the canonical glossary in the target codebase is the source of truth. Stages read a run-local copy materialised at run start; only the post-harvest `_reconcile_glossary` step in `orchestrate.py` writes back, and only via `glossary.reconcile`, which appends new terms, leaves existing definitions verbatim, and records conflicts in `$RUN_FOLDER/glossary-reconciliation.md` rather than overwriting. The harvest agent proposes terms via `proposed_glossary_terms` in its signal — it must never edit the canonical file directly. Failures during reconciliation are logged and never change the pipeline exit status. See ADR-027.
+
 ---
 
 ## Path Resolution Rules

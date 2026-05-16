@@ -94,9 +94,20 @@ log_level: DEBUG               # optional: orchestrator log level (default: DEBU
 standards:
   - php
   - mysql
+
+# Optional: codebase-backed domain-language glossary. Path is relative to
+# repo-root. When set, specification reads the canonical glossary, downstream
+# stages use the run-local copy, and harvest proposes new terms that the
+# orchestrator appends to the canonical file (append-only — existing
+# definitions are never overwritten; conflicts surface in
+# $RUN_FOLDER/glossary-reconciliation.md). See ADR-027.
+domain_language:
+  path: docs/domain-language.md
 ```
 
 Only `repo-root` is required. The `standards` list is optional — if omitted, only the general engineering standard is injected when the active profile opts stages in via `standards: true`. Add any identifier that has a corresponding `harsh-{name}-engineering-standards` skill symlinked in the orchestrator's `.claude/skills/` directory.
+
+The `domain_language` block is optional. Omitting it leaves all stages unchanged; configuring it activates the glossary lifecycle described in ADR-027.
 
 The default profile is controlled by the `--profile` CLI flag (defaults to `full`); it is not read from `project.yaml`.
 

@@ -6,14 +6,27 @@ You are a specification agent. Produce a PRD, a self-contained context document,
 
 **Alignment log:** `{{ alignment_log }}`
 **Project context (baseline):** `{{ project_context_path }}`
+{% if run_glossary_path %}
+**Domain-language glossary (run-local copy):** `{{ run_glossary_path }}`
+{% if canonical_glossary_path %}
+**Canonical glossary (codebase, read-only):** `{{ canonical_glossary_path }}`
+{% endif %}
+{% endif %}
 
 ## Instructions
 
 1. Read the alignment log at `{{ alignment_log }}`.
 2. Read the project context file at `{{ project_context_path }}` as your baseline. It may be empty on the first run — that is expected. Carry forward all standing constraints and augment with any new constraints from this run.
+{% if run_glossary_path %}
+3. Read the run-local glossary at `{{ run_glossary_path }}`. {% if canonical_glossary_path %}It was copied from the canonical glossary at `{{ canonical_glossary_path }}` at the start of this run — treat its terms as the authoritative vocabulary for this codebase. Use them verbatim in the PRD and `context.md`; do not coin synonyms or paraphrase canonical definitions.{% else %}No canonical glossary file exists yet; the run-local copy is a placeholder. You may propose new terms freely.{% endif %} If the alignment log or PRD introduces concepts that warrant a glossary term, list them in the **Candidate glossary terms** section of `context.md`. The canonical glossary is **never** edited at this stage — harvest reconciles proposals append-only.
+4. Write a PRD at `$RUN_FOLDER/specification/prd.md` using the template below.
+5. Write a context document at `$RUN_FOLDER/specification/context.md` using the template below. This is the most important artifact of this stage.
+6. ADRs are the exception, not the rule. **Default: zero ADRs.** Only write one when a decision is genuinely non-obvious *and* hard to reverse later. A decision qualifies only if all three are true: (a) real trade-offs between alternatives were weighed, not just the obvious choice applied; (b) a future developer would ask "why did they do it this way?" without this record; and (c) reversing it later would require coordinated changes across multiple modules or a migration. Negative test: if you would reach the same decision by following language idiom, framework convention, a stated project constraint, or local code structure — it is not an ADR. Most runs produce zero ADRs. If you write one, write it at `$RUN_FOLDER/specification/adrs/ADR-NNN-title.md` using the ADR template below.
+{% else %}
 3. Write a PRD at `$RUN_FOLDER/specification/prd.md` using the template below.
 4. Write a context document at `$RUN_FOLDER/specification/context.md` using the template below. This is the most important artifact of this stage.
 5. ADRs are the exception, not the rule. **Default: zero ADRs.** Only write one when a decision is genuinely non-obvious *and* hard to reverse later. A decision qualifies only if all three are true: (a) real trade-offs between alternatives were weighed, not just the obvious choice applied; (b) a future developer would ask "why did they do it this way?" without this record; and (c) reversing it later would require coordinated changes across multiple modules or a migration. Negative test: if you would reach the same decision by following language idiom, framework convention, a stated project constraint, or local code structure — it is not an ADR. Most runs produce zero ADRs. If you write one, write it at `$RUN_FOLDER/specification/adrs/ADR-NNN-title.md` using the ADR template below.
+{% endif %}
 
 ## PRD template
 
@@ -72,6 +85,11 @@ For each qualifying decision from alignment:
 ## Assumptions
 
 <Anything assumed true that is not confirmed — note the assumption and the risk if wrong.>
+{% if run_glossary_path %}
+## Candidate glossary terms
+
+<Each entry: term name + one-paragraph definition. Only terms not already in the run-local glossary — do not re-list canonical terms. Leave the section empty (write "None.") if nothing new emerged.>
+{% endif %}
 ```
 
 ## ADR template

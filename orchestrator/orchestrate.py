@@ -13,7 +13,7 @@ import yaml
 
 import orchestrator.review_cycle as review_cycle_mod
 from orchestrator import _git as git_state
-from orchestrator import _git_setup, _github, paths
+from orchestrator import _git_setup, _github, glossary, paths
 from orchestrator import state as state_mod
 from orchestrator._git import GitStateError
 from orchestrator.agent_runner import AgentConfig, AgentRunner, build_runner, resolve_agent_config
@@ -136,6 +136,16 @@ def _build_variables(
     }
     if "repo-root" in project_config:
         vars_dict["repo_root"] = project_config["repo-root"]
+    # Glossary variables are always present so prompts can rely on Jinja `{% if %}`
+    # blocks without StrictUndefined errors. Empty strings mean the feature is
+    # not configured for this project.
+    canonical = glossary.resolve_canonical_path(project_config, project_config.get("repo-root"))
+    if canonical is not None:
+        vars_dict["canonical_glossary_path"] = str(canonical) if canonical.is_file() else ""
+        vars_dict["run_glossary_path"] = str(run_folder / "specification" / "glossary.md")
+    else:
+        vars_dict["canonical_glossary_path"] = ""
+        vars_dict["run_glossary_path"] = ""
     for sig in signals.values():
         if isinstance(sig, dict):
             for k, v in sig.items():
@@ -975,6 +985,21 @@ def run_pipeline(
             logger.log("pipeline", "ERROR", f"base-branch sync failed: {exc}")
             sys.exit(f"[orchestrator] [ERROR] base-branch sync failed: {exc}")
 
+    glossary_paths = glossary.setup_for_run(project_config, project_config.get("repo-root"), run_folder)
+    if glossary_paths is not None:
+        if glossary_paths.canonical_existed:
+            logger.log(
+                "pipeline",
+                "INFO",
+                f"domain-language glossary copied from {glossary_paths.canonical} to {glossary_paths.run_local}",
+            )
+        else:
+            logger.log(
+                "pipeline",
+                "WARN",
+                f"domain-language glossary configured but canonical file not found: {glossary_paths.canonical}",
+            )
+
     ctx = _PipelineContext(
         docs_root=docs_root,
         project=project,
@@ -1100,6 +1125,9 @@ def run_pipeline(
 
     logger.log("pipeline", "INFO", "pipeline completed successfully")
 
+    if glossary_paths is not None and "harvest" in signals:
+        _reconcile_glossary(run_folder, glossary_paths, signals["harvest"], logger)
+
     gh_repo = preflight.origin.gh_repo
     pr_will_run = bool(preflight.create_pr and preflight.origin.is_github and gh_repo)
     if not pr_will_run:
@@ -1213,3 +1241,49 @@ def _finalize_pr(
     update_plan_md(run_folder, "pr", "passed", elapsed_secs=time.monotonic() - t0)
     mark_pipeline_done(run_folder)
     logger.log("pipeline", "INFO", f"draft PR opened: {url}")
+
+
+def _reconcile_glossary(
+    run_folder: Path,
+    glossary_paths: glossary.GlossaryPaths,
+    harvest_signal: dict,
+    logger: OrchestratorLogger,
+) -> None:
+    """Append harvest-proposed glossary terms to the canonical file.
+
+    Append-only by design: existing definitions are never overwritten and
+    conflicts surface as warnings + a report at `glossary-conflicts.md`.
+    Failures here are logged and never change the pipeline exit status — a
+    stale or partially-reconciled glossary is preferable to losing the
+    pipeline's actual verdict over a docs hiccup.
+    """
+    proposed = harvest_signal.get("proposed_glossary_terms")
+    if not isinstance(proposed, dict) or not proposed:
+        logger.log("glossary", "DEBUG", "no proposed_glossary_terms in harvest signal — nothing to reconcile")
+        return
+    canonical = glossary_paths.canonical
+    if canonical is None:
+        return
+    try:
+        result = glossary.reconcile(canonical, {str(k): str(v) for k, v in proposed.items()})
+    except OSError as exc:
+        logger.log("glossary", "WARN", f"glossary reconciliation skipped: {exc}")
+        return
+
+    summary_parts = [f"{len(result.appended)} appended"]
+    if result.unchanged:
+        summary_parts.append(f"{len(result.unchanged)} unchanged")
+    if result.skipped_empty:
+        summary_parts.append(f"{len(result.skipped_empty)} skipped (empty)")
+    if result.conflicts:
+        summary_parts.append(f"{len(result.conflicts)} conflict{'s' if len(result.conflicts) != 1 else ''}")
+    logger.log("glossary", "INFO", f"reconciliation: {', '.join(summary_parts)}")
+    for conflict in result.conflicts:
+        logger.log("glossary", "WARN", f"conflict on term '{conflict.name}' — canonical definition preserved")
+
+    report = glossary.render_conflicts_report(result)
+    report_path = run_folder / "glossary-reconciliation.md"
+    try:
+        report_path.write_text(report)
+    except OSError as exc:
+        logger.log("glossary", "WARN", f"glossary report write failed: {exc}")
