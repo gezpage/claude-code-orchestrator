@@ -6,16 +6,18 @@ import yaml
 from orchestrator import orchestrate
 from orchestrator._git import GitStateError
 from orchestrator._git_setup import GitPreflightResult, OriginInfo
+from orchestrator.orchestrate import _finalize_summary as _real_finalize_summary
 from orchestrator.orchestrate import _PipelineContext
 from orchestrator.profile import ExpansionKind, StageConfig
 
 
 @pytest.fixture(autouse=True)
 def _stub_preflight_and_sync():
-    """Stub the ADR-019 preflight and base-branch sync for every test in this file.
+    """Stub the ADR-019 preflight, base-branch sync, and ADR-028 executive summary
+    finalisation for every test in this file.
 
-    Tests that explicitly exercise the preflight paths re-patch within their own
-    `with` block; autouse means the rest of the suite is unaffected by the new
+    Tests that explicitly exercise these paths re-patch within their own `with`
+    block; autouse means the rest of the suite is unaffected by the finalisation
     machinery.
     """
     with (
@@ -28,6 +30,7 @@ def _stub_preflight_and_sync():
             ),
         ),
         patch("orchestrator.orchestrate._sync_base_and_create_impl_branch"),
+        patch("orchestrator.orchestrate._finalize_summary"),
     ):
         yield
 
@@ -2121,3 +2124,260 @@ def test_slices_dispatcher_blocks_when_worktree_creation_fails(tmp_path):
     assert result["status"] == "blocked"
     assert "branch already exists" in result["message"]
     mock_rs.assert_not_called()
+
+
+# ── ADR-028: executive summary finalisation ───────────────────────────────────
+
+
+def test_executive_summary_runs_after_successful_pipeline(tmp_path):
+    """Always-on finalisation: on a clean run, _finalize_summary fires once with the
+    final pr_url (None when no PR was created)."""
+    stages = [{"stage": "discovery", "prompt": "prompts/discovery/default.md"}]
+    docs_root = _setup_docs(tmp_path, stages)
+    run_folder_path = tmp_path / "projects" / "myproject" / "workflow" / "runs" / "feat" / "2026-01-01-run-1"
+    run_folder_path.mkdir(parents=True)
+
+    discovery_passed = {"stage": "discovery", "status": "passed", "findings_files": []}
+
+    with (
+        patch("orchestrator.orchestrate.run_stage", return_value=discovery_passed),
+        patch("orchestrator.orchestrate.update_plan_md"),
+        patch("orchestrator.orchestrate.subprocess.run", return_value=_git_ok()),
+        patch("orchestrator.orchestrate._resolve_run_folder", return_value=run_folder_path),
+        patch("orchestrator.orchestrate._finalize_summary") as mock_summary,
+    ):
+        orchestrate.run_pipeline(docs_root, "myproject", "feature", "feat/test", str(tmp_path / "test.yaml"))
+
+    mock_summary.assert_called_once()
+    kwargs = mock_summary.call_args.kwargs
+    assert kwargs["pr_url"] is None
+    assert kwargs["run_folder"] == run_folder_path
+    assert kwargs["impl_branch"] == "feat/test"
+    assert kwargs["base_branch"] == "main"
+
+
+def test_executive_summary_runs_after_blocked_stage(tmp_path):
+    """The finalisation step is wrapped in try/finally so sys.exit(1) does not skip it."""
+    stages = [{"stage": "discovery", "prompt": "prompts/discovery/default.md"}]
+    docs_root = _setup_docs(tmp_path, stages)
+    run_folder_path = tmp_path / "projects" / "myproject" / "workflow" / "runs" / "feat" / "2026-01-01-run-1"
+    run_folder_path.mkdir(parents=True)
+
+    with (
+        patch("orchestrator.orchestrate.run_stage", return_value=BLOCKED_SIGNAL),
+        patch("orchestrator.orchestrate.update_plan_md"),
+        patch("orchestrator.orchestrate.mark_pr_blocked"),
+        patch("orchestrator.orchestrate.subprocess.run", return_value=_git_ok()),
+        patch("orchestrator.orchestrate._resolve_run_folder", return_value=run_folder_path),
+        patch("orchestrator.orchestrate._finalize_summary") as mock_summary,
+    ):
+        with pytest.raises(SystemExit) as exc_info:
+            orchestrate.run_pipeline(docs_root, "myproject", "feature", "feat/test", str(tmp_path / "test.yaml"))
+
+    # Pipeline still exits non-zero on a blocked stage — the summary just runs first.
+    assert exc_info.value.code == 1
+    mock_summary.assert_called_once()
+
+
+def test_executive_summary_runs_after_interactive_incomplete(tmp_path):
+    """sys.exit(0) from an unfinished interactive stage must still fire the summary."""
+    stages = [
+        {"stage": "alignment", "mode": "interactive", "artifact": "alignment-log.md"},
+        {"stage": "specification", "prompt": "prompts/specification/default.md"},
+    ]
+    docs_root = _setup_docs(tmp_path, stages)
+    run_folder_path = tmp_path / "projects" / "myproject" / "workflow" / "runs" / "feat" / "2026-01-01-run-1"
+    run_folder_path.mkdir(parents=True)
+    blocked_signal = {"stage": "alignment", "status": "blocked", "message": "Artifact not created"}
+
+    with (
+        patch("orchestrator.orchestrate.run_interactive_stage", return_value=blocked_signal),
+        patch("orchestrator.orchestrate.update_plan_md"),
+        patch("orchestrator.orchestrate.subprocess.run", return_value=_git_ok()),
+        patch("orchestrator.orchestrate._resolve_run_folder", return_value=run_folder_path),
+        patch("orchestrator.orchestrate._finalize_summary") as mock_summary,
+    ):
+        with pytest.raises(SystemExit) as exc_info:
+            orchestrate.run_pipeline(docs_root, "myproject", "feature", "feat/test", str(tmp_path / "test.yaml"))
+
+    assert exc_info.value.code == 0
+    mock_summary.assert_called_once()
+
+
+def test_executive_summary_receives_pr_url_when_pr_created(tmp_path):
+    """When _finalize_pr returns a URL, that URL is forwarded to _finalize_summary."""
+    stages = [{"stage": "discovery", "prompt": "prompts/discovery/default.md"}]
+    docs_root = _setup_docs(tmp_path, stages)
+    run_folder_path = tmp_path / "projects" / "myproject" / "workflow" / "runs" / "feat" / "2026-01-01-run-1"
+    run_folder_path.mkdir(parents=True)
+    discovery_passed = {"stage": "discovery", "status": "passed", "findings_files": []}
+
+    with (
+        patch(
+            "orchestrator.orchestrate._git_setup.preflight",
+            return_value=GitPreflightResult(
+                base_branch="main",
+                create_pr=True,
+                origin=OriginInfo(url="git@github.com:org/repo.git", is_github=True, gh_repo="org/repo"),
+            ),
+        ),
+        patch("orchestrator.orchestrate._sync_base_and_create_impl_branch"),
+        patch("orchestrator.orchestrate.run_stage", return_value=discovery_passed),
+        patch("orchestrator.orchestrate.update_plan_md"),
+        patch("orchestrator.orchestrate.subprocess.run", return_value=_git_ok()),
+        patch("orchestrator.orchestrate._resolve_run_folder", return_value=run_folder_path),
+        patch(
+            "orchestrator.orchestrate._finalize_pr",
+            return_value="https://github.com/org/repo/pull/42",
+        ),
+        patch("orchestrator.orchestrate._finalize_summary") as mock_summary,
+    ):
+        orchestrate.run_pipeline(docs_root, "myproject", "feature", "feat/test", str(tmp_path / "test.yaml"))
+
+    mock_summary.assert_called_once()
+    assert mock_summary.call_args.kwargs["pr_url"] == "https://github.com/org/repo/pull/42"
+
+
+def test_executive_summary_failure_logs_warning_and_swallows(tmp_path):
+    """Direct call: a run_stage exception during summary must be swallowed (returning None)
+    with a warning logged, so the pipeline exit status is unaffected."""
+    from orchestrator.agent_runner import AgentConfig
+    from orchestrator.logger import OrchestratorLogger
+
+    run_folder = tmp_path / "run"
+    run_folder.mkdir()
+    (run_folder / "plan.md").write_text("# plan\n")
+    feature_dir = tmp_path / "feature"
+    feature_dir.mkdir()
+    (feature_dir / "overview.md").write_text("# Overview\n")
+    project_log_path = str(tmp_path)
+    logger = OrchestratorLogger(run_folder, project_log_path)
+    agent_config = AgentConfig(backend="claude_code", model=None)
+
+    with (
+        patch("orchestrator.orchestrate.run_stage", side_effect=RuntimeError("boom")),
+        patch("orchestrator.orchestrate.build_runner"),
+    ):
+        # Must not raise — exception is logged and swallowed.
+        _real_finalize_summary(
+            run_folder=run_folder,
+            docs_root=str(tmp_path),
+            project="myproject",
+            project_log_path=project_log_path,
+            feature_path="feature",
+            repo_root="/tmp",
+            impl_branch="feat/test",
+            base_branch="main",
+            pr_url=None,
+            logger=logger,
+            agent_config=agent_config,
+        )
+
+
+def test_executive_summary_blocked_status_logs_warning(tmp_path):
+    """If the summary stage returns a blocked signal, no exception is raised and the
+    signal is not saved to state."""
+    from orchestrator.agent_runner import AgentConfig
+    from orchestrator.logger import OrchestratorLogger
+
+    run_folder = tmp_path / "run"
+    run_folder.mkdir()
+    (run_folder / "plan.md").write_text("# plan\n")
+    feature_dir = tmp_path / "feature"
+    feature_dir.mkdir()
+    (feature_dir / "overview.md").write_text("# Overview\n")
+    project_log_path = str(tmp_path)
+    logger = OrchestratorLogger(run_folder, project_log_path)
+    agent_config = AgentConfig(backend="claude_code", model=None)
+
+    blocked = {"stage": "executive_summary", "status": "blocked", "message": "plan unreadable"}
+
+    with (
+        patch("orchestrator.orchestrate.run_stage", return_value=blocked),
+        patch("orchestrator.orchestrate.build_runner"),
+        patch("orchestrator.orchestrate.state_mod.save_stage_signal") as mock_save_sig,
+    ):
+        _real_finalize_summary(
+            run_folder=run_folder,
+            docs_root=str(tmp_path),
+            project="myproject",
+            project_log_path=project_log_path,
+            feature_path="feature",
+            repo_root="/tmp",
+            impl_branch="feat/test",
+            base_branch="main",
+            pr_url=None,
+            logger=logger,
+            agent_config=agent_config,
+        )
+
+    # Blocked summary must not be saved as if it had succeeded.
+    mock_save_sig.assert_not_called()
+
+
+def test_executive_summary_passes_pr_url_into_variables(tmp_path):
+    """The pr_url argument flows into the stage template variables verbatim, falling back
+    to 'not created' when None."""
+    from orchestrator.agent_runner import AgentConfig
+    from orchestrator.logger import OrchestratorLogger
+
+    run_folder = tmp_path / "run"
+    run_folder.mkdir()
+    feature_dir = tmp_path / "feature"
+    feature_dir.mkdir()
+    (feature_dir / "overview.md").write_text("# Overview\n")
+    logger = OrchestratorLogger(run_folder, str(tmp_path))
+    agent_config = AgentConfig(backend="claude_code", model=None)
+
+    summary_signal = {
+        "stage": "executive_summary",
+        "status": "passed",
+        "summary_path": str(run_folder / "executive_summary.md"),
+    }
+
+    with (
+        patch("orchestrator.orchestrate.run_stage", return_value=summary_signal) as mock_rs,
+        patch("orchestrator.orchestrate.build_runner"),
+        patch("orchestrator.orchestrate.state_mod.save_stage_signal"),
+        patch("orchestrator.orchestrate.state_mod.save_stage_agent"),
+    ):
+        _real_finalize_summary(
+            run_folder=run_folder,
+            docs_root=str(tmp_path),
+            project="myproject",
+            project_log_path=str(tmp_path),
+            feature_path="feature",
+            repo_root="/tmp",
+            impl_branch="feat/test",
+            base_branch="main",
+            pr_url="https://github.com/org/repo/pull/42",
+            logger=logger,
+            agent_config=agent_config,
+        )
+
+    variables = mock_rs.call_args.args[2]
+    assert variables["pr_url"] == "https://github.com/org/repo/pull/42"
+    assert variables["summary_path"] == str(run_folder / "executive_summary.md")
+
+    # Now confirm the None fallback.
+    with (
+        patch("orchestrator.orchestrate.run_stage", return_value=summary_signal) as mock_rs2,
+        patch("orchestrator.orchestrate.build_runner"),
+        patch("orchestrator.orchestrate.state_mod.save_stage_signal"),
+        patch("orchestrator.orchestrate.state_mod.save_stage_agent"),
+    ):
+        _real_finalize_summary(
+            run_folder=run_folder,
+            docs_root=str(tmp_path),
+            project="myproject",
+            project_log_path=str(tmp_path),
+            feature_path="feature",
+            repo_root="/tmp",
+            impl_branch="feat/test",
+            base_branch="main",
+            pr_url=None,
+            logger=logger,
+            agent_config=agent_config,
+        )
+
+    assert mock_rs2.call_args.args[2]["pr_url"] == "not created"

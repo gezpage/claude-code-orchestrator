@@ -60,8 +60,8 @@ def test_fix_cycle_resolves_architecture_changes(tmp_path):
     # reviewers re-enter the cycle.
     assert "review:implementation:r2" not in counts
 
-    # Happy-path 12 + 1 fix-impl + 1 arch-r2 = 14.
-    assert fake.call_count == 14
+    # Happy-path 13 (incl. executive_summary) + 1 fix-impl + 1 arch-r2 = 15.
+    assert fake.call_count == 15
 
     # Fix-cycle artefacts exist.
     fix_outputs = sorted((run_folder / "fix-implementation").glob("fix-implementation-*-output.md"))
