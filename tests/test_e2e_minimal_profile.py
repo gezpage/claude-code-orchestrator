@@ -93,8 +93,8 @@ def test_minimal_profile_e2e_happy_path(tmp_path):
     assert signals["review"]["reviewer_statuses"] == {"implementation": "approved"}
     assert signals["review"]["changes_requested"] == []
 
-    # spec + decomp + 1 impl + 1 reviewer = 4
-    assert fake.call_count == 4
+    # spec + decomp + 1 impl + 1 reviewer + executive_summary finalisation = 5
+    assert fake.call_count == 5
 
     assert (run_folder / "plan.md").exists()
     plan_md = (run_folder / "plan.md").read_text()

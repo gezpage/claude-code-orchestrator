@@ -68,8 +68,9 @@ def test_minimal_codex_profile_e2e_records_codex_backend(tmp_path):
         assert agent.get(autonomous, {}).get("model") is None
     assert agent.get("verification", {}).get("backend") == "deterministic"
 
-    # spec + decomp + 1 impl + 1 reviewer = 4 — same single-agent shape as `minimal`.
-    assert fake.call_count == 4
+    # spec + decomp + 1 impl + 1 reviewer + executive_summary finalisation = 5 —
+    # same single-agent shape as `minimal`.
+    assert fake.call_count == 5
 
     # No slice fan-out: no worktree creation, no fan-in/fan-out plan nodes,
     # no per-slice output filenames.

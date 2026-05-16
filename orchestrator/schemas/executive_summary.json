@@ -1,0 +1,18 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "required": ["stage", "status"],
+  "properties": {
+    "stage": {"type": "string"},
+    "status": {"type": "string", "enum": ["passed", "blocked", "failed"]},
+    "message": {"type": "string"},
+    "summary_path": {"type": "string", "minLength": 1}
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"status": {"const": "passed"}}},
+      "then": {"required": ["summary_path"]}
+    }
+  ],
+  "additionalProperties": true
+}

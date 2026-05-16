@@ -987,130 +987,162 @@ def run_pipeline(
         agent_metadata=agent_metadata,
     )
 
-    for stage in profile.stages:
-        stage_name = stage.name
+    # Resolved once so the finalisation phase honours the configured backend
+    # (e.g. codex_cli) instead of silently falling back to the default runner.
+    finalisation_agent = resolve_agent_config(profile.agent, None)
+    pr_url: str | None = None
 
-        if stage_name in completed:
-            logger.log(stage_name, "DEBUG", "already passed — skipping")
-            continue
+    # The stage loop and PR finalisation run inside try/finally so the executive
+    # summary fires on every exit path — clean completion, blocked stage
+    # (sys.exit(1)), or interactive incomplete (sys.exit(0)). See ADR-027.
+    try:
+        for stage in profile.stages:
+            stage_name = stage.name
 
-        variables = _build_variables(
-            stage_name,
-            signals,
-            branch,
-            preflight.base_branch,
-            feature_path,
-            docs_root,
-            project,
-            run_folder,
-            project_config,
-        )
+            if stage_name in completed:
+                logger.log(stage_name, "DEBUG", "already passed — skipping")
+                continue
 
-        if stage.mode == "interactive":
+            variables = _build_variables(
+                stage_name,
+                signals,
+                branch,
+                preflight.base_branch,
+                feature_path,
+                docs_root,
+                project,
+                run_folder,
+                project_config,
+            )
+
+            if stage.mode == "interactive":
+                t0 = time.monotonic()
+                try:
+                    sig = _dispatch_interactive(stage, variables, run_folder, ctx)
+                except Exception:
+                    logger.log(stage_name, "ERROR", f"unhandled exception in '{stage_name}':\n{traceback.format_exc()}")
+                    raise
+                elapsed = time.monotonic() - t0
+                if sig.get("status") != "passed":
+                    st = state_mod.load_state(run_folder)
+                    st["blocked_at"] = stage_name
+                    state_mod.save_state(run_folder, st)
+                    update_plan_md(run_folder, stage_name, "blocked")
+                    logger.log(
+                        stage_name, "WARN", f"interactive stage '{stage_name}' incomplete: {sig.get('message', '')}"
+                    )
+                    artifact_path = run_folder / stage_name / (stage.artifact or "")
+                    print(  # noqa: T201
+                        f"\n[orchestrator] Stage '{stage_name}' incomplete.\n"
+                        f"  Expected : {artifact_path}\n"
+                        f"  Resume   : orchestrator resume --run-folder {run_folder} --docs-root {docs_root}\n"
+                    )
+                    sys.exit(0)
+                signals[stage_name] = sig
+                state_mod.update_stage_status(run_folder, stage_name, "passed")
+                state_mod.save_stage_signal(run_folder, stage_name, sig)
+                meta = ctx.agent_metadata.get(stage_name, {})
+                state_mod.save_stage_agent(
+                    run_folder, stage_name, meta.get("backend", "interactive"), meta.get("model")
+                )
+                update_plan_md(
+                    run_folder, stage_name, "passed", elapsed_secs=elapsed, signal=sig, impl_name="Interactive"
+                )
+                continue
+
+            update_plan_md(run_folder, stage_name, "in_progress")
             t0 = time.monotonic()
             try:
-                sig = _dispatch_interactive(stage, variables, run_folder, ctx)
+                if stage.mode == "deterministic":
+                    sig = run_deterministic_stage(stage_name, variables["repo_root"], run_folder, ctx.project_log_path)
+                    if sig.get("verification_status") == "failed":
+                        sig = _run_fix_verification_cycle(sig, run_folder, variables, ctx)
+                else:
+                    sig = _DISPATCHERS[stage.expansion](stage, variables, run_folder, ctx, signals)
             except Exception:
                 logger.log(stage_name, "ERROR", f"unhandled exception in '{stage_name}':\n{traceback.format_exc()}")
                 raise
             elapsed = time.monotonic() - t0
+
+            signals[stage_name] = sig
+
             if sig.get("status") != "passed":
                 st = state_mod.load_state(run_folder)
                 st["blocked_at"] = stage_name
                 state_mod.save_state(run_folder, st)
-                update_plan_md(run_folder, stage_name, "blocked")
-                logger.log(stage_name, "WARN", f"interactive stage '{stage_name}' incomplete: {sig.get('message', '')}")
-                artifact_path = run_folder / stage_name / (stage.artifact or "")
-                print(  # noqa: T201
-                    f"\n[orchestrator] Stage '{stage_name}' incomplete.\n"
-                    f"  Expected : {artifact_path}\n"
-                    f"  Resume   : orchestrator resume --run-folder {run_folder} --docs-root {docs_root}\n"
+                update_plan_md(run_folder, stage_name, sig["status"])
+                # The PR node is added at init time when create-pr is true; on stage
+                # failure the finalisation phase never runs, so flip it to blocked
+                # rather than leaving it pending forever. See ADR-026.
+                mark_pr_blocked(run_folder)
+                logger.log(
+                    stage_name,
+                    "ERROR",
+                    f"pipeline stopped: stage {stage_name} {sig['status']}: {sig.get('message', '')}",
                 )
-                sys.exit(0)
-            signals[stage_name] = sig
+                sys.exit(1)
+
             state_mod.update_stage_status(run_folder, stage_name, "passed")
             state_mod.save_stage_signal(run_folder, stage_name, sig)
             meta = ctx.agent_metadata.get(stage_name, {})
-            state_mod.save_stage_agent(run_folder, stage_name, meta.get("backend", "interactive"), meta.get("model"))
-            update_plan_md(run_folder, stage_name, "passed", elapsed_secs=elapsed, signal=sig, impl_name="Interactive")
-            continue
-
-        update_plan_md(run_folder, stage_name, "in_progress")
-        t0 = time.monotonic()
-        try:
-            if stage.mode == "deterministic":
-                sig = run_deterministic_stage(stage_name, variables["repo_root"], run_folder, ctx.project_log_path)
-                if sig.get("verification_status") == "failed":
-                    sig = _run_fix_verification_cycle(sig, run_folder, variables, ctx)
-            else:
-                sig = _DISPATCHERS[stage.expansion](stage, variables, run_folder, ctx, signals)
-        except Exception:
-            logger.log(stage_name, "ERROR", f"unhandled exception in '{stage_name}':\n{traceback.format_exc()}")
-            raise
-        elapsed = time.monotonic() - t0
-
-        signals[stage_name] = sig
-
-        if sig.get("status") != "passed":
-            st = state_mod.load_state(run_folder)
-            st["blocked_at"] = stage_name
-            state_mod.save_state(run_folder, st)
-            update_plan_md(run_folder, stage_name, sig["status"])
-            # The PR node is added at init time when create-pr is true; on stage
-            # failure the finalisation phase never runs, so flip it to blocked
-            # rather than leaving it pending forever. See ADR-026.
-            mark_pr_blocked(run_folder)
-            logger.log(
-                stage_name, "ERROR", f"pipeline stopped: stage {stage_name} {sig['status']}: {sig.get('message', '')}"
-            )
-            sys.exit(1)
-
-        state_mod.update_stage_status(run_folder, stage_name, "passed")
-        state_mod.save_stage_signal(run_folder, stage_name, sig)
-        meta = ctx.agent_metadata.get(stage_name, {})
-        state_mod.save_stage_agent(run_folder, stage_name, meta.get("backend", "unknown"), meta.get("model"))
-        impl_name = _impl_from_prompt(stage.prompt) if stage.prompt else None
-        update_plan_md(
-            run_folder,
-            stage_name,
-            "passed",
-            elapsed_secs=elapsed,
-            output_summary=_output_summary(stage, sig),
-            signal=sig,
-            impl_name=impl_name,
-        )
-
-        if stage.expansion == ExpansionKind.TRACKS:
-            n_tracks = len(sig.get("tracks", []))
-            n_findings = len(sig.get("findings_files", []))
-            logger.log(
+            state_mod.save_stage_agent(run_folder, stage_name, meta.get("backend", "unknown"), meta.get("model"))
+            impl_name = _impl_from_prompt(stage.prompt) if stage.prompt else None
+            update_plan_md(
+                run_folder,
                 stage_name,
-                "INFO",
-                f"{stage_name} passed ({_fmt_elapsed(elapsed)}) — "
-                f"{n_tracks} track{'s' if n_tracks != 1 else ''}, "
-                f"{n_findings} findings file{'s' if n_findings != 1 else ''}",
-            )
-        elif stage.expansion == ExpansionKind.SLICES:
-            n_commits = len(sig.get("commit_hashes", []))
-            logger.log(
-                stage_name,
-                "INFO",
-                f"{stage_name} passed — {n_commits} commit{'s' if n_commits != 1 else ''} on {branch}",
+                "passed",
+                elapsed_secs=elapsed,
+                output_summary=_output_summary(stage, sig),
+                signal=sig,
+                impl_name=impl_name,
             )
 
-    logger.log("pipeline", "INFO", "pipeline completed successfully")
+            if stage.expansion == ExpansionKind.TRACKS:
+                n_tracks = len(sig.get("tracks", []))
+                n_findings = len(sig.get("findings_files", []))
+                logger.log(
+                    stage_name,
+                    "INFO",
+                    f"{stage_name} passed ({_fmt_elapsed(elapsed)}) — "
+                    f"{n_tracks} track{'s' if n_tracks != 1 else ''}, "
+                    f"{n_findings} findings file{'s' if n_findings != 1 else ''}",
+                )
+            elif stage.expansion == ExpansionKind.SLICES:
+                n_commits = len(sig.get("commit_hashes", []))
+                logger.log(
+                    stage_name,
+                    "INFO",
+                    f"{stage_name} passed — {n_commits} commit{'s' if n_commits != 1 else ''} on {branch}",
+                )
 
-    gh_repo = preflight.origin.gh_repo
-    pr_will_run = bool(preflight.create_pr and preflight.origin.is_github and gh_repo)
-    if not pr_will_run:
-        mark_pipeline_done(run_folder)
+        logger.log("pipeline", "INFO", "pipeline completed successfully")
 
-    if pr_will_run and gh_repo:
-        # pr_draft is not a profile stage, so _build_stage_runners does not produce a
-        # runner for it. Resolve one from the profile-level agent config so the
-        # finalisation phase honours the configured backend (e.g. codex_cli) instead
-        # of silently falling back to the default ClaudeCodeRunner. See ADR-019.
-        _finalize_pr(
+        gh_repo = preflight.origin.gh_repo
+        pr_will_run = bool(preflight.create_pr and preflight.origin.is_github and gh_repo)
+        if not pr_will_run:
+            mark_pipeline_done(run_folder)
+
+        if pr_will_run and gh_repo:
+            # pr_draft is not a profile stage, so _build_stage_runners does not produce a
+            # runner for it. The finalisation runner is shared with the executive
+            # summary step. See ADR-019.
+            pr_url = _finalize_pr(
+                run_folder=run_folder,
+                docs_root=docs_root,
+                project=project,
+                project_log_path=project_log_path,
+                feature_path=feature_path,
+                repo_root=project_config["repo-root"],
+                impl_branch=branch,
+                base_branch=preflight.base_branch,
+                gh_repo=gh_repo,
+                logger=logger,
+                agent_config=finalisation_agent,
+            )
+    finally:
+        # Always fires — pass, fail, or blocked. Failures here log a warning and
+        # never change the pipeline exit status. See ADR-027.
+        _finalize_summary(
             run_folder=run_folder,
             docs_root=docs_root,
             project=project,
@@ -1119,9 +1151,9 @@ def run_pipeline(
             repo_root=project_config["repo-root"],
             impl_branch=branch,
             base_branch=preflight.base_branch,
-            gh_repo=gh_repo,
+            pr_url=pr_url,
             logger=logger,
-            agent_config=resolve_agent_config(profile.agent, None),
+            agent_config=finalisation_agent,
         )
 
 
@@ -1137,11 +1169,12 @@ def _finalize_pr(
     gh_repo: str,
     logger: OrchestratorLogger,
     agent_config: AgentConfig,
-) -> None:
+) -> str | None:
     """Push the implementation branch and open a draft PR.
 
-    Any failure here is logged as a warning and surfaced in plan.md, but does
-    not change the pipeline exit status. See ADR-019.
+    Returns the PR URL on success, or None if any step failed. Any failure here
+    is logged as a warning and surfaced in plan.md, but does not change the
+    pipeline exit status. See ADR-019.
     """
     plan_path = run_folder / "plan.md"
     fallback_cmd = f"gh pr create --draft --base {base_branch} --head {impl_branch} --repo {gh_repo}"
@@ -1183,11 +1216,11 @@ def _finalize_pr(
         )
     except Exception as exc:
         _fail(f"pr_draft stage error: {exc}")
-        return
+        return None
 
     if sig.get("status") != "passed" or "title" not in sig or "body" not in sig:
         _fail(f"pr_draft stage did not produce title/body: {sig.get('message', sig.get('status'))}")
-        return
+        return None
 
     title = str(sig["title"]).strip()
     body = str(sig["body"]).strip()
@@ -1200,16 +1233,83 @@ def _finalize_pr(
         git_state.push_branch(repo_root, impl_branch, "origin", set_upstream=True)
     except GitStateError as exc:
         _fail(f"git push failed: {exc}")
-        return
+        return None
 
     try:
         url = _github.create_draft_pr(gh_repo, base_branch, impl_branch, title, body)
     except _github.GhError as exc:
         _fail(f"gh pr create failed: {exc}")
-        return
+        return None
 
     set_pr_notice(run_folder, url)
     set_pr_node(run_folder, url)
     update_plan_md(run_folder, "pr", "passed", elapsed_secs=time.monotonic() - t0)
     mark_pipeline_done(run_folder)
     logger.log("pipeline", "INFO", f"draft PR opened: {url}")
+    return url
+
+
+def _finalize_summary(
+    run_folder: Path,
+    docs_root: str,
+    project: str,
+    project_log_path: str,
+    feature_path: str,
+    repo_root: str,
+    impl_branch: str,
+    base_branch: str,
+    pr_url: str | None,
+    logger: OrchestratorLogger,
+    agent_config: AgentConfig,
+) -> None:
+    """Dispatch a Claude stage that writes ``executive_summary.md`` to the run folder.
+
+    Runs unconditionally as the last finalisation step — pass, fail, or blocked
+    pipelines all receive a post-mortem summary. Any failure here logs a warning
+    and does not change the pipeline exit status. See ADR-027.
+    """
+    plan_path = run_folder / "plan.md"
+    state_path = run_folder / "_state.yaml"
+    overview_path = Path(docs_root) / feature_path / "overview.md"
+    summary_path = run_folder / "executive_summary.md"
+
+    variables = {
+        "run_folder": str(run_folder),
+        "docs_root": docs_root,
+        "project": project,
+        "branch": impl_branch,
+        "base_branch": base_branch,
+        "feature_path": feature_path,
+        "plan_md_path": str(plan_path),
+        "overview_md_path": str(overview_path),
+        "state_yaml_path": str(state_path),
+        "summary_path": str(summary_path),
+        "pr_url": pr_url or "not created",
+        "repo_root": repo_root,
+    }
+    try:
+        sig = run_stage(
+            "executive_summary",
+            "default",
+            variables,
+            run_folder,
+            docs_root,
+            project,
+            project_log_path,
+            runner=build_runner(agent_config),
+        )
+    except Exception as exc:
+        logger.log("pipeline", "WARN", f"executive summary skipped: {exc}")
+        return
+
+    if sig.get("status") != "passed":
+        logger.log(
+            "pipeline",
+            "WARN",
+            f"executive summary not produced: {sig.get('message', sig.get('status'))}",
+        )
+        return
+
+    state_mod.save_stage_signal(run_folder, "executive_summary", sig)
+    state_mod.save_stage_agent(run_folder, "executive_summary", agent_config.backend, agent_config.model)
+    logger.log("pipeline", "INFO", f"executive summary written: {summary_path}")
