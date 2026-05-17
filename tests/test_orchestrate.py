@@ -2962,6 +2962,43 @@ def test_apply_alignment_policy_blocks_when_policy_block_and_items_remain():
     assert args[1] == "ERROR"
 
 
+def test_apply_alignment_policy_treats_whitespace_only_entries_as_empty():
+    """Empty strings and whitespace-only entries are not real residue — they
+    must not trigger a block, and they must not emit a warn-log either."""
+    from orchestrator.orchestrate import _apply_alignment_policy
+    from orchestrator.profile import AlignmentPolicy
+
+    stage = StageConfig(name="alignment", alignment_policy=AlignmentPolicy(on_unresolved="block"))
+    sig = {
+        "stage": "alignment",
+        "status": "passed",
+        "unresolved_remaining": ["", "   ", "\t\n"],
+    }
+    logger = MagicMock()
+    out = _apply_alignment_policy(stage, sig, logger)
+    assert out is sig
+    logger.log.assert_not_called()
+
+
+def test_apply_alignment_policy_counts_only_non_empty_entries():
+    """Whitespace-only entries are dropped from the count and preview, so a list
+    like ["", "real item"] reports one residue item — not two."""
+    from orchestrator.orchestrate import _apply_alignment_policy
+    from orchestrator.profile import AlignmentPolicy
+
+    stage = StageConfig(name="alignment", alignment_policy=AlignmentPolicy(on_unresolved="block"))
+    sig = {
+        "stage": "alignment",
+        "status": "passed",
+        "unresolved_remaining": ["", "   ", "Decide caching strategy"],
+    }
+    logger = MagicMock()
+    out = _apply_alignment_policy(stage, sig, logger)
+    assert out["status"] == "blocked"
+    assert "1 unresolved item:" in out["message"]
+    assert "Decide caching strategy" in out["message"]
+
+
 def test_apply_alignment_policy_noop_for_non_alignment_stage():
     """The gate only fires for the alignment stage — other stages pass through."""
     from orchestrator.orchestrate import _apply_alignment_policy

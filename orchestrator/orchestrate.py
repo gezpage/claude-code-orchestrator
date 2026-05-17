@@ -358,14 +358,20 @@ def _apply_alignment_policy(stage: StageConfig, sig: dict, logger: OrchestratorL
     """
     if stage.name != "alignment" or sig.get("status") != "passed":
         return sig
-    remaining = sig.get("unresolved_remaining")
-    if not isinstance(remaining, list) or not remaining:
+    raw_remaining = sig.get("unresolved_remaining")
+    if not isinstance(raw_remaining, list):
+        return sig
+    # Normalise away empty / whitespace-only entries before counting. An LLM that
+    # emits ``unresolved_remaining: [""]`` to satisfy the "always required" field
+    # contract must not be treated as having left residue.
+    remaining = [s for s in (str(v).strip() for v in raw_remaining) if s]
+    if not remaining:
         return sig
     policy = stage.alignment_policy
     on_unresolved = policy.on_unresolved if policy is not None else "warn"
     n = len(remaining)
     if on_unresolved == "block":
-        first = str(remaining[0])
+        first = remaining[0]
         preview = first if len(first) <= 120 else first[:117] + "..."
         msg = f"alignment left {n} unresolved item{'s' if n != 1 else ''}: {preview}"
         logger.log("alignment", "ERROR", f"alignment_policy=block — {msg}")
