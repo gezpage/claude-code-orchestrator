@@ -1692,7 +1692,8 @@ def test_extract_input_paths_filters_to_existing_files(tmp_path):
         "adr_paths": [str(real_one), str(tmp_path / "missing.md")],
         "irrelevant": "not a path key",
     }
-    inputs = _extract_input_paths(variables, exclude={prompt.resolve()})
+    prompt_body = f"refs {real_one} and {real_two} and {a_dir} and ghost.md and missing.md"
+    inputs = _extract_input_paths(variables, prompt_body, exclude={prompt.resolve()})
     assert str(real_one.resolve()) in inputs
     assert str(real_two.resolve()) in inputs
     assert all("ghost" not in p and "missing" not in p for p in inputs)
@@ -1711,5 +1712,38 @@ def test_extract_input_paths_excludes_the_prompt_file(tmp_path):
     prompt = tmp_path / "p.md"
     prompt.write_text("p")
     variables = {"prompt_path": str(prompt)}
-    inputs = _extract_input_paths(variables, exclude={prompt.resolve()})
+    inputs = _extract_input_paths(variables, str(prompt), exclude={prompt.resolve()})
     assert inputs == []
+
+
+def test_extract_input_paths_drops_paths_unreferenced_by_prompt(tmp_path):
+    """Regression for #186: a variable whose value is an existing file but
+    whose path string does not appear in the rendered prompt body must be
+    filtered out. Concretely, ``project_context_path`` is injected into
+    every stage's variables dict but only ``specification`` / ``harvest``
+    prompts reference it — other stages must not render a stale ``context``
+    chip pointing at the empty project-level ``context.md``."""
+    from orchestrator.run_stage import _extract_input_paths
+
+    project_context = tmp_path / "context.md"
+    project_context.write_text("")  # empty, like the auto-touched file
+    overview = tmp_path / "overview.md"
+    overview.write_text("overview")
+    prompt = tmp_path / "stage-prompt.md"
+    prompt.write_text("p")
+
+    # Decomposition-shaped prompt: references overview, never mentions project_context.
+    decomp_prompt_body = f"Read the overview at {overview} and produce slices."
+    variables = {
+        "project_context_path": str(project_context),
+        "overview_md_path": str(overview),
+    }
+    inputs = _extract_input_paths(variables, decomp_prompt_body, exclude={prompt.resolve()})
+    assert str(overview.resolve()) in inputs
+    assert str(project_context.resolve()) not in inputs
+
+    # Spec-shaped prompt: references both — both must surface.
+    spec_prompt_body = f"Baseline: {project_context}. Overview: {overview}."
+    inputs = _extract_input_paths(variables, spec_prompt_body, exclude={prompt.resolve()})
+    assert str(project_context.resolve()) in inputs
+    assert str(overview.resolve()) in inputs
