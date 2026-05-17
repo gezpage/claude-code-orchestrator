@@ -1,0 +1,49 @@
+toolchain: typescript
+priority: 60
+
+# `markers` must ALL be present; at least one `any_markers` entry must be present.
+# package.json is required (TypeScript projects are npm/yarn/pnpm ecosystems).
+# Any of the TypeScript-specific files confirms the project is TypeScript, not plain JS.
+markers:
+  - package.json
+
+any_markers:
+  - tsconfig.json
+  - vite.config.ts
+  - vitest.config.ts
+  - jest.config.ts
+  - src/**/*.ts
+  - src/**/*.tsx
+
+# `test` is the toolchain's required test command, but it is gated on a
+# matching `scripts.test` entry — so the engine skips (does not fail) it when
+# the script is missing. `required_any_of` escalates the all-skipped case to
+# `warned`: a TypeScript project with no `test` script ran no deterministic
+# verification at all, and a `passed` report there is silent false confidence
+# (the same misleading shape that motivated the PHP fix in #173).
+required_any_of:
+  - test
+
+commands:
+  - id: test
+    command: npm test
+    required: true
+    if_script_exists: test
+
+  - id: typecheck
+    command: npm run typecheck
+    required: false
+    if_script_exists: typecheck
+
+  - id: lint
+    command: npm run lint
+    required: false
+    if_script_exists: lint
+
+  - id: build
+    command: npm run build
+    required: false
+    if_script_exists: build
+
+probes:
+  - node_manifest_sanity

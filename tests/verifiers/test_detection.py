@@ -153,3 +153,42 @@ def test_bundled_repo_with_tests_python_file_selects_python(tmp_path: Path):
     chosen = detect_toolchain(tmp_path, load_bundled_recipes())
     assert chosen is not None
     assert chosen.toolchain == "python"
+
+
+# ---------------------------------------------------------------------------
+# TypeScript recipe detection
+# ---------------------------------------------------------------------------
+
+
+def test_bundled_typescript_repo_with_tsconfig_selects_typescript(tmp_path: Path):
+    (tmp_path / "package.json").write_text("{}")
+    (tmp_path / "tsconfig.json").write_text("{}")
+    chosen = detect_toolchain(tmp_path, load_bundled_recipes())
+    assert chosen is not None
+    assert chosen.toolchain == "typescript"
+
+
+def test_bundled_typescript_repo_with_vite_config_selects_typescript(tmp_path: Path):
+    (tmp_path / "package.json").write_text("{}")
+    (tmp_path / "vite.config.ts").write_text("")
+    chosen = detect_toolchain(tmp_path, load_bundled_recipes())
+    assert chosen is not None
+    assert chosen.toolchain == "typescript"
+
+
+def test_bundled_typescript_repo_with_ts_source_selects_typescript(tmp_path: Path):
+    (tmp_path / "package.json").write_text("{}")
+    src = tmp_path / "src"
+    src.mkdir()
+    (src / "index.ts").write_text("")
+    chosen = detect_toolchain(tmp_path, load_bundled_recipes())
+    assert chosen is not None
+    assert chosen.toolchain == "typescript"
+
+
+def test_bundled_plain_js_repo_without_ts_markers_selects_node(tmp_path: Path):
+    # A Node.js repo with no TypeScript signals must stay on the Node recipe.
+    (tmp_path / "package.json").write_text("{}")
+    chosen = detect_toolchain(tmp_path, load_bundled_recipes())
+    assert chosen is not None
+    assert chosen.toolchain == "node"

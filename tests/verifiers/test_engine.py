@@ -437,3 +437,92 @@ def test_no_baseline_path_means_no_classification(tmp_path: Path):
     assert sig["baseline_compared"] is False
     assert sig["baseline_failed_command_ids"] == []
     assert sig["new_failed_command_ids"] == []
+
+
+# ---------------------------------------------------------------------------
+# TypeScript recipe engine tests
+# ---------------------------------------------------------------------------
+
+
+def _make_ts_repo(tmp_path: Path, manifest: dict | None = None) -> Path:
+    """Create a TypeScript repo (package.json + tsconfig.json)."""
+    repo = _make_repo(tmp_path, manifest)
+    (repo / "tsconfig.json").write_text("{}")
+    return repo
+
+
+def test_typescript_repo_detected_and_test_runs(tmp_path: Path):
+    repo = _make_ts_repo(tmp_path, {"name": "x", "version": "0.0.1", "scripts": {"test": "vitest"}})
+    run_folder = _make_run_folder(tmp_path)
+    with patch("orchestrator.verifiers.engine.subprocess.run", return_value=_completed(0)):
+        sig = verify(repo, run_folder)
+    assert sig["toolchain"] == "typescript"
+    assert sig["verification_status"] == "passed"
+    assert "test" in sig["command_ids"]
+
+
+def test_typescript_repo_typecheck_runs_when_script_present(tmp_path: Path):
+    repo = _make_ts_repo(
+        tmp_path,
+        {"name": "x", "version": "0.0.1", "scripts": {"test": "vitest", "typecheck": "tsc --noEmit"}},
+    )
+    run_folder = _make_run_folder(tmp_path)
+    invoked: list[str] = []
+
+    def _capture(cmd: str, **_: object) -> MagicMock:
+        invoked.append(cmd)
+        return _completed(0)
+
+    with patch("orchestrator.verifiers.engine.subprocess.run", side_effect=_capture):
+        sig = verify(repo, run_folder)
+    assert sig["verification_status"] == "passed"
+    assert any("typecheck" in c for c in invoked)
+
+
+def test_typescript_repo_typecheck_skipped_when_script_absent(tmp_path: Path):
+    # No `typecheck` script → command must be skipped, not failed.
+    repo = _make_ts_repo(tmp_path, {"name": "x", "version": "0.0.1", "scripts": {"test": "vitest"}})
+    run_folder = _make_run_folder(tmp_path)
+    invoked: list[str] = []
+
+    def _capture(cmd: str, **_: object) -> MagicMock:
+        invoked.append(cmd)
+        return _completed(0)
+
+    with patch("orchestrator.verifiers.engine.subprocess.run", side_effect=_capture):
+        sig = verify(repo, run_folder)
+    assert not any("typecheck" in c for c in invoked)
+    assert sig["verification_status"] == "passed"
+
+
+def test_typescript_repo_missing_test_script_downgrades_to_warned(tmp_path: Path):
+    """A TypeScript repo with no `test` script ran zero deterministic commands.
+    `required_any_of` must downgrade the report to `warned` — a `passed` result
+    here is silent false confidence (same shape as the PHP fix in #173)."""
+    repo = _make_ts_repo(tmp_path, {"name": "x", "version": "0.0.1", "scripts": {}})
+    run_folder = _make_run_folder(tmp_path)
+    with patch("orchestrator.verifiers.engine.subprocess.run") as mock_run:
+        sig = verify(repo, run_folder)
+    assert mock_run.call_count == 0
+    assert sig["toolchain"] == "typescript"
+    assert sig["verification_status"] == "warned"
+    assert "no eligible test command ran" in sig["summary"]
+
+
+def test_typescript_failing_test_marks_failed(tmp_path: Path):
+    """The test command failing is still a hard failure — required_any_of doesn't soften it."""
+    repo = _make_ts_repo(tmp_path, {"name": "x", "version": "0.0.1", "scripts": {"test": "vitest"}})
+    run_folder = _make_run_folder(tmp_path)
+    with patch("orchestrator.verifiers.engine.subprocess.run", return_value=_completed(1)):
+        sig = verify(repo, run_folder)
+    assert sig["verification_status"] == "failed"
+    assert "test" in sig["failed_command_ids"]
+
+
+def test_plain_js_repo_not_misdetected_as_typescript(tmp_path: Path):
+    # No tsconfig.json or other TS markers → must fall through to Node recipe.
+    repo = _make_repo(tmp_path, {"name": "x", "version": "0.0.1", "scripts": {"test": "jest"}})
+    run_folder = _make_run_folder(tmp_path)
+    with patch("orchestrator.verifiers.engine.subprocess.run", return_value=_completed(0)):
+        sig = verify(repo, run_folder)
+    assert sig["toolchain"] == "node"
