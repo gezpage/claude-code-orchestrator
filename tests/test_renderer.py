@@ -303,3 +303,82 @@ def test_decomposition_prompts_include_numeric_edge_cases(tmp_path, template):
         "whitespace",
     ):
         assert needle in result, f"missing edge case wording: {needle!r}"
+
+
+def test_executive_summary_calls_out_verification_honestly(tmp_path):
+    summary_vars = {
+        **VARS,
+        "plan_md_path": "/tmp/run/plan.md",
+        "overview_md_path": "/tmp/docs/projects/myproject/feature/overview.md",
+        "state_yaml_path": "/tmp/run/_state.yaml",
+        "summary_path": "/tmp/run/executive_summary.md",
+        "pr_url": "not created",
+        "base_branch": "main",
+        "branch": "feature/test",
+        "feature_path": "myfeature",
+        "project": "myproject",
+    }
+
+    result = render_prompt("executive_summary", "default", summary_vars, str(tmp_path), "myproject")
+
+    # Verification must be reported honestly, with skipped/warned states named
+    # so a recipe that ran zero commands cannot pass as green.
+    assert "Deterministic verification" in result
+    assert "skipped" in result
+    assert "warned" in result
+    # The no-overclaim rule must be explicit so the summary cannot describe a
+    # warned-or-skipped-verification run as "production ready" or "complete".
+    assert "overclaim" in result.lower() or "do not describe" in result.lower()
+    assert "production ready" in result
+    # Accepted assumptions from alignment must surface, not be buried.
+    assert "accepted assumptions" in result.lower()
+
+
+def test_fix_implementation_requires_tests_and_summary(tmp_path):
+    fix_vars = {
+        **VARS,
+        "branch": "feature/test",
+        "changes_brief": "- implementation: dummy finding\n",
+    }
+
+    result = render_prompt("fix-implementation", "default", fix_vars, str(tmp_path), "myproject")
+
+    # Every bug fix gets a regression test that would have caught the bug.
+    assert "fail before the fix and pass after" in result
+    # Fix cycles must rerun the test suite before signalling.
+    assert "rerun the project's tests" in result
+    # The agent must summarise which blocking finding each commit addressed so
+    # the next reviewer can audit the fix loop quickly.
+    assert "blocking finding" in result
+    assert "commit hash" in result
+
+
+@pytest.mark.parametrize("template", ["minimal", "default"])
+def test_specification_prompts_guard_against_scope_expansion(tmp_path, template):
+    if template == "minimal":
+        spec_vars = {
+            **VARS,
+            "feature_path": "myfeature",
+            "project_context_path": "/tmp/docs/projects/myproject/project-context.md",
+            "run_glossary_path": "",
+            "canonical_glossary_path": "",
+        }
+    else:
+        spec_vars = {
+            **VARS,
+            "alignment_log": "/tmp/run/alignment/alignment-log.md",
+            "project_context_path": "/tmp/docs/projects/myproject/project-context.md",
+            "run_glossary_path": "",
+            "canonical_glossary_path": "",
+        }
+
+    result = render_prompt("specification", template, spec_vars, str(tmp_path), "myproject")
+
+    # The PRD must stay proportional — small tasks must not become platforms.
+    assert "Do not expand" in result
+    assert "enterprise system" in result
+    # Rubric/judging criteria from the overview are binding.
+    assert "rubric" in result
+    # User-facing inputs default to a graceful-error contract unless overridden.
+    assert "graceful" in result
+    assert "5xx" in result

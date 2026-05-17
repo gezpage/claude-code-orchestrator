@@ -50,6 +50,7 @@ Render exactly this markdown structure, in this order:
 
 - **Commands run:** <list of significant commands executed by the pipeline — verification, test runners, linters. Skip trivial git/`mkdir` plumbing.>
 - **Tests:** <passed/failed counts and toolchain if known from verification output; otherwise "not run">
+- **Deterministic verification:** <state honestly whether deterministic verification actually ran. Use exactly one of: "passed", "failed", "skipped — <reason>", "warned — <reason>", or "not run". A stage that selected a recipe but ran zero eligible commands is "skipped" — do not collapse that into "passed". A `warned` policy outcome stays "warned" even if the pipeline continued.>
 
 ## Reviews
 
@@ -76,6 +77,8 @@ Render exactly this markdown structure, in this order:
 - Do not override or contradict the status recorded in `_state.yaml` / `plan.md`. The `Status:` line at the top must match whatever those files say.
 - Link to underlying artifacts (e.g. `[review log](review/review-log.md)`, `[plan](plan.md)`) rather than restating their contents at length.
 - Do not include the `Co-Authored-By` trailer or any signature.
+- **No overclaiming.** Do not describe the change as "production ready", "fully tested", or "complete" unless deterministic verification passed, every requirement is checked `[x]`, and no reviewer left blocking findings. If verification was skipped or warned, or reviewers flagged unresolved risks, say so in `## Open risks & known limitations` — do not bury it.
+- **Surface unresolved alignment items.** If alignment recorded accepted assumptions or unresolved-remaining items, list them under `## Open risks & known limitations`. An accepted assumption is not a failure, but it must be visible so the reader knows what was *not* confirmed.
 
 ## Signal
 
