@@ -250,6 +250,25 @@ def rerender_plan_md(run_folder: Path) -> None:
         replace_mermaid_block(plan_path, graph)
 
 
+def set_node_inputs(run_folder: Path, stage_id: str, inputs: list[str]) -> None:
+    """Stamp ``Node.inputs`` and re-render so the Input box surfaces the agent's
+    reading list before dispatch. No-ops if the graph/plan or node does not
+    exist — callers don't need to gate on init state.
+    """
+    with _plan_lock:
+        run_folder = Path(run_folder)
+        plan_path = run_folder / "plan.md"
+        graph = load_graph(run_folder)
+        if graph is None or not plan_path.exists():
+            return
+        node = graph.nodes.get(stage_id)
+        if node is None:
+            return
+        node.inputs = list(inputs)
+        save_graph(run_folder, graph)
+        replace_mermaid_block(plan_path, graph)
+
+
 def _update_plan_md(
     run_folder: Path,
     stage: str,
@@ -290,6 +309,10 @@ def _update_plan_md(
         node.css_class = css_class
         if elapsed_secs is not None:
             node.elapsed_secs = elapsed_secs
+        if signal is not None:
+            commit_hashes = signal.get("commit_hashes") or []
+            if commit_hashes:
+                node.commits = [str(h)[:7] for h in commit_hashes]
         save_graph(run_folder, graph)
         replace_mermaid_block(plan_path, graph)
 

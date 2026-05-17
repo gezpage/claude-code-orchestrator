@@ -51,6 +51,7 @@ You are a decomposition agent. Your task is to break the PRD into implementation
    - Slices in the same wave are independent and will run in parallel — only group slices together if they share no file or data dependency.
    - Every slice must appear in exactly one wave.
    Store the result as `slice_groups`: an ordered list of waves, each wave a list of absolute `S-NN-slug.md` paths (same paths as in `slice_files`).
+11. For every slice, list the files the implementing agent will need to **read** while executing it: the slice spec itself, the PRD, the context doc, the run-local glossary if present, and any ADRs or source files the slice spec cites by path. Emit this as `slice_inputs`: an array aligned by index with `slice_files`, each entry the list of absolute file paths for that slice. Inputs only — omit files the slice will create.
 
 ### Slice file template
 
@@ -78,7 +79,7 @@ Do not implement anything. This stage is planning only.
 Emit exactly one line:
 
 ```
-SIGNAL_JSON: {"stage": "decomposition", "status": "passed", "slice_files": ["{{ run_folder }}/decomposition/S-01-slug.md", "..."], "slice_groups": [["{{ run_folder }}/decomposition/S-01-slug.md", "{{ run_folder }}/decomposition/S-07-slug.md"], ["{{ run_folder }}/decomposition/S-02-slug.md"], ["..."]]}
+SIGNAL_JSON: {"stage": "decomposition", "status": "passed", "slice_files": ["{{ run_folder }}/decomposition/S-01-slug.md", "..."], "slice_inputs": [["{{ run_folder }}/decomposition/S-01-slug.md", "{{ prd_path }}", "{{ context_path }}"], ["..."]], "slice_groups": [["{{ run_folder }}/decomposition/S-01-slug.md", "{{ run_folder }}/decomposition/S-07-slug.md"], ["{{ run_folder }}/decomposition/S-02-slug.md"], ["..."]]}
 ```
 
 `slice_files` must contain only `S-NN-slug.md` paths — not `dependency-graph.md`.
@@ -89,4 +90,4 @@ If decomposition cannot proceed:
 SIGNAL_JSON: {"stage": "decomposition", "status": "blocked", "message": "<reason>"}
 ```
 
-Required fields: `stage`, `status`. Required when passed: `slice_files` (flat ordered array of paths written), `slice_groups` (ordered list of execution waves — slices in the same wave run in parallel).
+Required fields: `stage`, `status`. Required when passed: `slice_files` (flat ordered array of paths written), `slice_inputs` (per-slice array of file paths the implementing agent will read, aligned by index with `slice_files`), `slice_groups` (ordered list of execution waves — slices in the same wave run in parallel).

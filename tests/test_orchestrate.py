@@ -239,6 +239,8 @@ def test_full_happy_path(tmp_path):
         schema_name=None,
         standards=None,
         runner=None,
+        inputs=None,
+        node_id=None,
     ):
         if stage == "review":
             assert "review_md" in variables
@@ -424,6 +426,8 @@ def test_resume_skips_completed_stages(tmp_path):
         schema_name=None,
         standards=None,
         runner=None,
+        inputs=None,
+        node_id=None,
     ):
         called_stages.append(stage)
         return SPEC_SIGNAL
@@ -478,6 +482,8 @@ def test_branch_created_at_implementation_start(tmp_path):
         schema_name=None,
         standards=None,
         runner=None,
+        inputs=None,
+        node_id=None,
     ):
         call_order.append(("run_stage", stage))
         return next(sig_iter)
@@ -541,6 +547,8 @@ def test_interactive_stage_not_dispatched_through_run_stage(tmp_path):
         schema_name=None,
         standards=None,
         runner=None,
+        inputs=None,
+        node_id=None,
     ):
         called_stages.append(stage)
         return SPEC_SIGNAL
@@ -640,6 +648,8 @@ def test_discovery_fanout_calls_planning_then_tracks(tmp_path):
         schema_name=None,
         standards=None,
         runner=None,
+        inputs=None,
+        node_id=None,
     ):
         call_log.append(
             {"stage": stage, "output_suffix": output_suffix, "schema_name": schema_name, "prompt_file": prompt_file}
@@ -786,6 +796,8 @@ def test_implementation_filters_non_slice_files(tmp_path):
         schema_name=None,
         standards=None,
         runner=None,
+        inputs=None,
+        node_id=None,
     ):
         called_with.append(variables.get("slice_file"))
         return IMPL_SIGNAL
@@ -830,6 +842,8 @@ def test_review_md_path_uses_stage_subfolder(tmp_path):
         schema_name=None,
         standards=None,
         runner=None,
+        inputs=None,
+        node_id=None,
     ):
         captured_vars.update(variables)
         return REVIEW_ARCH_SIGNAL
@@ -912,6 +926,8 @@ def test_project_context_path_injected_into_variables(tmp_path):
         schema_name=None,
         standards=None,
         runner=None,
+        inputs=None,
+        node_id=None,
     ):
         captured_vars.update(variables)
         return SPEC_SIGNAL

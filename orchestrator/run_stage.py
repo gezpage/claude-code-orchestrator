@@ -14,7 +14,7 @@ from orchestrator.agent_runner import (
     ProgressEvent,
 )
 from orchestrator.logger import OrchestratorLogger
-from orchestrator.plan import rerender_plan_md
+from orchestrator.plan import rerender_plan_md, set_node_inputs
 
 
 def _fmt_elapsed(secs: float) -> str:
@@ -93,6 +93,54 @@ def _missing_declared_artifacts(sig: dict) -> list[Path]:
     return [path for path in _declared_artifact_paths(sig) if not path.exists()]
 
 
+def _extract_input_paths(variables: dict, exclude: set[Path]) -> list[str]:
+    """Pick ``*_path`` / ``*_file`` / ``*_paths`` / ``*_files`` values from the
+    prompt-variables dict that resolve to existing files.
+
+    Mirrors the convention :func:`_declared_artifact_paths` already relies on:
+    keys ending in ``_path`` / ``_file`` are scalar paths; ``_paths`` /
+    ``_files`` are lists. Anything that isn't an existing file is skipped —
+    so directory variables (e.g. ``feature_path``, ``repo_root``) and not-yet-
+    written downstream artifacts drop out automatically. Order matches first
+    encounter so the rendered pills follow the prompt's variable ordering.
+    """
+    seen: list[str] = []
+    seen_set: set[str] = set()
+
+    def add(raw: str) -> None:
+        try:
+            path = Path(raw)
+        except (TypeError, ValueError):
+            return
+        if not path.is_file():
+            return
+        try:
+            resolved = path.resolve()
+        except OSError:
+            return
+        if resolved in exclude:
+            return
+        absolute = str(resolved)
+        if absolute in seen_set:
+            return
+        seen_set.add(absolute)
+        seen.append(absolute)
+
+    def visit(key: str, value) -> None:
+        if key.endswith(("_path", "_file", "_md")) and isinstance(value, str):
+            add(value)
+            return
+        if key.endswith(("_paths", "_files")) and isinstance(value, list):
+            for item in value:
+                if isinstance(item, str):
+                    add(item)
+            return
+
+    for key, value in variables.items():
+        visit(key, value)
+    return seen
+
+
 def _agent_writable_roots(docs_root: str, run_folder: Path, variables: dict) -> tuple[str, ...]:
     roots = [
         Path(docs_root),
@@ -164,6 +212,8 @@ def run_stage(
     schema_name: str | None = None,
     standards: list[str] | None = None,
     runner: AgentRunner | None = None,
+    inputs: list[str] | None = None,
+    node_id: str | None = None,
 ) -> dict:
     run_folder = Path(run_folder)
     logger = OrchestratorLogger(run_folder, project_log_path)
@@ -185,10 +235,24 @@ def run_stage(
     output_dir = run_folder / stage
     output_dir.mkdir(parents=True, exist_ok=True)
     tag = f"-{output_suffix}" if output_suffix else ""
-    (output_dir / f"{stage}{tag}-prompt.md").write_text(prompt)
-    # Re-render so the prompt link surfaces in plan.md before the agent dispatches
-    # — otherwise it only appears after the stage finishes and update_plan_md re-renders.
-    rerender_plan_md(run_folder)
+    prompt_path = output_dir / f"{stage}{tag}-prompt.md"
+    prompt_path.write_text(prompt)
+
+    # Stamp the stage node's input list so the Input box in plan.md previews
+    # what the agent is about to read. Two paths:
+    #   - Explicit list passed in (slices/tracks/fix-cycles): use verbatim —
+    #     the caller knows what its pre-rendered prompt references.
+    #   - Otherwise: extract from the variables dict using the same *_path /
+    #     *_file convention _declared_artifact_paths uses. Skip the prompt
+    #     file itself so it doesn't duplicate the Prompt link.
+    if inputs is not None:
+        resolved_inputs = inputs
+    elif variables:
+        resolved_inputs = _extract_input_paths(variables, exclude={prompt_path.resolve()})
+    else:
+        resolved_inputs = []
+    stage_node_id = node_id or output_suffix or stage
+    set_node_inputs(run_folder, stage_node_id, resolved_inputs)
 
     progress_callback = _make_progress_callback(logger, stage)
     t0 = time.monotonic()

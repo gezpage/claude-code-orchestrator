@@ -54,6 +54,17 @@ class Node:
     # by ``set_pr_node`` once the GitHub PR is created so the URL renders inside
     # the pr stage's panel — independent of any output file the stage produced.
     url: str = ""
+    # Files the stage agent will read, surfaced as pill buttons inside the
+    # input parallelogram. Populated at dispatch time from the prompt's
+    # variables dict (or from an upstream planner's per-slice signal) so the
+    # input box previews the agent's reading list before it runs. Paths are
+    # relative to the run folder when possible; absolute otherwise.
+    inputs: list[str] = field(default_factory=list)
+    # Short commit SHAs the agent recorded in its ``commit_hashes`` signal
+    # field. Stamped at stage completion so the output panel can list one
+    # ``Commit #abc1234`` line per commit. When the graph's ``pr`` node has a
+    # URL set, the renderer upgrades these to clickable GitHub commit links.
+    commits: list[str] = field(default_factory=list)
 
 
 @dataclass
