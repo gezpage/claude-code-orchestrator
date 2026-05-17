@@ -180,6 +180,40 @@ def test_init_plan_md_review_fan_in_to_next_stage(tmp_path):
     assert "review_panel --> harvest_prompt" not in content
 
 
+def test_aggregate_review_node_renders_no_prompt_input_card(tmp_path):
+    """The PROMPTS-expansion aggregate node has no prompt artifact of its own,
+    so the renderer must not emit a ``{id}_prompt`` input card for it. The
+    pre-fix renderer produced an unlinked literal ``Prompt`` placeholder that
+    confused the diagram. See issue #194.
+
+    Per-reviewer sub-nodes (e.g. ``review_arch``) keep their prompt input cards
+    so this regression is scoped to the aggregate only.
+    """
+    run_folder = _make_run_folder(tmp_path)
+    profile = Profile(
+        name="test",
+        stages=(
+            StageConfig(name="implementation", prompt="prompts/implementation/default.md"),
+            StageConfig(
+                name="review",
+                expansion=ExpansionKind.PROMPTS,
+                prompts={"arch": "prompts/review/arch.md"},
+            ),
+        ),
+    )
+    init_plan_md(run_folder, profile)
+    content = (run_folder / "plan.md").read_text()
+    # Aggregate review node has no prompt input partner — no declaration, no
+    # class assignment, no chain edge into the stage node.
+    assert "review_prompt@{" not in content
+    assert "class review_prompt input" not in content
+    assert "review_prompt --> review" not in content
+    # Per-reviewer sub-nodes still materialise their prompt input cards.
+    assert "review_arch_prompt@{" in content
+    assert "class review_arch_prompt input" in content
+    assert "review_arch_prompt --> review_arch" in content
+
+
 def test_init_plan_md_start_done_nodes(tmp_path):
     run_folder = _make_run_folder(tmp_path)
     profile = _simple_profile("discovery", "specification")
@@ -789,6 +823,185 @@ def test_add_fix_cycle_node_noop_when_no_reviewers(tmp_path):
     original = (run_folder / "plan.md").read_text()
     add_fix_cycle_node(run_folder, cycle_num=1, reviewers=[])
     assert (run_folder / "plan.md").read_text() == original
+
+
+# --- add_fix_verification_node ---
+
+
+def _profile_with_verification() -> Profile:
+    return Profile(
+        name="test",
+        stages=(
+            StageConfig(name="implementation", prompt="prompts/implementation/default.md"),
+            StageConfig(name="verification", mode="deterministic"),
+            StageConfig(name="review", prompt="prompts/review/default.md"),
+        ),
+    )
+
+
+def test_add_fix_verification_node_injects_node_and_rewires_edge(tmp_path):
+    """When a verification fix cycle fires, the helper must add a first-class
+    ``fix_verification`` node spliced between ``verification`` and its
+    downstream successor so the diagram reflects the remediation step. See
+    issue #194.
+    """
+    from orchestrator.plan import add_fix_verification_node
+    from orchestrator.plan._graph import load_graph
+
+    run_folder = _make_run_folder(tmp_path)
+    init_plan_md(run_folder, _profile_with_verification())
+    add_fix_verification_node(run_folder, status="in_progress")
+
+    graph = load_graph(run_folder)
+    assert graph is not None
+    assert "fix_verification" in graph.nodes
+    fix_node = graph.nodes["fix_verification"]
+    assert fix_node.display == "Fix Verification"
+    assert fix_node.stage_dir == "fix-verification"
+    assert fix_node.mode == "auto"
+    # The verification → review edge is rewired so fix_verification sits in
+    # the middle: verification → fix_verification, fix_verification → review.
+    edge_steps = [e.steps for e in graph.edges]
+    assert [["verification"], ["fix_verification"]] in edge_steps
+    assert [["fix_verification"], ["review"]] in edge_steps
+    # The old direct verification → review edge no longer exists.
+    assert [["verification"], ["review"]] not in edge_steps
+
+
+def test_add_fix_verification_node_renders_prompt_and_panel_partners(tmp_path):
+    """The injected node carries the same renderer treatment as a regular
+    auto stage: prompt input partner, output panel, and edges through both.
+    """
+    from orchestrator.plan import add_fix_verification_node
+
+    run_folder = _make_run_folder(tmp_path)
+    init_plan_md(run_folder, _profile_with_verification())
+    add_fix_verification_node(run_folder, status="in_progress")
+
+    content = (run_folder / "plan.md").read_text()
+    assert "fix_verification[" in content
+    assert "fix_verification_prompt@{" in content
+    assert "fix_verification_panel@{" in content
+    assert "fix_verification_prompt --> fix_verification" in content
+    assert "fix_verification --> fix_verification_panel" in content
+    # Edge endpoint rewriting: verification → fix_verification routes through
+    # the materialised prompt/panel partners just like any chain edge.
+    assert "verification_panel --> fix_verification_prompt" in content
+    assert "fix_verification_panel --> review_prompt" in content
+
+
+def test_add_fix_verification_node_attaches_artifact_files(tmp_path):
+    """``fix-verification/fix-verification-prompt.md`` and the matching
+    output file must attach to the injected node — not end up in the
+    generic ``Other files`` strip below the diagram. See issue #194.
+    """
+    from orchestrator.plan import add_fix_verification_node
+
+    run_folder = _make_run_folder(tmp_path)
+    init_plan_md(run_folder, _profile_with_verification())
+    add_fix_verification_node(run_folder, status="in_progress")
+
+    stage_dir = run_folder / "fix-verification"
+    stage_dir.mkdir()
+    (stage_dir / "fix-verification-prompt.md").write_text("prompt body")
+    (stage_dir / "fix-verification-output.md").write_text("Fix applied.")
+    rerender_plan_md(run_folder)
+
+    content = (run_folder / "plan.md").read_text()
+    # Files render as links on the materialised partners, not in the
+    # other-files strip.
+    assert "fix-verification/fix-verification-prompt.md" in content
+    assert "fix-verification/fix-verification-output.md" in content
+    other_strip_start = content.find("<!-- other-files-begin -->")
+    if other_strip_start >= 0:
+        other_strip = content[other_strip_start:]
+        assert "fix-verification-prompt.md" not in other_strip
+        assert "fix-verification-output.md" not in other_strip
+
+
+def test_add_fix_verification_node_idempotent(tmp_path):
+    """Re-calling the helper after the node exists must not duplicate the node
+    or re-rewire edges (e.g. on a resumed run that replays the cycle)."""
+    from orchestrator.plan import add_fix_verification_node
+    from orchestrator.plan._graph import load_graph
+
+    run_folder = _make_run_folder(tmp_path)
+    init_plan_md(run_folder, _profile_with_verification())
+    add_fix_verification_node(run_folder, status="in_progress")
+    after_first = (run_folder / "plan.md").read_text()
+    add_fix_verification_node(run_folder, status="in_progress")
+    after_second = (run_folder / "plan.md").read_text()
+    assert after_first == after_second
+
+    graph = load_graph(run_folder)
+    assert graph is not None
+    fix_edges = [e for e in graph.edges if e.steps and e.steps[0] == ["verification"]]
+    # Exactly one verification → fix_verification edge; no duplicate splices.
+    assert len(fix_edges) == 1
+    assert fix_edges[0].steps == [["verification"], ["fix_verification"]]
+
+
+def test_add_fix_verification_node_noop_when_no_plan(tmp_path):
+    from orchestrator.plan import add_fix_verification_node
+
+    run_folder = _make_run_folder(tmp_path)
+    add_fix_verification_node(run_folder, status="in_progress")
+    assert not (run_folder / "plan.md").exists()
+
+
+def test_add_fix_verification_node_noop_when_no_verification_node(tmp_path):
+    """A profile without verification (e.g. a docs-only run) must not gain a
+    spurious fix_verification node when the helper is called defensively."""
+    from orchestrator.plan import add_fix_verification_node
+    from orchestrator.plan._graph import load_graph
+
+    run_folder = _make_run_folder(tmp_path)
+    init_plan_md(run_folder, _simple_profile("discovery"))
+    add_fix_verification_node(run_folder, status="in_progress")
+
+    graph = load_graph(run_folder)
+    assert graph is not None
+    assert "fix_verification" not in graph.nodes
+
+
+def test_add_fix_verification_node_preserves_fix_cycle_rendering(tmp_path):
+    """Injecting fix_verification must not interfere with the existing review
+    fix-implementation cycle injection — both helpers operate on disjoint
+    edges so they must compose. See issue #194 design constraints."""
+    from orchestrator.plan import add_fix_verification_node
+    from orchestrator.plan._graph import load_graph
+
+    run_folder = _make_run_folder(tmp_path)
+    profile = Profile(
+        name="test",
+        stages=(
+            StageConfig(name="implementation", prompt="prompts/implementation/default.md"),
+            StageConfig(name="verification", mode="deterministic"),
+            StageConfig(
+                name="review",
+                expansion=ExpansionKind.PROMPTS,
+                prompts={"tests": "prompts/review/tests.md"},
+            ),
+            StageConfig(name="harvest", prompt="prompts/harvest/default.md"),
+        ),
+    )
+    init_plan_md(run_folder, profile)
+    add_fix_verification_node(run_folder, status="in_progress")
+    add_fix_cycle_node(run_folder, cycle_num=1, reviewers=["tests"])
+
+    graph = load_graph(run_folder)
+    assert graph is not None
+    assert "fix_verification" in graph.nodes
+    assert "fix_impl_1" in graph.nodes
+    assert "review_tests_2" in graph.nodes
+
+    content = (run_folder / "plan.md").read_text()
+    # fix-verification splice still in place.
+    assert "verification_panel --> fix_verification_prompt" in content
+    # Review fix-cycle wiring still in place — it pivots off review sub-nodes,
+    # not verification, so the two helpers compose without interference.
+    assert "review_tests_panel --> fix_impl_1_prompt" in content
+    assert "fix_impl_1_panel --> review_tests_2_prompt" in content
 
 
 # --- node label: Mode line, file links, legend ---

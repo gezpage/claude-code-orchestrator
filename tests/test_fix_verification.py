@@ -285,6 +285,99 @@ def test_fix_verification_cycle_puts_actual_hashes_in_returned_signal(tmp_path):
     assert result["commit_hashes"] == fix_hashes
 
 
+# ── plan graph injection ──────────────────────────────────────────────────────
+
+
+def test_fix_verification_cycle_injects_plan_node_before_dispatch(tmp_path):
+    """``_run_fix_verification_cycle`` must call ``add_fix_verification_node``
+    before running the fix-verification agent so the plan diagram reflects the
+    remediation step and the run_stage input-stamp lands on a real node.
+
+    See issue #194 — without this, fix-verification artifacts ended up in the
+    generic ``Other files`` strip and the diagram skipped the cycle entirely.
+    """
+    run_folder = tmp_path / "run-1"
+    run_folder.mkdir()
+    ctx = _make_ctx(tmp_path)
+    variables = {"repo_root": str(tmp_path / "repo")}
+    verify_sig = _verify_failed_sig(run_folder)
+
+    call_order: list[str] = []
+
+    def record_inject(*a, **kw):
+        call_order.append("inject")
+
+    def record_run_stage(*a, **kw):
+        call_order.append("run_stage")
+        return _fix_sig()
+
+    with (
+        patch("orchestrator.plan.add_fix_verification_node", side_effect=record_inject) as mock_inject,
+        patch("orchestrator.orchestrate.run_stage", side_effect=record_run_stage),
+        patch("orchestrator.orchestrate.run_deterministic_stage", return_value=_verify_passed_sig(run_folder)),
+        patch("orchestrator.orchestrate.review_cycle_mod._head_sha", return_value="deadbeef"),
+        patch("orchestrator.orchestrate.review_cycle_mod._commits_since", return_value=["abc123"]),
+        patch("orchestrator.plan.update_plan_md"),
+    ):
+        orchestrate._run_fix_verification_cycle(verify_sig, run_folder, variables, ctx)
+
+    mock_inject.assert_called_once()
+    assert call_order[0] == "inject", f"node injection must precede dispatch (got {call_order!r})"
+
+
+def test_fix_verification_cycle_stamps_node_passed_on_success(tmp_path):
+    """A successful fix-verification cycle stamps the ``fix_verification`` plan
+    node as ``passed`` with the commits it produced — this is what surfaces
+    the cycle in the Run Summary and panel."""
+    run_folder = tmp_path / "run-1"
+    run_folder.mkdir()
+    ctx = _make_ctx(tmp_path)
+    variables = {"repo_root": str(tmp_path / "repo")}
+    verify_sig = _verify_failed_sig(run_folder)
+
+    with (
+        patch("orchestrator.plan.add_fix_verification_node"),
+        patch("orchestrator.orchestrate.run_stage", return_value=_fix_sig()),
+        patch("orchestrator.orchestrate.run_deterministic_stage", return_value=_verify_passed_sig(run_folder)),
+        patch("orchestrator.orchestrate.review_cycle_mod._head_sha", return_value="deadbeef"),
+        patch("orchestrator.orchestrate.review_cycle_mod._commits_since", return_value=["abc123"]),
+        patch("orchestrator.plan.update_plan_md") as mock_update,
+    ):
+        orchestrate._run_fix_verification_cycle(verify_sig, run_folder, variables, ctx)
+
+    passed_calls = [c for c in mock_update.call_args_list if c.args and c.args[1] == "fix_verification"]
+    assert passed_calls, "fix_verification node must be stamped via update_plan_md"
+    args, kwargs = passed_calls[-1].args, passed_calls[-1].kwargs
+    assert args[2] == "passed"
+    assert kwargs.get("signal", {}).get("commit_hashes") == ["abc123"]
+
+
+def test_fix_verification_cycle_stamps_node_blocked_when_no_commits(tmp_path):
+    """A fix-verification cycle that makes no commits stamps the node as
+    ``blocked`` so the diagram surfaces the failure rather than leaving the
+    node in its initial ``in_progress`` state forever."""
+    run_folder = tmp_path / "run-1"
+    run_folder.mkdir()
+    ctx = _make_ctx(tmp_path)
+    variables = {"repo_root": str(tmp_path / "repo")}
+    verify_sig = _verify_failed_sig(run_folder)
+
+    with (
+        patch("orchestrator.plan.add_fix_verification_node"),
+        patch("orchestrator.orchestrate.run_stage", return_value=_fix_sig(hashes=[])),
+        patch("orchestrator.orchestrate.run_deterministic_stage"),
+        patch("orchestrator.orchestrate.review_cycle_mod._head_sha", return_value="deadbeef"),
+        patch("orchestrator.orchestrate.review_cycle_mod._commits_since", return_value=[]),
+        patch("orchestrator.plan.update_plan_md") as mock_update,
+    ):
+        orchestrate._run_fix_verification_cycle(verify_sig, run_folder, variables, ctx)
+
+    blocked_calls = [
+        c for c in mock_update.call_args_list if c.args and c.args[1] == "fix_verification" and c.args[2] == "blocked"
+    ]
+    assert blocked_calls, "fix_verification node must be stamped blocked when no commits land"
+
+
 def test_dispatch_prompts_diff_spans_implementation_and_fix_verification_commits(tmp_path):
     """When signals include commit_hashes from both implementation and verification
     (set by _run_fix_verification_cycle), the review diff range must span all commits."""

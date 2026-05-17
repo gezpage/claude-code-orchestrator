@@ -72,6 +72,10 @@ def build_initial_graph(
             chain_ids.append(name)
 
         elif stage.expansion == ExpansionKind.PROMPTS:
+            # The aggregate PROMPTS-expansion node has no prompt artifact of its
+            # own — only the per-reviewer sub-nodes do. Skip the prompt input
+            # partner so the renderer does not emit an unlinked ``Prompt``
+            # placeholder card. See issue #194.
             graph.add_node(
                 Node(
                     id=name,
@@ -82,6 +86,7 @@ def build_initial_graph(
                     stage_dir=name,
                     backend=backend,
                     model=model,
+                    materialize_prompt=False,
                 )
             )
             for reviewer, prompt_path in stage.prompts.items():
