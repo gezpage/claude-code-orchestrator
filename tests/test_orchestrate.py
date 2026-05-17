@@ -2385,7 +2385,8 @@ def test_remove_worktree_silent_when_not_registered(tmp_path):
 
     logger = MagicMock()
     with (
-        patch("orchestrator.orchestrate.git_state.worktree_registered", return_value=False),
+        patch("orchestrator.orchestrate.git_state.list_worktrees", return_value=[]),
+        patch("orchestrator.orchestrate.git_state.worktree_for_branch", return_value=None),
         patch("orchestrator.orchestrate.git_state.branch_exists", return_value=False),
         patch("orchestrator.orchestrate.subprocess.run") as mock_run,
     ):
@@ -2393,6 +2394,71 @@ def test_remove_worktree_silent_when_not_registered(tmp_path):
     mock_run.assert_not_called()
     levels = [call.args[1] for call in logger.log.call_args_list]
     assert "WARN" not in levels
+
+
+def test_remove_worktree_uses_git_registry_when_orchestrator_path_drifts(tmp_path):
+    """Git reports a worktree on our branch under a different path → remove that one anyway.
+
+    Mirrors the parallel-run failure mode where the orchestrator's recorded
+    path no longer matches git's actual registry entry for the same branch.
+    """
+    from orchestrator.orchestrate import _remove_worktree
+
+    registry = [{"path": "/tmp/wt-drifted", "branch": "feat/x-impl_1"}]
+    logger = MagicMock()
+    proc_ok = MagicMock(returncode=0, stdout="", stderr="")
+    with (
+        patch("orchestrator.orchestrate.git_state.list_worktrees", return_value=registry),
+        patch("orchestrator.orchestrate.git_state.worktree_for_branch", return_value=None),
+        patch("orchestrator.orchestrate.git_state.branch_exists", return_value=False),
+        patch("orchestrator.orchestrate.subprocess.run", return_value=proc_ok) as mock_run,
+    ):
+        _remove_worktree("/repo", "/tmp/missing", "feat/x-impl_1", logger, "implementation")
+    cmds = [call.args[0] for call in mock_run.call_args_list]
+    assert ["git", "-C", "/repo", "worktree", "remove", "--force", "/tmp/wt-drifted"] in cmds
+
+
+def test_remove_worktree_skips_branch_delete_when_branch_still_held(tmp_path):
+    """If a worktree still references the branch after removal, do NOT run `git branch -D`.
+
+    Avoids the "branch is used by worktree" error reported in #147.
+    """
+    from orchestrator.orchestrate import _remove_worktree
+
+    registry = [{"path": "/tmp/wt-a", "branch": "feat/x-impl_1"}]
+    logger = MagicMock()
+    failed_remove = MagicMock(returncode=1, stdout="", stderr="cannot remove")
+    with (
+        patch("orchestrator.orchestrate.git_state.list_worktrees", return_value=registry),
+        patch("orchestrator.orchestrate.git_state.worktree_for_branch", return_value="/tmp/wt-a"),
+        patch("orchestrator.orchestrate.git_state.branch_exists", return_value=True),
+        patch("orchestrator.orchestrate.subprocess.run", return_value=failed_remove) as mock_run,
+    ):
+        _remove_worktree("/repo", "/tmp/wt-a", "feat/x-impl_1", logger, "implementation")
+    cmds = [call.args[0] for call in mock_run.call_args_list]
+    assert not any("branch" in c and "-D" in c for c in cmds)
+    warn_msgs = [call.args[2] for call in logger.log.call_args_list if call.args[1] == "WARN"]
+    assert any("still held by worktree" in m for m in warn_msgs)
+
+
+def test_remove_worktree_removes_worktree_then_branch_on_happy_path(tmp_path):
+    """Happy path: worktree at our path is removed first, then the branch is deleted."""
+    from orchestrator.orchestrate import _remove_worktree
+
+    registry = [{"path": "/tmp/wt-a", "branch": "feat/x-impl_1"}]
+    logger = MagicMock()
+    proc_ok = MagicMock(returncode=0, stdout="", stderr="")
+    with (
+        patch("orchestrator.orchestrate.git_state.list_worktrees", return_value=registry),
+        patch("orchestrator.orchestrate.git_state.worktree_for_branch", return_value=None),
+        patch("orchestrator.orchestrate.git_state.branch_exists", return_value=True),
+        patch("orchestrator.orchestrate.subprocess.run", return_value=proc_ok) as mock_run,
+    ):
+        _remove_worktree("/repo", "/tmp/wt-a", "feat/x-impl_1", logger, "implementation")
+    cmds = [call.args[0] for call in mock_run.call_args_list]
+    remove_idx = next(i for i, c in enumerate(cmds) if "worktree" in c and "remove" in c)
+    delete_idx = next(i for i, c in enumerate(cmds) if "branch" in c and "-D" in c)
+    assert remove_idx < delete_idx
 
 
 def test_merge_worktree_branch_aborts_on_conflict(tmp_path):

@@ -62,6 +62,41 @@ def test_worktree_registered_false_for_unknown_path():
         assert git_state.worktree_registered("/repo", "/tmp/missing") is False
 
 
+def test_list_worktrees_parses_porcelain_entries():
+    porcelain = (
+        "worktree /repo\nHEAD abc\nbranch refs/heads/main\n\n"
+        "worktree /tmp/wt-a\nHEAD def\nbranch refs/heads/feat/x-impl_1\n\n"
+        "worktree /tmp/wt-detached\nHEAD ghi\ndetached\n"
+    )
+    with patch("orchestrator._git.subprocess.run", return_value=_proc(stdout=porcelain)):
+        entries = git_state.list_worktrees("/repo")
+    assert entries == [
+        {"path": "/repo", "branch": "main"},
+        {"path": "/tmp/wt-a", "branch": "feat/x-impl_1"},
+        {"path": "/tmp/wt-detached", "branch": None},
+    ]
+
+
+def test_list_worktrees_returns_empty_on_git_failure():
+    with patch("orchestrator._git.subprocess.run", return_value=_proc(returncode=1, stderr="boom")):
+        assert git_state.list_worktrees("/repo") == []
+
+
+def test_worktree_for_branch_returns_path_when_held():
+    porcelain = (
+        "worktree /repo\nHEAD abc\nbranch refs/heads/main\n\n"
+        "worktree /tmp/wt-a\nHEAD def\nbranch refs/heads/feat/x-impl_1\n"
+    )
+    with patch("orchestrator._git.subprocess.run", return_value=_proc(stdout=porcelain)):
+        assert git_state.worktree_for_branch("/repo", "feat/x-impl_1") == "/tmp/wt-a"
+
+
+def test_worktree_for_branch_returns_none_when_not_held():
+    porcelain = "worktree /repo\nHEAD abc\nbranch refs/heads/main\n"
+    with patch("orchestrator._git.subprocess.run", return_value=_proc(stdout=porcelain)):
+        assert git_state.worktree_for_branch("/repo", "feat/x-impl_1") is None
+
+
 def test_has_merge_conflicts_true_on_UU_marker():
     with patch("orchestrator._git.subprocess.run", return_value=_proc(stdout="UU conflict.py\n")):
         assert git_state.has_merge_conflicts("/repo") is True
