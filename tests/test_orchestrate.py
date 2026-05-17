@@ -2226,9 +2226,14 @@ def test_fix_then_retry_preserves_baseline(tmp_path):
         ]
     )
 
+    run_stage_dispatch = lambda *a, **kw: next(run_stage_results)  # noqa: E731
     with (
         patch("orchestrator.orchestrate._create_branch"),
-        patch("orchestrator.orchestrate.run_stage", side_effect=lambda *a, **kw: next(run_stage_results)),
+        patch("orchestrator.orchestrate.run_stage", side_effect=run_stage_dispatch),
+        # ``_wave_fix_then_retry`` lives in ``orchestrator.wave_verification`` and
+        # imports ``run_stage`` independently of ``orchestrate``'s binding, so the
+        # retry dispatch needs its own patch to stay intercepted. See issue #154.
+        patch("orchestrator.wave_verification.run_stage", side_effect=run_stage_dispatch),
         patch("orchestrator.orchestrate.update_plan_md"),
         patch("orchestrator.orchestrate.expand_nodes"),
         patch("orchestrator.verifiers.engine.verify", side_effect=side) as mock_verify,

@@ -115,8 +115,8 @@ def test_resume_with_existing_baseline_is_idempotent(tmp_path):
     with (
         patch("orchestrator.verifiers.engine.capture_baseline") as mock_capture,
         patch("orchestrator.verifiers.engine.verify", return_value=sig) as mock_verify,
-        patch("orchestrator.orchestrate._stamp_wave_node"),
-        patch("orchestrator.orchestrate._append_wave_verification_section"),
+        patch("orchestrator.wave_verification._stamp_wave_node"),
+        patch("orchestrator.wave_verification._append_wave_verification_section"),
     ):
         _maybe_capture_wave_baseline(stage, {"repo_root": "/tmp"}, run_folder, ctx)
         _maybe_run_wave_verification(stage, 1, {"repo_root": "/tmp"}, run_folder, ctx)
@@ -138,8 +138,8 @@ def test_resume_with_missing_baseline_refuses_capture_and_warns(tmp_path):
     with (
         patch("orchestrator.verifiers.engine.capture_baseline") as mock_capture,
         patch("orchestrator.verifiers.engine.verify", return_value=sig) as mock_verify,
-        patch("orchestrator.orchestrate._stamp_wave_node"),
-        patch("orchestrator.orchestrate._append_wave_verification_section"),
+        patch("orchestrator.wave_verification._stamp_wave_node"),
+        patch("orchestrator.wave_verification._append_wave_verification_section"),
     ):
         _maybe_capture_wave_baseline(stage, {"repo_root": "/tmp"}, run_folder, ctx)
         _maybe_run_wave_verification(stage, 1, {"repo_root": "/tmp"}, run_folder, ctx)
@@ -164,8 +164,8 @@ def test_baseline_capture_failure_is_swallowed(tmp_path):
             side_effect=VerificationError("recipe missing"),
         ),
         patch("orchestrator.verifiers.engine.verify", return_value=sig) as mock_verify,
-        patch("orchestrator.orchestrate._stamp_wave_node"),
-        patch("orchestrator.orchestrate._append_wave_verification_section"),
+        patch("orchestrator.wave_verification._stamp_wave_node"),
+        patch("orchestrator.wave_verification._append_wave_verification_section"),
     ):
         _maybe_capture_wave_baseline(stage, {"repo_root": "/tmp"}, run_folder, ctx)
         result = _maybe_run_wave_verification(stage, 1, {"repo_root": "/tmp"}, run_folder, ctx)
@@ -195,8 +195,8 @@ def test_missing_baseline_degrades_block_policy_to_raw_verification_status(tmp_p
     failed_sig = _verify_signal(verification_status="failed")
     with (
         patch("orchestrator.verifiers.engine.verify", return_value=failed_sig) as mock_verify,
-        patch("orchestrator.orchestrate._stamp_wave_node"),
-        patch("orchestrator.orchestrate._append_wave_verification_section"),
+        patch("orchestrator.wave_verification._stamp_wave_node"),
+        patch("orchestrator.wave_verification._append_wave_verification_section"),
     ):
         result = _maybe_run_wave_verification(stage, 1, {"repo_root": "/tmp"}, run_folder, ctx)
 
@@ -217,8 +217,8 @@ def test_artifact_paths_stable_across_fresh_and_resumed(tmp_path):
     with (
         patch("orchestrator.verifiers.engine.capture_baseline", side_effect=_fake_capture),
         patch("orchestrator.verifiers.engine.verify", return_value=sig) as mock_verify_fresh,
-        patch("orchestrator.orchestrate._stamp_wave_node"),
-        patch("orchestrator.orchestrate._append_wave_verification_section"),
+        patch("orchestrator.wave_verification._stamp_wave_node"),
+        patch("orchestrator.wave_verification._append_wave_verification_section"),
     ):
         _maybe_capture_wave_baseline(stage, {"repo_root": "/tmp"}, fresh, fresh_ctx)
         _maybe_run_wave_verification(stage, 2, {"repo_root": "/tmp"}, fresh, fresh_ctx)
@@ -233,8 +233,8 @@ def test_artifact_paths_stable_across_fresh_and_resumed(tmp_path):
     with (
         patch("orchestrator.verifiers.engine.capture_baseline") as mock_capture_resumed,
         patch("orchestrator.verifiers.engine.verify", return_value=sig) as mock_verify_resumed,
-        patch("orchestrator.orchestrate._stamp_wave_node"),
-        patch("orchestrator.orchestrate._append_wave_verification_section"),
+        patch("orchestrator.wave_verification._stamp_wave_node"),
+        patch("orchestrator.wave_verification._append_wave_verification_section"),
     ):
         _maybe_capture_wave_baseline(stage, {"repo_root": "/tmp"}, resumed, resumed_ctx)
         _maybe_run_wave_verification(stage, 2, {"repo_root": "/tmp"}, resumed, resumed_ctx)
