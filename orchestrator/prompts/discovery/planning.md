@@ -38,11 +38,14 @@ Each prompt must be bullet-point instructions only — no prose paragraphs. Each
 - [targeted read instructions — specific files, directories, or patterns scoped to {{ repo_root }}]
 - Write findings to `{{ run_folder }}/discovery/discovery-{name}.md`
 - Bullet points only. Max 3 sentences per finding. No prose.
+- Unresolved questions, ambiguities, and risks are normal discovery outputs — record them as structured inputs for alignment, do not treat them as reasons to stop the pipeline. Reserve `status: blocked` for situations where this track genuinely cannot proceed (e.g. missing files). Do not use the word "blocker" to describe an unresolved decision.
 
 ## Output
 
 When complete, emit exactly:
-SIGNAL_JSON: {"stage": "discovery-{name}", "status": "passed", "findings_file": "{{ run_folder }}/discovery/discovery-{name}.md", "summary": "<2–3 sentence summary of key findings>"}
+SIGNAL_JSON: {"stage": "discovery-{name}", "status": "passed", "findings_file": "{{ run_folder }}/discovery/discovery-{name}.md", "summary": "<2–3 sentence summary of key findings>", "unresolved_questions": [...], "risks": [...], "assumptions_needed": [...]}
+
+Each of `unresolved_questions`, `risks`, and `assumptions_needed` is an array of short strings — one entry per item from this track. Use `[]` when a category is empty.
 
 If blocked:
 SIGNAL_JSON: {"stage": "discovery-{name}", "status": "blocked", "message": "<reason>"}

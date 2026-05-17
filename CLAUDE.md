@@ -48,6 +48,8 @@ Developer-facing reference. Read before touching any orchestrator code.
 
 - **Slice completion and wave integration health are distinct graph nodes.** When wave verification is enabled, `_expand_slices` inserts a `wave_verify_{N}` deterministic node after each wave so per-slice `impl_{N}` nodes carry only local-completion status while `wave_verify_{N}` nodes carry the merged-branch verdict. `_maybe_run_wave_verification` stamps `wave_verify_{N}` as `blocked` on any failed integration check — even under `warn` / `fix_then_retry` policy where the pipeline continues — so a passing slice can never visually imply repo health. Collapsing the two concepts back into a single node (e.g. by stamping the slice node with the wave verdict) violates this invariant. See ADR-031.
 
+- **Discovery unresolved items are alignment inputs — not pipeline blockers.** Discovery surfaces `unresolved_questions`, `risks`, and `assumptions_needed` as string arrays on its signal (tracks aggregate these across the fan-out). Discovery prompts must reserve `status: blocked` for "cannot proceed" cases (missing overview, unreadable inputs) — finding an unresolved decision is not one of those cases. Alignment resolves each item by decision, by adopting an explicit assumption, or by deferring, and reports back via `accepted_assumptions` and `unresolved_remaining`. `_apply_alignment_policy` in `orchestrate.py` is the single gate that converts a non-empty `unresolved_remaining` into a pipeline halt — and only when the stage's `alignment_policy.on_unresolved` is `block` (default is `warn`). Adding pipeline-halt logic anywhere else for discovery/alignment unresolved items violates this invariant. See ADR-032.
+
 ---
 
 ## Path Resolution Rules

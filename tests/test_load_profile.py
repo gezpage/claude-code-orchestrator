@@ -456,3 +456,76 @@ def test_minimal_profile_implementation_has_no_wave_verification():
     profile = load_profile("minimal")
     impl = next(s for s in profile.stages if s.name == "implementation")
     assert impl.wave_verification is None
+
+
+# ── alignment_policy (ADR-032) ────────────────────────────────────────────────
+
+
+def test_alignment_policy_absent_yields_none(tmp_path):
+    p = tmp_path / "p.yaml"
+    p.write_text(yaml.dump({"name": "p", "stages": [{"stage": "alignment"}]}))
+    profile = load_profile(str(p))
+    assert profile.stages[0].alignment_policy is None
+
+
+def test_alignment_policy_warn_parsed(tmp_path):
+    p = tmp_path / "p.yaml"
+    p.write_text(
+        yaml.dump(
+            {
+                "name": "p",
+                "stages": [{"stage": "alignment", "alignment_policy": {"on_unresolved": "warn"}}],
+            }
+        )
+    )
+    profile = load_profile(str(p))
+    ap = profile.stages[0].alignment_policy
+    assert ap is not None
+    assert ap.on_unresolved == "warn"
+
+
+def test_alignment_policy_block_parsed(tmp_path):
+    p = tmp_path / "p.yaml"
+    p.write_text(
+        yaml.dump(
+            {
+                "name": "p",
+                "stages": [{"stage": "alignment", "alignment_policy": {"on_unresolved": "block"}}],
+            }
+        )
+    )
+    profile = load_profile(str(p))
+    ap = profile.stages[0].alignment_policy
+    assert ap is not None
+    assert ap.on_unresolved == "block"
+
+
+def test_alignment_policy_default_on_unresolved_is_warn(tmp_path):
+    """An empty mapping is valid and defaults to ``warn``."""
+    p = tmp_path / "p.yaml"
+    p.write_text(yaml.dump({"name": "p", "stages": [{"stage": "alignment", "alignment_policy": {}}]}))
+    profile = load_profile(str(p))
+    ap = profile.stages[0].alignment_policy
+    assert ap is not None
+    assert ap.on_unresolved == "warn"
+
+
+def test_alignment_policy_unknown_value_raises(tmp_path):
+    p = tmp_path / "p.yaml"
+    p.write_text(
+        yaml.dump(
+            {
+                "name": "p",
+                "stages": [{"stage": "alignment", "alignment_policy": {"on_unresolved": "panic"}}],
+            }
+        )
+    )
+    with pytest.raises(ValueError, match="on_unresolved"):
+        load_profile(str(p))
+
+
+def test_alignment_policy_must_be_mapping(tmp_path):
+    p = tmp_path / "p.yaml"
+    p.write_text(yaml.dump({"name": "p", "stages": [{"stage": "alignment", "alignment_policy": ["nope"]}]}))
+    with pytest.raises(ValueError, match="'alignment_policy' must be a mapping"):
+        load_profile(str(p))
