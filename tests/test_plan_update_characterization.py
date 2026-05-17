@@ -212,6 +212,60 @@ def test_pr_node_flipped_to_blocked_in_plan_when_pipeline_blocks(tmp_path):
     assert "class pr blocked" in (rf / "plan.md").read_text()
 
 
+def test_skipped_verification_renders_distinct_from_passed_in_plan(tmp_path):
+    """Issue #172: a deterministic verification that ran no commands must NOT
+    surface as a green/passed node. update_plan_md with status='skipped' +
+    signal stamps the ``skipped`` css_class AND appends the engine's summary
+    so a reader can tell at a glance no toolchain was found."""
+    rf = tmp_path / "run"
+    rf.mkdir()
+    init_plan_md(
+        rf,
+        Profile(name="t", stages=(StageConfig(name="verification", prompt="prompts/verification/default.md"),)),
+    )
+
+    summary = "no toolchain detected — verification skipped"
+    skipped_sig = {
+        "stage": "verification",
+        "status": "passed",
+        "verification_status": "skipped",
+        "toolchain": "none",
+        "summary": summary,
+        "command_ids": [],
+        "probe_ids": [],
+    }
+    update_plan_md(
+        rf,
+        "verification",
+        "skipped",
+        elapsed_secs=0.1,
+        output_summary=summary,
+        signal=skipped_sig,
+    )
+
+    graph = load_graph(rf)
+    assert graph is not None and graph.nodes["verification"].status == "skipped"
+    text = (rf / "plan.md").read_text()
+    # Distinct css class — the bug was that this rendered as ``complete`` (green).
+    assert "class verification skipped" in text
+    assert "class verification complete" not in text
+    # Explanatory prose must reach plan.md so the reason for skipping is visible.
+    assert "no toolchain detected — verification skipped" in text
+
+
+def test_plan_status_from_signal_maps_verification_outcomes(tmp_path):
+    """_plan_status_from_signal mirrors ADR-031 for the main verification stage:
+    only ``verification_status=passed`` renders the node green; everything else
+    (skipped, warned) renders as ``skipped`` so a reader can't mistake a no-op
+    run for a real one. See issue #172."""
+    from orchestrator.orchestrate import _plan_status_from_signal
+
+    assert _plan_status_from_signal({"status": "passed"}) == "passed"
+    assert _plan_status_from_signal({"status": "passed", "verification_status": "passed"}) == "passed"
+    assert _plan_status_from_signal({"status": "passed", "verification_status": "skipped"}) == "skipped"
+    assert _plan_status_from_signal({"status": "passed", "verification_status": "warned"}) == "skipped"
+
+
 def test_executive_summary_node_presence_is_config_driven_not_name_driven(tmp_path):
     """ADR-036: two profiles with IDENTICAL names but different
     ``executive_summary`` declarations render different graphs — locks the

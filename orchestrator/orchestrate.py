@@ -108,8 +108,14 @@ def _generic_summary(signal: dict) -> str | None:
     if outcome := signal.get("outcome"):
         parts.append(str(outcome))
     if vstatus := signal.get("verification_status"):
-        toolchain = signal.get("toolchain", "?")
-        parts.append(f"{toolchain}: {vstatus}")
+        if vstatus != "passed":
+            # Surface the verifier's own summary so a skipped or warned run reads as
+            # "no toolchain detected — verification skipped" rather than the cryptic
+            # "none: skipped". A passed verification stays compact ("node: passed").
+            parts.append(signal.get("summary") or f"verification {vstatus}")
+        else:
+            toolchain = signal.get("toolchain", "?")
+            parts.append(f"{toolchain}: {vstatus}")
     if signal.get("prd_path"):
         parts.append("PRD")
     if signal.get("context_path"):
@@ -125,6 +131,24 @@ def _generic_summary(signal: dict) -> str | None:
             n = len(val)
             parts.append(f"{n} {label}{'s' if n != 1 else ''}")
     return ", ".join(parts) if parts else None
+
+
+def _plan_status_from_signal(signal: dict) -> str:
+    """Map a passed-pipeline signal to the plan node status used for rendering.
+
+    Verification stages always return ``status="passed"`` because verification is
+    not a hard gate (ADR-017) — the actual verdict lives in ``verification_status``.
+    Rendering the node green for every passing pipeline turn would hide a run
+    where no deterministic checks executed (``verification_status="skipped"``) or
+    where non-required checks failed (``"warned"``). Mirror the wave-verification
+    rule (ADR-031): a verification verdict that isn't ``passed`` renders as
+    ``skipped`` so reviewers can see at a glance which runs had genuine
+    deterministic coverage. See issue #172.
+    """
+    vstatus = signal.get("verification_status")
+    if vstatus and vstatus != "passed":
+        return "skipped"
+    return "passed"
 
 
 def _load_project_config(docs_root: str, project: str) -> dict:
@@ -516,7 +540,7 @@ def run_pipeline(
             update_plan_md(
                 run_folder,
                 stage_name,
-                "passed",
+                _plan_status_from_signal(sig),
                 elapsed_secs=elapsed,
                 output_summary=_output_summary(stage, sig),
                 signal=sig,

@@ -319,12 +319,17 @@ def _update_plan_md(
     if elapsed_secs is not None:
         state_mod.save_stage_elapsed(run_folder, stage, elapsed_secs)
 
-    if status == "passed" and signal is not None:
+    # ``skipped`` is a terminal completion status (deterministic verification that
+    # found no toolchain, wave verification that warned instead of failing) — it
+    # gets the same plan-side accounting as ``passed`` so the stage's explanatory
+    # prose, run-summary row, and file-manifest entries all land. The css_class
+    # carries the visual distinction. See issue #172 / ADR-031.
+    if status in ("passed", "skipped") and signal is not None:
         display = node.display if node is not None else stage.replace("_", " ").title()
         _append_stage_section(
             plan_path, display, output_summary, signal, run_folder, elapsed_secs, impl_name, repo_root
         )
-    if status == "passed":
+    if status in ("passed", "skipped"):
         _update_run_summary(plan_path, run_folder)
         _update_run_files_table(plan_path, run_folder)
 
