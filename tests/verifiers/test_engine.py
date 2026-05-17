@@ -336,6 +336,97 @@ def test_artifacts_show_baseline_comparison_section(tmp_path: Path):
     assert "Kind" in md
 
 
+# ---------------------------------------------------------------------------
+# PHP recipe — composer / phpunit precondition behaviour
+# ---------------------------------------------------------------------------
+
+
+def _make_php_repo(tmp_path: Path, composer: dict | None = None, with_phpunit_binary: bool = False) -> Path:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    if composer is not None:
+        (repo / "composer.json").write_text(json.dumps(composer))
+    if with_phpunit_binary:
+        bin_dir = repo / "vendor" / "bin"
+        bin_dir.mkdir(parents=True)
+        (bin_dir / "phpunit").write_text("#!/bin/sh\nexit 0\n")
+    return repo
+
+
+def test_php_repo_with_composer_test_script_runs_composer(tmp_path: Path):
+    repo = _make_php_repo(tmp_path, composer={"scripts": {"test": "phpunit"}})
+    run_folder = _make_run_folder(tmp_path)
+    with patch("orchestrator.verifiers.engine.subprocess.run", return_value=_completed(0)) as mock_run:
+        sig = verify(repo, run_folder)
+    assert sig["toolchain"] == "php"
+    invoked = [c.args[0] for c in mock_run.call_args_list]
+    assert "composer test" in invoked
+    # phpunit binary not present → that command is skipped, not invoked.
+    assert "vendor/bin/phpunit" not in invoked
+    # A required_any_of member ran and passed → passed.
+    assert sig["verification_status"] == "passed"
+
+
+def test_php_repo_without_composer_test_falls_back_to_phpunit(tmp_path: Path):
+    repo = _make_php_repo(tmp_path, composer={}, with_phpunit_binary=True)
+    run_folder = _make_run_folder(tmp_path)
+    with patch("orchestrator.verifiers.engine.subprocess.run", return_value=_completed(0)) as mock_run:
+        sig = verify(repo, run_folder)
+    invoked = [c.args[0] for c in mock_run.call_args_list]
+    # composer test must be skipped because scripts.test is absent.
+    assert "composer test" not in invoked
+    assert "vendor/bin/phpunit" in invoked
+    assert sig["verification_status"] == "passed"
+
+
+def test_php_repo_with_neither_downgrades_to_warned(tmp_path: Path):
+    """Composer.json without scripts.test AND no installed phpunit → no eligible
+    test command ran. The recipe must NOT report 'passed' — that would be silent
+    false confidence. required_any_of escalates the all-skipped case to 'warned'."""
+    repo = _make_php_repo(tmp_path, composer={})
+    run_folder = _make_run_folder(tmp_path)
+    with patch("orchestrator.verifiers.engine.subprocess.run") as mock_run:
+        sig = verify(repo, run_folder)
+    assert mock_run.call_count == 0
+    assert sig["toolchain"] == "php"
+    assert sig["verification_status"] == "warned"
+    assert "no eligible test command ran" in sig["summary"]
+
+
+def test_php_phpunit_failure_marks_failed(tmp_path: Path):
+    """When phpunit (a required_any_of member) actually runs and fails, the
+    recipe is asserting that this IS the test — failure must surface as
+    'failed', not be softened to 'warned' by the per-command non-required flag."""
+    repo = _make_php_repo(tmp_path, composer={}, with_phpunit_binary=True)
+    run_folder = _make_run_folder(tmp_path)
+    with patch("orchestrator.verifiers.engine.subprocess.run", return_value=_completed(1)):
+        sig = verify(repo, run_folder)
+    assert sig["verification_status"] == "failed"
+    assert "phpunit" in sig["failed_command_ids"]
+
+
+def test_php_composer_test_failure_marks_failed(tmp_path: Path):
+    """Composer test failure is the same hard-failure path as phpunit."""
+    repo = _make_php_repo(tmp_path, composer={"scripts": {"test": "phpunit"}})
+    run_folder = _make_run_folder(tmp_path)
+    with patch("orchestrator.verifiers.engine.subprocess.run", return_value=_completed(1)):
+        sig = verify(repo, run_folder)
+    assert sig["verification_status"] == "failed"
+    assert "composer-test" in sig["failed_command_ids"]
+
+
+def test_php_verify_md_surfaces_no_test_ran_note(tmp_path: Path):
+    """VERIFY.md must explicitly call out the 'no test ran' case so reviewers
+    aren't misled by an empty Commands table next to a 'warned' badge."""
+    repo = _make_php_repo(tmp_path, composer={})
+    run_folder = _make_run_folder(tmp_path)
+    verify(repo, run_folder)
+    md = (run_folder / "verification" / "VERIFY.md").read_text()
+    assert "none of the expected test commands ran" in md
+    assert "composer-test" in md
+    assert "phpunit" in md
+
+
 def test_no_baseline_path_means_no_classification(tmp_path: Path):
     """Calling verify without baseline_path leaves classification fields empty."""
     repo = _make_repo(tmp_path, {"name": "x", "version": "0.0.1", "scripts": {"test": "jest"}})
