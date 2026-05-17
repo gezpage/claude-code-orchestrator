@@ -111,9 +111,9 @@ A missing test is blocking if it would expose a confirmed bug or protect a docum
 
 A finding **MUST** be blocking if it is a confirmed violation of any of:
 
-- the PRD
-- `context.md` binding constraints (including the "Quality Bar and Standards" section's testing requirements)
-- the slice spec or implementation-plan acceptance criteria
+- the PRD artifact
+- the generated context artifact at `{{ context_path }}` (including its "Quality Bar and Standards" section's testing requirements)
+- the implementation plan or slice spec acceptance criteria
 - deterministic verification requirements
 - documented user-facing behaviour
 

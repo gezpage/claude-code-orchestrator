@@ -71,7 +71,7 @@ If the diff path is missing, unreadable, or not a full git diff file:
 
 ### Invariant and constraint alignment
 
-- Does the change comply with any documented architectural invariants (from `context_path`, `CLAUDE.md`, or ADRs referenced therein)?
+- Does the change comply with any documented architectural invariants (from the generated context artifact at `{{ context_path }}`, `CLAUDE.md`, or ADRs referenced therein)?
 - If the change deviates from a stated invariant, is there a documented reason?
 - Undocumented deviations are blocking.
 
@@ -123,9 +123,9 @@ If the diff path is missing, unreadable, or not a full git diff file:
 
 A finding **MUST** be blocking if it is a confirmed violation of any of:
 
-- the PRD
-- `context.md` binding constraints (including documented architectural invariants and the "Standing Constraints" section)
-- the slice spec or implementation-plan acceptance criteria
+- the PRD artifact
+- the generated context artifact at `{{ context_path }}` (including its documented architectural invariants and "Standing Constraints" section)
+- the implementation plan or slice spec acceptance criteria
 - deterministic verification requirements
 - documented user-facing behaviour
 

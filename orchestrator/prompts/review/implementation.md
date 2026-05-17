@@ -140,9 +140,9 @@ Block on:
 
 A finding **MUST** be blocking if it is a confirmed violation of any of:
 
-- the PRD
-- `context.md` binding constraints (including "Quality Bar and Standards" and "Standing Constraints")
-- the slice spec or implementation-plan acceptance criteria
+- the PRD artifact
+- the generated context artifact at `{{ context_path }}` (including its "Quality Bar and Standards" and "Standing Constraints" sections)
+- the implementation plan or slice spec acceptance criteria
 - deterministic verification requirements
 - documented user-facing behaviour
 

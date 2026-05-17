@@ -17,9 +17,9 @@ You are a decomposition agent for a **single-agent** implementation flow. Produc
 
 ## Instructions
 
-1. Read the PRD at `{{ prd_path }}` and the self-contained context document at `{{ context_path }}`. Treat `context.md` as binding for quality bar, standing constraints, and architectural assumptions.{% if run_glossary_path %} Also read the run-local glossary at `{{ run_glossary_path }}` — use these terms verbatim in the plan; do not paraphrase canonical definitions or coin synonyms. The glossary is read-only at this stage.{% endif %}
+1. Read the PRD at `{{ prd_path }}` and the generated context artifact at `{{ context_path }}`. Treat the generated context artifact at `{{ context_path }}` as binding for quality bar, standing constraints, and architectural assumptions.{% if run_glossary_path %} Also read the run-local glossary at `{{ run_glossary_path }}` — use these terms verbatim in the plan; do not paraphrase canonical definitions or coin synonyms. The glossary is read-only at this stage.{% endif %}
 2. Produce **one** implementation plan at `$RUN_FOLDER/decomposition/implementation-plan.md` using the template below. This is the only artifact this stage produces.
-3. The plan must be operational guidance for a single implementation agent that will execute the entire feature end-to-end in one run. It must include enough context that the implementation agent does not need to re-derive non-negotiable constraints, architectural invariants, or the quality bar — although the PRD and `context.md` remain authoritative source-of-truth references.
+3. The plan must be operational guidance for a single implementation agent that will execute the entire feature end-to-end in one run. It must include enough context that the implementation agent does not need to re-derive non-negotiable constraints, architectural invariants, or the quality bar — although the PRD and the generated context artifact at `{{ context_path }}` remain authoritative source-of-truth references.
 4. Acceptance criteria must preserve the strongest meaningful interpretation of every invariant. Do not weaken an invariant to whatever happens to be easy to test.
 
    Examples:
@@ -53,7 +53,7 @@ Do not implement anything. This stage is planning only.
 
 ## Non-negotiable constraints
 
-<Standing constraints from `context.md` and the PRD that the implementation agent must honour. Quote them directly where possible.>
+<Standing constraints from the generated context artifact (`{{ context_path }}`) and the PRD that the implementation agent must honour. Quote them directly where possible.>
 
 ## Architectural invariants
 
@@ -61,7 +61,7 @@ Do not implement anything. This stage is planning only.
 
 ## Quality bar expectations
 
-<Testing standard, code quality bar, and any binding process constraints from `context.md` "Quality Bar and Standards". State them concretely — "every public function has a unit test", not "good test coverage".>
+<Testing standard, code quality bar, and any binding process constraints from the generated context artifact (`{{ context_path }}`) "Quality Bar and Standards" section. State them concretely — "every public function has a unit test", not "good test coverage".>
 
 ## Acceptance criteria
 

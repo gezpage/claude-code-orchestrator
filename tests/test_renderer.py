@@ -165,8 +165,12 @@ def test_review_prompts_include_blocking_policy(tmp_path, reviewer):
 
     assert "## Blocking policy" in result
     assert "confirmed violation" in result
-    assert "PRD" in result
-    assert "context.md" in result
+    assert "PRD artifact" in result
+    # The blocking policy must refer to the generated context artifact through
+    # the path variable, not a literal filename, so reviewers cannot look for
+    # a stray `context.md` in the working directory.
+    assert "generated context artifact" in result
+    assert "/tmp/run/specification/context.md" in result
     assert "acceptance criteria" in result
     assert "deterministic verification" in result
     assert "documented user-facing behaviour" in result
@@ -179,6 +183,79 @@ def test_review_prompts_include_blocking_policy(tmp_path, reviewer):
     assert "found manually" in result
     # Confirmed-only — speculative concerns are still non-blocking.
     assert "Speculative" in result or "speculative" in result
+
+
+@pytest.mark.parametrize("reviewer", ["architecture", "implementation", "tests"])
+def test_review_prompts_have_no_literal_context_md(tmp_path, reviewer):
+    # Reviewers receive the context artifact via `{{ context_path }}` and must
+    # not be told to look for a literal `context.md` file — that file does not
+    # exist in the working directory and the reference is misleading.
+    review_vars = {
+        **VARS,
+        "review_md": "/tmp/run/review/review-log.md",
+        "diff": "/tmp/run/review/diff-round-1.patch",
+        "round": "1",
+        "context_path": "/tmp/run/specification/context.md",
+    }
+
+    result = render_prompt("review", reviewer, review_vars, str(tmp_path), "myproject")
+
+    # The rendered context_path itself ends in "context.md" and is fine —
+    # we only forbid the bare `context.md` token used as policy wording.
+    assert "`context.md`" not in result
+
+
+def test_decomposition_minimal_refers_to_generated_context_artifact(tmp_path):
+    decomposition_vars = {
+        **VARS,
+        "prd_path": "/tmp/run/specification/prd.md",
+        "context_path": "/tmp/run/specification/context.md",
+        "run_glossary_path": "",
+        "canonical_glossary_path": "",
+    }
+
+    result = render_prompt("decomposition", "minimal", decomposition_vars, str(tmp_path), "myproject")
+
+    assert "generated context artifact" in result
+    assert "/tmp/run/specification/context.md" in result
+    # No bare `context.md` wording — downstream prompts must reference the
+    # artifact through the path variable or by canonical conceptual name.
+    assert "`context.md`" not in result
+
+
+def test_implementation_minimal_refers_to_generated_context_artifact(tmp_path):
+    impl_vars = {
+        **VARS,
+        "plan_file": "/tmp/run/decomposition/implementation-plan.md",
+        "prd_path": "/tmp/run/specification/prd.md",
+        "context_path": "/tmp/run/specification/context.md",
+        "branch": "feature/test",
+        "run_glossary_path": "",
+    }
+
+    result = render_prompt("implementation", "minimal", impl_vars, str(tmp_path), "myproject")
+
+    assert "generated context artifact" in result
+    assert "/tmp/run/specification/context.md" in result
+    assert "`context.md`" not in result
+
+
+def test_specification_minimal_keeps_writer_path_literal(tmp_path):
+    # The specification stage writes the artifact, so it legitimately names
+    # `$RUN_FOLDER/specification/context.md` in writer instructions.
+    spec_vars = {
+        **VARS,
+        "feature_path": "myfeature",
+        "project_context_path": "/tmp/docs/projects/myproject/project-context.md",
+        "run_glossary_path": "",
+        "canonical_glossary_path": "",
+    }
+
+    result = render_prompt("specification", "minimal", spec_vars, str(tmp_path), "myproject")
+
+    # The writer instruction (and template heading) keep the literal filename.
+    assert "$RUN_FOLDER/specification/context.md" in result
+    assert "context.md template" in result
 
 
 def test_implementation_review_calls_out_unhandled_exception_5xx(tmp_path):
