@@ -119,14 +119,28 @@ If the diff path is missing, unreadable, or not a full git diff file:
 - Is the change appropriately simple for the task, or is there unnecessary ceremony?
 - Over-engineering: unnecessary design patterns, indirection, or abstraction for the problem size?
 
+## Blocking policy
+
+A finding **MUST** be blocking if it is a confirmed violation of any of:
+
+- the PRD
+- `context.md` binding constraints (including documented architectural invariants and the "Standing Constraints" section)
+- the slice spec or implementation-plan acceptance criteria
+- deterministic verification requirements
+- documented user-facing behaviour
+
+Do **not** downgrade a confirmed requirement violation to non-blocking because the happy path works, tests currently pass, the edge case is uncommon, the fix is small, the issue was found manually rather than by automated verification, or the implementation is otherwise good. Speculative or unconfirmed concerns still belong in non-blocking findings — this rule applies only to violations you have *confirmed* from the diff, the code, or referenced documents.
+
+This rule overrides the triage caps below — a confirmed requirement violation is always blocking, even if it is the sixth finding.
+
 ## Triage and scope
 
 You are triaging, not exhaustively cataloguing.
 
 - Report at most 5 blocking findings (Critical or High).
-- If more than 5 exist, keep the highest-leverage issues and drop the rest.
+- If more than 5 exist, keep the highest-leverage issues and drop the rest — except that confirmed requirement violations under the Blocking policy above are never dropped.
 
-Block only on issues that materially threaten:
+Outside the Blocking policy, block only on issues that materially threaten:
 - correctness
 - safety
 - determinism

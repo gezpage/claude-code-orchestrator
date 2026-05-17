@@ -29,6 +29,20 @@ You are a decomposition agent. Your task is to break the PRD into implementation
 4. Prefer many thin slices over few thick ones. Each slice must be independently committable and verifiable.
 5. For every acceptance criterion that covers a config field, env-var, or error path: enumerate all instances explicitly by name. Do not write a catch-all such as "invalid values → error". Write "Invalid `READ_TIMEOUT`, `WRITE_TIMEOUT`, `IDLE_TIMEOUT` → `Load()` returns non-nil error." An incomplete enumeration becomes a test gap.
 
+   ### Numeric input edge cases
+
+   For every numeric user input (form fields, query params, request bodies, CLI args, config values), the slice's acceptance criteria must consider the following edge cases and either cover them or explicitly justify omission:
+
+   - negative values
+   - zero where disallowed
+   - non-numeric text (letters, punctuation, empty string)
+   - decimal values where integers are required
+   - `NaN`, `Infinity`, `-Infinity`, and overflow-style literals (e.g. `1e500`) that the language parser may silently accept
+   - extremely large values (above any documented or implicit upper bound)
+   - whitespace-only or whitespace-padded values
+
+   Treat these as general guidance for any numeric input, not as a domain-specific checklist. If a slice accepts numeric user input and the acceptance criteria do not address invalid inputs producing well-formed errors (no unhandled exceptions, no 5xx, no crashes), the slice is incomplete.
+
    ### Semantic invariant preservation
 
    When converting requirements into acceptance criteria, preserve the strongest meaningful interpretation of the invariant. Do not weaken it to whatever happens to be easy to test.
