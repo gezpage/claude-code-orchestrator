@@ -1,3 +1,5 @@
+import json
+from pathlib import Path
 from typing import Literal
 from unittest.mock import MagicMock, patch
 
@@ -1661,10 +1663,12 @@ def test_wave_verification_runs_after_each_passed_wave(tmp_path):
         result = _dispatch_slices(stage, {"repo_root": "/tmp"}, run_folder, ctx, signals)
 
     assert result["status"] == "passed"
-    assert mock_verify.call_count == 2
-    # Wave artifact subdirs must be distinct per wave so reports don't overwrite.
+    # 1 baseline capture (before any slice) + 1 per wave. See ADR-033.
+    assert mock_verify.call_count == 3
+    # Wave artifact subdirs must be distinct per wave so reports don't overwrite;
+    # baseline lives in its own subdir.
     subdirs = sorted(call.kwargs["artifact_subdir"] for call in mock_verify.call_args_list)
-    assert subdirs == ["wave-verification/wave-1", "wave-verification/wave-2"]
+    assert subdirs == ["baseline-verification", "wave-verification/wave-1", "wave-verification/wave-2"]
     assert len(result["wave_verifications"]) == 2
 
 
@@ -1740,8 +1744,8 @@ def test_wave_verification_block_policy_halts_dispatcher(tmp_path):
         result = _dispatch_slices(stage, {"repo_root": "/tmp"}, run_folder, ctx, signals)
 
     assert result["status"] == "blocked"
-    # Only wave 1 ran — block prevents wave 2 from starting.
-    assert mock_verify.call_count == 1
+    # 1 baseline capture + 1 wave-1 run; block prevents wave 2 from starting.
+    assert mock_verify.call_count == 2
     assert "wave 1" in result["message"]
 
 
@@ -1843,6 +1847,284 @@ def test_wave_verification_not_run_when_stage_lacks_config(tmp_path):
         _dispatch_slices(stage, {"repo_root": "/tmp"}, run_folder, ctx, signals)
 
     mock_verify.assert_not_called()
+
+
+# ── baseline vs net-new wave verification (ADR-033) ──────────────────────────
+
+
+def _baseline_verify_side_effect(run_folder, *, fail_command_ids_per_call):
+    """Side effect that writes a baseline-shaped verify.json into the artifact_subdir.
+
+    ``fail_command_ids_per_call`` is a sequence of failure-id lists, one per call,
+    so callers can simulate a baseline failure set followed by per-wave runs.
+    """
+    calls = iter(fail_command_ids_per_call)
+
+    def _fake_verify(repo_root, run_folder_arg, *, artifact_subdir, baseline_path=None):
+        fail_ids = next(calls)
+        out_dir = Path(run_folder_arg) / artifact_subdir
+        out_dir.mkdir(parents=True, exist_ok=True)
+        commands = [
+            {
+                "id": "test",
+                "command": "x",
+                "required": True,
+                "status": "failed" if "test" in fail_ids else "passed",
+                "exit_code": 1 if "test" in fail_ids else 0,
+                "duration_seconds": 0.0,
+                "skipped_reason": None,
+                "failure_kind": None,
+            }
+        ]
+        report = {
+            "status": "failed" if fail_ids else "passed",
+            "toolchain": "node",
+            "commands": commands,
+            "probes": [],
+        }
+        (out_dir / "verify.json").write_text(json.dumps(report))
+        # Mirror what the real engine returns, including baseline classification fields.
+        baseline_failed_command_ids: list[str] = []
+        new_failed_command_ids: list[str] = []
+        baseline_compared = baseline_path is not None and Path(baseline_path).exists()
+        if baseline_compared:
+            baseline_data = json.loads(Path(baseline_path).read_text())
+            baseline_set = {c["id"] for c in baseline_data.get("commands", []) if c.get("status") == "failed"}
+            for cid in fail_ids:
+                if cid in baseline_set:
+                    baseline_failed_command_ids.append(cid)
+                else:
+                    new_failed_command_ids.append(cid)
+        if not baseline_compared:
+            net_new_status = "failed" if fail_ids else "passed"
+        else:
+            net_new_status = "failed" if new_failed_command_ids else "passed"
+        return {
+            "stage": "verification",
+            "status": "passed",
+            "verification_status": "failed" if fail_ids else "passed",
+            "net_new_status": net_new_status,
+            "summary": f"failures={fail_ids}",
+            "toolchain": "node",
+            "verify_md_path": str(out_dir / "VERIFY.md"),
+            "verify_json_path": str(out_dir / "verify.json"),
+            "command_ids": ["test"],
+            "failed_command_ids": list(fail_ids),
+            "probe_ids": [],
+            "failed_probe_ids": [],
+            "baseline_failed_command_ids": baseline_failed_command_ids,
+            "baseline_failed_probe_ids": [],
+            "new_failed_command_ids": new_failed_command_ids,
+            "new_failed_probe_ids": [],
+            "resolved_command_ids": [],
+            "resolved_probe_ids": [],
+            "baseline_compared": baseline_compared,
+        }
+
+    return _fake_verify
+
+
+def test_baseline_unchanged_failure_does_not_block_under_default_warn(tmp_path):
+    """Pre-existing failures repeated in a wave run must not halt the dispatcher."""
+    import json as _json
+
+    from orchestrator.orchestrate import _dispatch_slices
+
+    stage = _wave_stage(on_failure="block")  # even under block, baseline-only must continue
+    ctx = _make_ctx(tmp_path)
+    run_folder = _make_run_folder(tmp_path)
+    (run_folder / "plan.md").write_text("# Plan\n")
+    signals = {
+        "decomposition": {
+            "slice_files": ["S-01-a.md"],
+            "slice_groups": [["S-01-a.md"]],
+        }
+    }
+
+    side = _baseline_verify_side_effect(run_folder, fail_command_ids_per_call=[["test"], ["test"]])
+
+    with (
+        patch("orchestrator.orchestrate._create_branch"),
+        patch("orchestrator.orchestrate.run_stage", return_value={"status": "passed", "commit_hashes": ["a1"]}),
+        patch("orchestrator.orchestrate.update_plan_md"),
+        patch("orchestrator.orchestrate.expand_nodes"),
+        patch("orchestrator.verifiers.engine.verify", side_effect=side),
+    ):
+        result = _dispatch_slices(stage, {"repo_root": "/tmp"}, run_folder, ctx, signals)
+
+    # Baseline-only failure under block policy must NOT halt — only net-new failures gate the pipeline.
+    assert result["status"] == "passed"
+    wave = result["wave_verifications"][0]
+    assert wave["baseline_compared"] is True
+    assert wave["baseline_failed_command_ids"] == ["test"]
+    assert wave["new_failed_command_ids"] == []
+    _ = _json  # keep import for static checkers
+
+
+def test_new_failure_blocks_under_block_policy(tmp_path):
+    """A net-new failure under block policy halts the pipeline at the wave boundary."""
+    from orchestrator.orchestrate import _dispatch_slices
+
+    stage = _wave_stage(on_failure="block")
+    ctx = _make_ctx(tmp_path)
+    run_folder = _make_run_folder(tmp_path)
+    (run_folder / "plan.md").write_text("# Plan\n")
+    signals = {
+        "decomposition": {
+            "slice_files": ["S-01-a.md", "S-02-b.md"],
+            "slice_groups": [["S-01-a.md"], ["S-02-b.md"]],
+        }
+    }
+
+    # Baseline clean (no failures); wave 1 introduces a new failure.
+    side = _baseline_verify_side_effect(run_folder, fail_command_ids_per_call=[[], ["test"]])
+
+    with (
+        patch("orchestrator.orchestrate._create_branch"),
+        patch("orchestrator.orchestrate.run_stage", return_value={"status": "passed", "commit_hashes": ["a1"]}),
+        patch("orchestrator.orchestrate.update_plan_md"),
+        patch("orchestrator.orchestrate.expand_nodes"),
+        patch("orchestrator.verifiers.engine.verify", side_effect=side),
+    ):
+        result = _dispatch_slices(stage, {"repo_root": "/tmp"}, run_folder, ctx, signals)
+
+    assert result["status"] == "blocked"
+    wave = result["wave_verifications"][0]
+    assert wave["new_failed_command_ids"] == ["test"]
+    assert "net-new" in result["message"]
+
+
+def test_new_failure_under_warn_policy_records_but_continues(tmp_path):
+    """Under warn, net-new failures are logged and surfaced but do not block."""
+    from orchestrator.orchestrate import _dispatch_slices
+
+    stage = _wave_stage(on_failure="warn")
+    ctx = _make_ctx(tmp_path)
+    run_folder = _make_run_folder(tmp_path)
+    (run_folder / "plan.md").write_text("# Plan\n")
+    signals = {
+        "decomposition": {
+            "slice_files": ["S-01-a.md"],
+            "slice_groups": [["S-01-a.md"]],
+        }
+    }
+
+    side = _baseline_verify_side_effect(run_folder, fail_command_ids_per_call=[[], ["test"]])
+
+    with (
+        patch("orchestrator.orchestrate._create_branch"),
+        patch("orchestrator.orchestrate.run_stage", return_value={"status": "passed", "commit_hashes": ["a1"]}),
+        patch("orchestrator.orchestrate.update_plan_md"),
+        patch("orchestrator.orchestrate.expand_nodes"),
+        patch("orchestrator.verifiers.engine.verify", side_effect=side),
+    ):
+        result = _dispatch_slices(stage, {"repo_root": "/tmp"}, run_folder, ctx, signals)
+
+    assert result["status"] == "passed"
+    wave = result["wave_verifications"][0]
+    assert wave["new_failed_command_ids"] == ["test"]
+    # Plan section calls out the net-new breakdown.
+    plan_text = (run_folder / "plan.md").read_text()
+    assert "Net-new failures" in plan_text
+    assert "Net-new status" in plan_text
+
+
+def test_baseline_captured_before_first_slice(tmp_path):
+    """The baseline must be captured before any slice has run, written to the standard subdir."""
+    from orchestrator.orchestrate import _dispatch_slices
+
+    stage = _wave_stage()
+    ctx = _make_ctx(tmp_path)
+    run_folder = _make_run_folder(tmp_path)
+    (run_folder / "plan.md").write_text("# Plan\n")
+    signals = {
+        "decomposition": {
+            "slice_files": ["S-01-a.md"],
+            "slice_groups": [["S-01-a.md"]],
+        }
+    }
+
+    side = _baseline_verify_side_effect(run_folder, fail_command_ids_per_call=[[], []])
+
+    call_order: list[str] = []
+
+    def tracking_run_stage(*args, **kwargs):
+        call_order.append("slice")
+        return {"status": "passed", "commit_hashes": ["a1"]}
+
+    def tracking_verify(*args, **kwargs):
+        call_order.append("verify:" + kwargs.get("artifact_subdir", ""))
+        return side(*args, **kwargs)
+
+    with (
+        patch("orchestrator.orchestrate._create_branch"),
+        patch("orchestrator.orchestrate.run_stage", side_effect=tracking_run_stage),
+        patch("orchestrator.orchestrate.update_plan_md"),
+        patch("orchestrator.orchestrate.expand_nodes"),
+        patch("orchestrator.verifiers.engine.verify", side_effect=tracking_verify),
+    ):
+        _dispatch_slices(stage, {"repo_root": "/tmp"}, run_folder, ctx, signals)
+
+    assert call_order == ["verify:baseline-verification", "slice", "verify:wave-verification/wave-1"]
+
+
+def test_baseline_capture_idempotent_across_resume(tmp_path):
+    """A resumed pipeline must not overwrite an existing baseline file."""
+    from orchestrator.orchestrate import _dispatch_slices
+    from orchestrator.verifiers.engine import BASELINE_SUBDIR
+
+    stage = _wave_stage()
+    ctx = _make_ctx(tmp_path)
+    run_folder = _make_run_folder(tmp_path)
+    (run_folder / "plan.md").write_text("# Plan\n")
+    signals = {
+        "decomposition": {
+            "slice_files": ["S-01-a.md"],
+            "slice_groups": [["S-01-a.md"]],
+        }
+    }
+
+    # Pre-populate a baseline so the capture should be skipped.
+    baseline_dir = run_folder / BASELINE_SUBDIR
+    baseline_dir.mkdir(parents=True)
+    pre_existing = {
+        "status": "failed",
+        "toolchain": "node",
+        "commands": [
+            {
+                "id": "test",
+                "command": "x",
+                "required": True,
+                "status": "failed",
+                "exit_code": 1,
+                "duration_seconds": 0.0,
+                "skipped_reason": None,
+                "failure_kind": None,
+            }
+        ],
+        "probes": [],
+    }
+    (baseline_dir / "verify.json").write_text(json.dumps(pre_existing))
+
+    side = _baseline_verify_side_effect(
+        run_folder,
+        fail_command_ids_per_call=[[]],  # only one call expected — the wave run
+    )
+
+    with (
+        patch("orchestrator.orchestrate._create_branch"),
+        patch("orchestrator.orchestrate.run_stage", return_value={"status": "passed", "commit_hashes": ["a1"]}),
+        patch("orchestrator.orchestrate.update_plan_md"),
+        patch("orchestrator.orchestrate.expand_nodes"),
+        patch("orchestrator.verifiers.engine.verify", side_effect=side) as mock_verify,
+    ):
+        _dispatch_slices(stage, {"repo_root": "/tmp"}, run_folder, ctx, signals)
+
+    # No baseline capture call — only the wave verify.
+    assert mock_verify.call_count == 1
+    assert mock_verify.call_args_list[0].kwargs["artifact_subdir"] == "wave-verification/wave-1"
+    # Pre-existing baseline file untouched.
+    assert json.loads((baseline_dir / "verify.json").read_text())["commands"][0]["status"] == "failed"
 
 
 # ── slice-completion vs wave-integration distinction (ADR-031) ───────────────

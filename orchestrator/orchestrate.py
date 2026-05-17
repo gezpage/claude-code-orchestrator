@@ -597,6 +597,58 @@ def _run_slice(
     return sig, time.monotonic() - t0
 
 
+def _maybe_capture_wave_baseline(
+    stage: StageConfig,
+    variables: dict,
+    run_folder: Path,
+    ctx: _PipelineContext,
+) -> None:
+    """Capture the pre-pipeline verifier baseline for later net-new comparison.
+
+    Runs the verifier engine against the integration branch *before* any slice
+    has changed it, writing the result to ``baseline-verification/verify.json``
+    in the run folder. Subsequent wave verifications load this file to classify
+    failures as ``baseline`` vs ``net_new``.
+
+    Idempotent — silently no-ops if a baseline file already exists (matters for
+    a resumed pipeline). Best-effort — failures are logged and swallowed so the
+    pipeline still proceeds without classification. Only runs when the stage
+    has wave verification enabled; non-wave stages do not need a baseline. See
+    ADR-033.
+    """
+    wv = stage.wave_verification
+    if wv is None or not wv.enabled:
+        return
+
+    from orchestrator.verifiers import engine as verifier_engine
+    from orchestrator.verifiers.engine import VerificationError
+
+    baseline_file = verifier_engine.baseline_path_for(run_folder)
+    if baseline_file.exists():
+        return
+
+    repo_root = variables.get("repo_root")
+    if not repo_root:
+        ctx.logger.log("wave-verification", "WARN", "baseline capture skipped — no repo_root in variables")
+        return
+
+    ctx.logger.log("wave-verification", "INFO", "capturing pre-pipeline verifier baseline")
+    try:
+        sig = verifier_engine.capture_baseline(Path(repo_root), run_folder)
+    except VerificationError as exc:
+        ctx.logger.log("wave-verification", "WARN", f"baseline capture could not start: {exc}")
+        return
+    except Exception as exc:
+        ctx.logger.log("wave-verification", "WARN", f"baseline capture failed: {exc}")
+        return
+
+    ctx.logger.log(
+        "wave-verification",
+        "INFO",
+        f"baseline captured: {sig.get('summary', '')}",
+    )
+
+
 def _maybe_run_wave_verification(
     stage: StageConfig,
     wave_idx: int,
@@ -633,10 +685,17 @@ def _maybe_run_wave_verification(
         return {"stage": "wave-verification", "status": "passed", "verification_status": "skipped"}
 
     artifact_subdir = f"wave-verification/wave-{wave_idx}"
+    baseline_file = verifier_engine.baseline_path_for(run_folder)
+    baseline_arg = baseline_file if baseline_file.exists() else None
     ctx.logger.log("wave-verification", "INFO", f"dispatching wave {wave_idx} against integration branch")
     t0 = time.monotonic()
     try:
-        sig = verifier_engine.verify(Path(repo_root), run_folder, artifact_subdir=artifact_subdir)
+        sig = verifier_engine.verify(
+            Path(repo_root),
+            run_folder,
+            artifact_subdir=artifact_subdir,
+            baseline_path=baseline_arg,
+        )
     except VerificationError as exc:
         ctx.logger.log("wave-verification", "WARN", f"wave {wave_idx} could not start: {exc}")
         return {
@@ -651,32 +710,47 @@ def _maybe_run_wave_verification(
     sig["on_failure"] = wv.on_failure
     sig["elapsed_secs"] = elapsed
     vstatus = sig.get("verification_status", "unknown")
+    # ``net_new_status`` falls back to ``verification_status`` when no baseline
+    # was available, so the policy gate degrades gracefully into the pre-ADR-033
+    # behaviour (warn/block on any failure) rather than silently passing.
+    net_new_status = sig.get("net_new_status", vstatus)
     summary = sig.get("summary", "")
 
     if vstatus == "failed":
-        ctx.logger.log(
-            "wave-verification",
-            "WARN",
-            f"wave {wave_idx} failed ({_fmt_elapsed(elapsed)}) on_failure={wv.on_failure}: {summary}",
-        )
-        if wv.on_failure == "fix_then_retry":
-            sig = _wave_fix_then_retry(stage, wave_idx, sig, variables, run_folder, ctx)
-            vstatus = sig.get("verification_status", "unknown")
-            if vstatus == "failed":
-                ctx.logger.log(
-                    "wave-verification",
-                    "WARN",
-                    f"wave {wave_idx} still failed after fix_then_retry — continuing",
-                )
-        if wv.on_failure == "block" and vstatus == "failed":
-            sig["status"] = "blocked"
-            sig["message"] = f"wave {wave_idx} integration verification failed: {summary}"
+        node_status = "blocked"
+        if net_new_status == "failed":
+            ctx.logger.log(
+                "wave-verification",
+                "WARN",
+                f"wave {wave_idx} failed (net-new, {_fmt_elapsed(elapsed)}) on_failure={wv.on_failure}: {summary}",
+            )
+            if wv.on_failure == "fix_then_retry":
+                sig = _wave_fix_then_retry(stage, wave_idx, sig, variables, run_folder, ctx)
+                vstatus = sig.get("verification_status", "unknown")
+                net_new_status = sig.get("net_new_status", vstatus)
+                if net_new_status == "failed":
+                    ctx.logger.log(
+                        "wave-verification",
+                        "WARN",
+                        f"wave {wave_idx} net-new still failing after fix_then_retry — continuing",
+                    )
+            if wv.on_failure == "block" and net_new_status == "failed":
+                sig["status"] = "blocked"
+                sig["message"] = f"wave {wave_idx} integration verification failed (net-new): {summary}"
+        else:
+            # Baseline-only failures: pre-existing red tests, not regressions.
+            # Always warn — never trigger fix or block — so a project carrying
+            # known-failing tests can still advance waves under any policy.
+            ctx.logger.log(
+                "wave-verification",
+                "WARN",
+                f"wave {wave_idx} baseline-only failures ({_fmt_elapsed(elapsed)}) — continuing: {summary}",
+            )
 
         # Always stamp the wave node as ``blocked`` on a failed integration check —
         # even when the policy is ``warn`` or ``fix_then_retry`` and the pipeline
         # continues. The slice nodes report local completion; this node is the
         # only place a reader sees integration health. See ADR-031.
-        node_status = "blocked"
     else:
         ctx.logger.log(
             "wave-verification",
@@ -778,6 +852,7 @@ def _append_wave_verification_section(run_folder: Path, wave_idx: int, sig: dict
     if not plan_path.exists():
         return
     vstatus = sig.get("verification_status", "unknown")
+    net_new_status = sig.get("net_new_status", vstatus)
     summary = sig.get("summary", "")
     elapsed = sig.get("elapsed_secs")
     elapsed_str = f" ({_fmt_elapsed(elapsed)})" if isinstance(elapsed, int | float) else ""
@@ -790,6 +865,36 @@ def _append_wave_verification_section(run_folder: Path, wave_idx: int, sig: dict
         f"_Integration branch verification — `{vstatus}`{elapsed_str} (policy: `{on_failure}`)._",
         "",
     ]
+
+    if sig.get("baseline_compared"):
+        base_cmds = sig.get("baseline_failed_command_ids", []) or []
+        base_probes = sig.get("baseline_failed_probe_ids", []) or []
+        new_cmds = sig.get("new_failed_command_ids", []) or []
+        new_probes = sig.get("new_failed_probe_ids", []) or []
+        resolved_cmds = sig.get("resolved_command_ids", []) or []
+        resolved_probes = sig.get("resolved_probe_ids", []) or []
+        lines.append(f"- Net-new status: `{net_new_status}`")
+        lines.append(
+            f"- Baseline-only failures: {len(base_cmds) + len(base_probes)}"
+            + (f" (commands: {', '.join(base_cmds)}" if base_cmds else "")
+            + (f"; probes: {', '.join(base_probes)}" if base_probes else "")
+            + (")" if base_cmds or base_probes else "")
+        )
+        lines.append(
+            f"- Net-new failures: {len(new_cmds) + len(new_probes)}"
+            + (f" (commands: {', '.join(new_cmds)}" if new_cmds else "")
+            + (f"; probes: {', '.join(new_probes)}" if new_probes else "")
+            + (")" if new_cmds or new_probes else "")
+        )
+        if resolved_cmds or resolved_probes:
+            lines.append(
+                f"- Resolved baseline failures: {len(resolved_cmds) + len(resolved_probes)}"
+                + (f" (commands: {', '.join(resolved_cmds)}" if resolved_cmds else "")
+                + (f"; probes: {', '.join(resolved_probes)}" if resolved_probes else "")
+                + ")"
+            )
+        lines.append("")
+
     if summary:
         lines.append(summary)
         lines.append("")
@@ -831,6 +936,12 @@ def _dispatch_slices(
     except GitStateError as exc:
         ctx.logger.log(stage.name, "ERROR", f"git state error before slice dispatch: {exc}")
         return {"stage": stage.name, "status": "blocked", "message": str(exc)}
+
+    # Capture the baseline verifier output before any slice touches the integration
+    # branch so wave verification can distinguish pre-existing failures from
+    # net-new regressions. Best-effort: a failure here only loses classification,
+    # the pipeline still proceeds. See ADR-033.
+    _maybe_capture_wave_baseline(stage, variables, run_folder, ctx)
 
     prior_sig = signals.get(stage.slices_from_stage or "", {}) if stage.slices_from_stage else {}
     slice_files: list[str] = prior_sig.get("slice_files", [])
