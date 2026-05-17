@@ -44,6 +44,8 @@ Developer-facing reference. Read before touching any orchestrator code.
 
 - **Domain-language reconciliation is append-only and lives in `orchestrator/glossary.py`.** When a project opts in via `project.yaml` `domain_language.path`, the canonical glossary in the target codebase is the source of truth. Stages read a run-local copy materialised at run start; only the post-harvest `_reconcile_glossary` step in `orchestrate.py` writes back, and only via `glossary.reconcile`, which appends new terms, leaves existing definitions verbatim, and records conflicts in `$RUN_FOLDER/glossary-reconciliation.md` rather than overwriting. The harvest agent proposes terms via `proposed_glossary_terms` in its signal — it must never edit the canonical file directly. Failures during reconciliation are logged and never change the pipeline exit status. See ADR-027.
 
+- **Wave-level deterministic verification is keyed off `StageConfig.wave_verification` — never off profile or stage name.** Stages with `expansion: slices` default to `wave_verification: {enabled: true, on_failure: warn}`; `_maybe_run_wave_verification` in `orchestrate.py` is called from `_dispatch_slices` after each slice group merges, writing artifacts under `wave-verification/wave-{N}/` via the existing verifier engine. Policy values are `warn` (default — log and continue), `block` (return a blocked signal so the pipeline halts at the wave boundary), and `fix_then_retry` (dispatch the `fix-verification` agent then re-verify under `wave-verification/wave-{N}/retry/`; on still-failing retry, behave as `warn`). Adding profile-name branching in orchestration code to trigger this hook violates the invariant. See ADR-030.
+
 ---
 
 ## Path Resolution Rules

@@ -1,3 +1,4 @@
+from typing import Literal
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -1607,6 +1608,241 @@ def test_slices_failed_slice_propagates_failed_signal(tmp_path):
         result = _dispatch_slices(stage, {"repo_root": "/tmp"}, run_folder, ctx, signals)
 
     assert result["status"] in ("failed", "blocked")
+
+
+# ── wave verification (ADR-030) ───────────────────────────────────────────────
+
+
+def _wave_stage(
+    on_failure: Literal["warn", "fix_then_retry", "block"] = "warn",
+    enabled: bool = True,
+) -> StageConfig:
+    from orchestrator.profile import WaveVerification
+
+    return StageConfig(
+        name="implementation",
+        prompt="prompts/implementation/default.md",
+        expansion=ExpansionKind.SLICES,
+        slices_from_stage="decomposition",
+        wave_verification=WaveVerification(enabled=enabled, on_failure=on_failure),
+    )
+
+
+def test_wave_verification_runs_after_each_passed_wave(tmp_path):
+    """When slice expansion is enabled, the verifier is invoked once per group."""
+    from orchestrator.orchestrate import _dispatch_slices
+
+    stage = _wave_stage()
+    ctx = _make_ctx(tmp_path)
+    run_folder = _make_run_folder(tmp_path)
+    signals = {
+        "decomposition": {
+            "slice_files": ["S-01-a.md", "S-02-b.md"],
+            "slice_groups": [["S-01-a.md"], ["S-02-b.md"]],
+        }
+    }
+    verify_sig = {
+        "stage": "verification",
+        "status": "passed",
+        "verification_status": "passed",
+        "summary": "ok",
+        "verify_md_path": str(run_folder / "wave-verification" / "wave-1" / "VERIFY.md"),
+        "verify_json_path": str(run_folder / "wave-verification" / "wave-1" / "verify.json"),
+    }
+    (run_folder / "plan.md").write_text("# Plan\n")
+
+    with (
+        patch("orchestrator.orchestrate._create_branch"),
+        patch("orchestrator.orchestrate.run_stage", return_value={"status": "passed", "commit_hashes": ["a1"]}),
+        patch("orchestrator.orchestrate.update_plan_md"),
+        patch("orchestrator.orchestrate.expand_nodes"),
+        patch("orchestrator.verifiers.engine.verify", return_value=verify_sig) as mock_verify,
+    ):
+        result = _dispatch_slices(stage, {"repo_root": "/tmp"}, run_folder, ctx, signals)
+
+    assert result["status"] == "passed"
+    assert mock_verify.call_count == 2
+    # Wave artifact subdirs must be distinct per wave so reports don't overwrite.
+    subdirs = sorted(call.kwargs["artifact_subdir"] for call in mock_verify.call_args_list)
+    assert subdirs == ["wave-verification/wave-1", "wave-verification/wave-2"]
+    assert len(result["wave_verifications"]) == 2
+
+
+def test_wave_verification_warn_policy_continues_on_failure(tmp_path):
+    """on_failure=warn records the failure but the dispatcher still passes."""
+    from orchestrator.orchestrate import _dispatch_slices
+
+    stage = _wave_stage(on_failure="warn")
+    ctx = _make_ctx(tmp_path)
+    run_folder = _make_run_folder(tmp_path)
+    signals = {
+        "decomposition": {
+            "slice_files": ["S-01-a.md"],
+            "slice_groups": [["S-01-a.md"]],
+        }
+    }
+    failed_verify = {
+        "stage": "verification",
+        "status": "passed",
+        "verification_status": "failed",
+        "summary": "tests broke after merge",
+        "verify_md_path": str(run_folder / "wave-verification" / "wave-1" / "VERIFY.md"),
+        "verify_json_path": str(run_folder / "wave-verification" / "wave-1" / "verify.json"),
+    }
+    (run_folder / "plan.md").write_text("# Plan\n")
+
+    with (
+        patch("orchestrator.orchestrate._create_branch"),
+        patch("orchestrator.orchestrate.run_stage", return_value={"status": "passed", "commit_hashes": ["a1"]}),
+        patch("orchestrator.orchestrate.update_plan_md"),
+        patch("orchestrator.orchestrate.expand_nodes"),
+        patch("orchestrator.verifiers.engine.verify", return_value=failed_verify),
+    ):
+        result = _dispatch_slices(stage, {"repo_root": "/tmp"}, run_folder, ctx, signals)
+
+    assert result["status"] == "passed"
+    assert result["wave_verifications"][0]["verification_status"] == "failed"
+    # A WARN line is emitted with the failure summary so run.log surfaces wave health.
+    warn_calls = [c for c in ctx.logger.log.call_args_list if c.args[1] == "WARN"]
+    assert any("wave 1" in c.args[2] and "failed" in c.args[2] for c in warn_calls)
+
+
+def test_wave_verification_block_policy_halts_dispatcher(tmp_path):
+    """on_failure=block returns a blocked signal so the pipeline stops at the wave boundary."""
+    from orchestrator.orchestrate import _dispatch_slices
+
+    stage = _wave_stage(on_failure="block")
+    ctx = _make_ctx(tmp_path)
+    run_folder = _make_run_folder(tmp_path)
+    signals = {
+        "decomposition": {
+            "slice_files": ["S-01-a.md", "S-02-b.md"],
+            "slice_groups": [["S-01-a.md"], ["S-02-b.md"]],
+        }
+    }
+    failed_verify = {
+        "stage": "verification",
+        "status": "passed",
+        "verification_status": "failed",
+        "summary": "tests broke after merge",
+        "verify_md_path": str(run_folder / "wave-verification" / "wave-1" / "VERIFY.md"),
+        "verify_json_path": str(run_folder / "wave-verification" / "wave-1" / "verify.json"),
+    }
+    (run_folder / "plan.md").write_text("# Plan\n")
+
+    with (
+        patch("orchestrator.orchestrate._create_branch"),
+        patch("orchestrator.orchestrate.run_stage", return_value={"status": "passed", "commit_hashes": ["a1"]}),
+        patch("orchestrator.orchestrate.update_plan_md"),
+        patch("orchestrator.orchestrate.expand_nodes"),
+        patch("orchestrator.verifiers.engine.verify", return_value=failed_verify) as mock_verify,
+    ):
+        result = _dispatch_slices(stage, {"repo_root": "/tmp"}, run_folder, ctx, signals)
+
+    assert result["status"] == "blocked"
+    # Only wave 1 ran — block prevents wave 2 from starting.
+    assert mock_verify.call_count == 1
+    assert "wave 1" in result["message"]
+
+
+def test_wave_verification_disabled_when_config_off(tmp_path):
+    """Setting enabled=false on a slice stage skips the verifier entirely."""
+    from orchestrator.orchestrate import _dispatch_slices
+
+    stage = _wave_stage(enabled=False)
+    ctx = _make_ctx(tmp_path)
+    run_folder = _make_run_folder(tmp_path)
+    signals = {
+        "decomposition": {
+            "slice_files": ["S-01-a.md"],
+            "slice_groups": [["S-01-a.md"]],
+        }
+    }
+
+    with (
+        patch("orchestrator.orchestrate._create_branch"),
+        patch("orchestrator.orchestrate.run_stage", return_value={"status": "passed", "commit_hashes": ["a1"]}),
+        patch("orchestrator.orchestrate.update_plan_md"),
+        patch("orchestrator.orchestrate.expand_nodes"),
+        patch("orchestrator.verifiers.engine.verify") as mock_verify,
+    ):
+        result = _dispatch_slices(stage, {"repo_root": "/tmp"}, run_folder, ctx, signals)
+
+    mock_verify.assert_not_called()
+    assert "wave_verifications" not in result
+
+
+def test_wave_verification_section_appended_to_plan_md(tmp_path):
+    """A 'Wave N Verification' section lands in plan.md per wave."""
+    from orchestrator.orchestrate import _dispatch_slices
+
+    stage = _wave_stage()
+    ctx = _make_ctx(tmp_path)
+    run_folder = _make_run_folder(tmp_path)
+    signals = {
+        "decomposition": {
+            "slice_files": ["S-01-a.md"],
+            "slice_groups": [["S-01-a.md"]],
+        }
+    }
+    verify_sig = {
+        "stage": "verification",
+        "status": "passed",
+        "verification_status": "passed",
+        "summary": "toolchain=python, 3 commands",
+        "verify_md_path": str(run_folder / "wave-verification" / "wave-1" / "VERIFY.md"),
+        "verify_json_path": str(run_folder / "wave-verification" / "wave-1" / "verify.json"),
+    }
+    plan_path = run_folder / "plan.md"
+    plan_path.write_text("# Plan\n\n## Run Summary\n")
+
+    with (
+        patch("orchestrator.orchestrate._create_branch"),
+        patch("orchestrator.orchestrate.run_stage", return_value={"status": "passed", "commit_hashes": ["a1"]}),
+        patch("orchestrator.orchestrate.update_plan_md"),
+        patch("orchestrator.orchestrate.expand_nodes"),
+        patch("orchestrator.verifiers.engine.verify", return_value=verify_sig),
+    ):
+        _dispatch_slices(stage, {"repo_root": "/tmp"}, run_folder, ctx, signals)
+
+    plan_text = plan_path.read_text()
+    assert "## Wave 1 Verification" in plan_text
+    assert "`passed`" in plan_text
+    assert "wave-verification/wave-1/VERIFY.md" in plan_text
+    # Insertion respects existing markers — the new section lives above Run Summary.
+    assert plan_text.index("## Wave 1 Verification") < plan_text.index("## Run Summary")
+
+
+def test_wave_verification_not_run_when_stage_lacks_config(tmp_path):
+    """A slice stage with wave_verification=None (e.g. an old profile) is unaffected."""
+    from orchestrator.orchestrate import _dispatch_slices
+
+    stage = StageConfig(
+        name="implementation",
+        prompt="prompts/implementation/default.md",
+        expansion=ExpansionKind.SLICES,
+        slices_from_stage="decomposition",
+        wave_verification=None,
+    )
+    ctx = _make_ctx(tmp_path)
+    run_folder = _make_run_folder(tmp_path)
+    signals = {
+        "decomposition": {
+            "slice_files": ["S-01-a.md"],
+            "slice_groups": [["S-01-a.md"]],
+        }
+    }
+
+    with (
+        patch("orchestrator.orchestrate._create_branch"),
+        patch("orchestrator.orchestrate.run_stage", return_value={"status": "passed", "commit_hashes": ["a1"]}),
+        patch("orchestrator.orchestrate.update_plan_md"),
+        patch("orchestrator.orchestrate.expand_nodes"),
+        patch("orchestrator.verifiers.engine.verify") as mock_verify,
+    ):
+        _dispatch_slices(stage, {"repo_root": "/tmp"}, run_folder, ctx, signals)
+
+    mock_verify.assert_not_called()
 
 
 # ── _dispatch_prompts ─────────────────────────────────────────────────────────

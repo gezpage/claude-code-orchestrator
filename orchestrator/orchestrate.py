@@ -509,6 +509,200 @@ def _run_slice(
     return sig, time.monotonic() - t0
 
 
+def _maybe_run_wave_verification(
+    stage: StageConfig,
+    wave_idx: int,
+    variables: dict,
+    run_folder: Path,
+    ctx: _PipelineContext,
+) -> dict | None:
+    """Run deterministic verification against the integration branch after a wave merges.
+
+    Returns ``None`` if wave verification is not configured for this stage (e.g.
+    the stage does not use slice expansion, or it was explicitly disabled). Returns
+    a signal dict otherwise:
+
+    - ``status=passed`` when the dispatcher should continue (passed, warned,
+      skipped, or failed-under-``warn``/``fix_then_retry`` policies). The
+      ``verification_status`` field carries the underlying verifier verdict so
+      reviewers and post-mortems can see integration health per wave.
+    - ``status=blocked`` only when the policy is ``block`` and verification
+      failed; the dispatcher converts this into a pipeline halt.
+
+    The hook is keyed off ``stage.wave_verification`` — never off the profile
+    name. See ADR-030.
+    """
+    wv = stage.wave_verification
+    if wv is None or not wv.enabled:
+        return None
+
+    from orchestrator.verifiers import engine as verifier_engine
+    from orchestrator.verifiers.engine import VerificationError
+
+    repo_root = variables.get("repo_root")
+    if not repo_root:
+        ctx.logger.log("wave-verification", "WARN", f"wave {wave_idx} skipped — no repo_root in variables")
+        return {"stage": "wave-verification", "status": "passed", "verification_status": "skipped"}
+
+    artifact_subdir = f"wave-verification/wave-{wave_idx}"
+    ctx.logger.log("wave-verification", "INFO", f"dispatching wave {wave_idx} against integration branch")
+    t0 = time.monotonic()
+    try:
+        sig = verifier_engine.verify(Path(repo_root), run_folder, artifact_subdir=artifact_subdir)
+    except VerificationError as exc:
+        ctx.logger.log("wave-verification", "WARN", f"wave {wave_idx} could not start: {exc}")
+        return {
+            "stage": "wave-verification",
+            "status": "passed",
+            "verification_status": "skipped",
+            "summary": f"wave {wave_idx} verification could not start: {exc}",
+        }
+    elapsed = time.monotonic() - t0
+
+    sig["wave_idx"] = wave_idx
+    sig["on_failure"] = wv.on_failure
+    sig["elapsed_secs"] = elapsed
+    vstatus = sig.get("verification_status", "unknown")
+    summary = sig.get("summary", "")
+
+    if vstatus == "failed":
+        ctx.logger.log(
+            "wave-verification",
+            "WARN",
+            f"wave {wave_idx} failed ({_fmt_elapsed(elapsed)}) on_failure={wv.on_failure}: {summary}",
+        )
+        if wv.on_failure == "fix_then_retry":
+            sig = _wave_fix_then_retry(stage, wave_idx, sig, variables, run_folder, ctx)
+            vstatus = sig.get("verification_status", "unknown")
+            if vstatus == "failed":
+                ctx.logger.log(
+                    "wave-verification",
+                    "WARN",
+                    f"wave {wave_idx} still failed after fix_then_retry — continuing",
+                )
+        if wv.on_failure == "block" and vstatus == "failed":
+            sig["status"] = "blocked"
+            sig["message"] = f"wave {wave_idx} integration verification failed: {summary}"
+    else:
+        ctx.logger.log(
+            "wave-verification",
+            "INFO",
+            f"wave {wave_idx} {vstatus} ({_fmt_elapsed(elapsed)}) — {summary}",
+        )
+
+    _append_wave_verification_section(run_folder, wave_idx, sig)
+    return sig
+
+
+def _wave_fix_then_retry(
+    stage: StageConfig,
+    wave_idx: int,
+    failed_sig: dict,
+    variables: dict,
+    run_folder: Path,
+    ctx: _PipelineContext,
+) -> dict:
+    """Dispatch a fix-verification agent against the wave VERIFY.md, then re-verify.
+
+    Returns the re-verification signal (whether or not the fix worked). The caller
+    decides what to do with a still-failed result based on the policy.
+    """
+    repo_root = variables.get("repo_root", "")
+    verify_md_path = failed_sig.get("verify_md_path", "")
+    verify_json_path = failed_sig.get("verify_json_path", "")
+    fix_vars = {
+        "run_folder": str(run_folder),
+        "docs_root": ctx.docs_root,
+        "branch": ctx.branch,
+        "verify_md_path": verify_md_path,
+        "verify_json_path": verify_json_path,
+        "repo_root": repo_root,
+    }
+    ctx.logger.log("wave-verification", "INFO", f"wave {wave_idx} dispatching fix-verification agent")
+    fix_sig = run_stage(
+        "fix-verification",
+        "default",
+        fix_vars,
+        run_folder,
+        ctx.docs_root,
+        ctx.project,
+        ctx.project_log_path,
+        cwd=repo_root or None,
+        runner=ctx.runner_for(stage.name),
+    )
+    if fix_sig.get("status") != "passed":
+        ctx.logger.log(
+            "wave-verification",
+            "WARN",
+            f"wave {wave_idx} fix-verification did not pass: {fix_sig.get('message', '')}",
+        )
+        return failed_sig
+
+    from orchestrator.verifiers import engine as verifier_engine
+    from orchestrator.verifiers.engine import VerificationError
+
+    retry_subdir = f"wave-verification/wave-{wave_idx}/retry"
+    try:
+        retry_sig = verifier_engine.verify(Path(repo_root), run_folder, artifact_subdir=retry_subdir)
+    except VerificationError as exc:
+        ctx.logger.log("wave-verification", "WARN", f"wave {wave_idx} retry could not start: {exc}")
+        return failed_sig
+    retry_sig["wave_idx"] = wave_idx
+    retry_sig["on_failure"] = stage.wave_verification.on_failure if stage.wave_verification else "warn"
+    retry_sig["retry"] = True
+    return retry_sig
+
+
+def _append_wave_verification_section(run_folder: Path, wave_idx: int, sig: dict) -> None:
+    """Append a wave-verification result section to plan.md.
+
+    Surfaces the per-wave verifier verdict alongside the stage's commit list so
+    reviewers can see integration health at the wave boundary without trawling
+    run.log. Best-effort: silently no-ops if plan.md does not exist.
+    """
+    plan_path = run_folder / "plan.md"
+    if not plan_path.exists():
+        return
+    vstatus = sig.get("verification_status", "unknown")
+    summary = sig.get("summary", "")
+    elapsed = sig.get("elapsed_secs")
+    elapsed_str = f" ({_fmt_elapsed(elapsed)})" if isinstance(elapsed, int | float) else ""
+    on_failure = sig.get("on_failure", "warn")
+    retry_note = " (after fix_then_retry)" if sig.get("retry") else ""
+
+    lines = [
+        "",
+        f"## Wave {wave_idx} Verification{retry_note}",
+        f"_Integration branch verification — `{vstatus}`{elapsed_str} (policy: `{on_failure}`)._",
+        "",
+    ]
+    if summary:
+        lines.append(summary)
+        lines.append("")
+    for label, key in (("VERIFY.md", "verify_md_path"), ("verify.json", "verify_json_path")):
+        path_str = sig.get(key)
+        if isinstance(path_str, str) and path_str:
+            try:
+                rel: Path | str = Path(path_str).relative_to(run_folder)
+            except ValueError:
+                rel = path_str
+            lines.append(f"- [{label}]({rel})")
+    lines.append("")
+
+    section_text = "\n".join(lines)
+    content = plan_path.read_text()
+    markers = ["\n## File Manifest", "\n## Run Summary"]
+    insert_at = len(content)
+    for marker in markers:
+        idx = content.find(marker)
+        if 0 <= idx < insert_at:
+            insert_at = idx
+    if insert_at < len(content):
+        plan_path.write_text(content[:insert_at] + section_text + content[insert_at:])
+    else:
+        plan_path.write_text(content + section_text)
+
+
 def _dispatch_slices(
     stage: StageConfig,
     variables: dict,
@@ -547,8 +741,9 @@ def _dispatch_slices(
 
     impl = _impl_from_prompt(stage.prompt or f"prompts/{stage.name}/default.md")
     all_commits: list[str] = []
+    wave_verifications: list[dict] = []
 
-    for group in slice_groups:
+    for wave_idx, group in enumerate(slice_groups, start=1):
         if len(group) == 1:
             slice_file = group[0]
             sub_id = slice_to_id[slice_file]
@@ -585,6 +780,16 @@ def _dispatch_slices(
                 impl_name=impl,
                 repo_root=variables.get("repo_root"),
             )
+            wave_sig = _maybe_run_wave_verification(stage, wave_idx, variables, run_folder, ctx)
+            if wave_sig is not None:
+                wave_verifications.append(wave_sig)
+                if wave_sig.get("status") == "blocked":
+                    return {
+                        "stage": stage.name,
+                        "status": "blocked",
+                        "message": wave_sig.get("message", f"wave {wave_idx} integration verification failed"),
+                        "wave_verifications": wave_verifications,
+                    }
         else:
             repo_root = variables["repo_root"]
             ctx.logger.log(stage.name, "INFO", f"dispatching {len(group)} implementation slices in parallel")
@@ -677,7 +882,21 @@ def _dispatch_slices(
                     "message": failed_sig.get("message", ""),
                 }
 
-    return {"stage": stage.name, "status": "passed", "commit_hashes": all_commits, "branch": ctx.branch}
+            wave_sig = _maybe_run_wave_verification(stage, wave_idx, variables, run_folder, ctx)
+            if wave_sig is not None:
+                wave_verifications.append(wave_sig)
+                if wave_sig.get("status") == "blocked":
+                    return {
+                        "stage": stage.name,
+                        "status": "blocked",
+                        "message": wave_sig.get("message", f"wave {wave_idx} integration verification failed"),
+                        "wave_verifications": wave_verifications,
+                    }
+
+    result: dict = {"stage": stage.name, "status": "passed", "commit_hashes": all_commits, "branch": ctx.branch}
+    if wave_verifications:
+        result["wave_verifications"] = wave_verifications
+    return result
 
 
 def _dispatch_prompts(
