@@ -1476,7 +1476,7 @@ def test_slices_single_slice_runs_serially(tmp_path):
 
     with (
         patch("orchestrator.orchestrate._create_branch"),
-        patch("orchestrator.orchestrate._create_worktree") as mock_wt,
+        patch("orchestrator.slice_dispatcher._create_worktree") as mock_wt,
         patch("orchestrator.orchestrate.run_stage", return_value={"status": "passed", "commit_hashes": ["a1"]}),
         patch("orchestrator.orchestrate.update_plan_md"),
         patch("orchestrator.orchestrate.expand_nodes"),
@@ -1512,9 +1512,9 @@ def test_slices_parallel_group_creates_one_worktree_per_slice(tmp_path):
 
     with (
         patch("orchestrator.orchestrate._create_branch"),
-        patch("orchestrator.orchestrate._create_worktree", return_value="/tmp/wt") as mock_wt,
-        patch("orchestrator.orchestrate._remove_worktree"),
-        patch("orchestrator.orchestrate._merge_worktree_branch"),
+        patch("orchestrator.slice_dispatcher._create_worktree", return_value="/tmp/wt") as mock_wt,
+        patch("orchestrator.slice_dispatcher._remove_worktree"),
+        patch("orchestrator.slice_dispatcher._merge_worktree_branch"),
         patch("orchestrator.orchestrate.update_plan_md"),
         patch("orchestrator.orchestrate.expand_nodes"),
         patch("concurrent.futures.ThreadPoolExecutor") as mock_exec_cls,
@@ -1555,8 +1555,8 @@ def test_slices_worktrees_cleaned_up_after_failure(tmp_path):
 
     with (
         patch("orchestrator.orchestrate._create_branch"),
-        patch("orchestrator.orchestrate._create_worktree", return_value="/tmp/wt"),
-        patch("orchestrator.orchestrate._remove_worktree") as mock_rm,
+        patch("orchestrator.slice_dispatcher._create_worktree", return_value="/tmp/wt"),
+        patch("orchestrator.slice_dispatcher._remove_worktree") as mock_rm,
         patch("orchestrator.orchestrate.update_plan_md"),
         patch("orchestrator.orchestrate.expand_nodes"),
         patch("concurrent.futures.ThreadPoolExecutor") as mock_exec_cls,
@@ -2942,10 +2942,10 @@ def test_slices_dispatcher_converts_merge_conflict_to_blocked_signal(tmp_path):
     with (
         _patch_safe_git_state(),
         patch("orchestrator.orchestrate._create_branch"),
-        patch("orchestrator.orchestrate._create_worktree", return_value="/tmp/wt"),
-        patch("orchestrator.orchestrate._remove_worktree") as mock_rm,
+        patch("orchestrator.slice_dispatcher._create_worktree", return_value="/tmp/wt"),
+        patch("orchestrator.slice_dispatcher._remove_worktree") as mock_rm,
         patch(
-            "orchestrator.orchestrate._merge_worktree_branch",
+            "orchestrator.slice_dispatcher._merge_worktree_branch",
             side_effect=GitStateError("merge conflict on 'feat/test-impl_1' — aborted"),
         ),
         patch("orchestrator.orchestrate.update_plan_md"),
@@ -2988,10 +2988,10 @@ def test_slices_dispatcher_blocks_when_worktree_creation_fails(tmp_path):
         _patch_safe_git_state(),
         patch("orchestrator.orchestrate._create_branch"),
         patch(
-            "orchestrator.orchestrate._create_worktree",
+            "orchestrator.slice_dispatcher._create_worktree",
             side_effect=GitStateError("branch already exists"),
         ),
-        patch("orchestrator.orchestrate._remove_worktree"),
+        patch("orchestrator.slice_dispatcher._remove_worktree"),
         patch("orchestrator.orchestrate.update_plan_md"),
         patch("orchestrator.orchestrate.expand_nodes"),
         patch("orchestrator.orchestrate.run_stage") as mock_rs,
