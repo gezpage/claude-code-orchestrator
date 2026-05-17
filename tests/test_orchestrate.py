@@ -996,7 +996,7 @@ def test_unhandled_exception_in_dispatcher_is_logged_to_run_log(tmp_path):
 # ── dispatcher unit tests ─────────────────────────────────────────────────────
 
 
-def _make_ctx(tmp_path):
+def _make_ctx(tmp_path, *, resume: bool = False):
     logger = MagicMock()
     return _PipelineContext(
         docs_root=str(tmp_path),
@@ -1008,6 +1008,7 @@ def _make_ctx(tmp_path):
         project_standards=[],
         runners={},
         agent_metadata={},
+        resume=resume,
     )
 
 
@@ -2125,6 +2126,101 @@ def test_baseline_capture_idempotent_across_resume(tmp_path):
     assert mock_verify.call_args_list[0].kwargs["artifact_subdir"] == "wave-verification/wave-1"
     # Pre-existing baseline file untouched.
     assert json.loads((baseline_dir / "verify.json").read_text())["commands"][0]["status"] == "failed"
+
+
+def test_baseline_capture_refuses_on_resume_when_baseline_missing(tmp_path):
+    """A resumed run without an existing baseline must not synthesise one from the mutated branch.
+
+    The integration branch already carries slice commits at this point, so a
+    fresh capture would record pipeline-introduced regressions as "baseline".
+    See ADR-033 — missing baseline degrades to pre-ADR behaviour, never a
+    contaminated baseline.
+    """
+    from orchestrator.orchestrate import _dispatch_slices
+
+    stage = _wave_stage()
+    ctx = _make_ctx(tmp_path, resume=True)
+    run_folder = _make_run_folder(tmp_path)
+    (run_folder / "plan.md").write_text("# Plan\n")
+    signals = {
+        "decomposition": {
+            "slice_files": ["S-01-a.md"],
+            "slice_groups": [["S-01-a.md"]],
+        }
+    }
+
+    side = _baseline_verify_side_effect(run_folder, fail_command_ids_per_call=[[]])
+
+    with (
+        patch("orchestrator.orchestrate._create_branch"),
+        patch("orchestrator.orchestrate.run_stage", return_value={"status": "passed", "commit_hashes": ["a1"]}),
+        patch("orchestrator.orchestrate.update_plan_md"),
+        patch("orchestrator.orchestrate.expand_nodes"),
+        patch("orchestrator.verifiers.engine.verify", side_effect=side) as mock_verify,
+    ):
+        _dispatch_slices(stage, {"repo_root": "/tmp"}, run_folder, ctx, signals)
+
+    # Only the wave-1 verify ran — the baseline capture was refused.
+    assert mock_verify.call_count == 1
+    assert mock_verify.call_args_list[0].kwargs["artifact_subdir"] == "wave-verification/wave-1"
+    # The wave call must not carry a stale baseline file either.
+    assert mock_verify.call_args_list[0].kwargs.get("baseline_path") is None
+    # And the warn line is surfaced so an operator can see the degradation.
+    warn_msgs = [c.args[2] for c in ctx.logger.log.call_args_list if c.args[1] == "WARN"]
+    assert any("baseline capture skipped on resume" in m for m in warn_msgs)
+
+
+def test_fix_then_retry_preserves_baseline(tmp_path):
+    """The retry verify call must carry the baseline so resolved failures don't reclassify.
+
+    Without the baseline_path on retry, pre-existing baseline failures would
+    look "net-new" again after the fix attempt, hiding the fact that the fixer
+    actually resolved the regression. See ADR-033.
+    """
+    from orchestrator.orchestrate import _dispatch_slices
+    from orchestrator.verifiers.engine import BASELINE_SUBDIR
+
+    stage = _wave_stage(on_failure="fix_then_retry")
+    ctx = _make_ctx(tmp_path)
+    run_folder = _make_run_folder(tmp_path)
+    (run_folder / "plan.md").write_text("# Plan\n")
+    signals = {
+        "decomposition": {
+            "slice_files": ["S-01-a.md"],
+            "slice_groups": [["S-01-a.md"]],
+        }
+    }
+
+    # 1: baseline capture (no failures here — keeps the test contract simple)
+    # 2: wave-1 verify — net-new failure triggers fix
+    # 3: retry verify — net-new resolved, should NOT reclassify
+    side = _baseline_verify_side_effect(run_folder, fail_command_ids_per_call=[[], ["test"], []])
+
+    # The first run_stage call is the slice; the second is fix-verification.
+    run_stage_results = iter(
+        [
+            {"status": "passed", "commit_hashes": ["a1"]},
+            {"status": "passed"},
+        ]
+    )
+
+    with (
+        patch("orchestrator.orchestrate._create_branch"),
+        patch("orchestrator.orchestrate.run_stage", side_effect=lambda *a, **kw: next(run_stage_results)),
+        patch("orchestrator.orchestrate.update_plan_md"),
+        patch("orchestrator.orchestrate.expand_nodes"),
+        patch("orchestrator.verifiers.engine.verify", side_effect=side) as mock_verify,
+    ):
+        _dispatch_slices(stage, {"repo_root": "/tmp"}, run_folder, ctx, signals)
+
+    # 3 calls: baseline, wave-1, wave-1/retry.
+    assert mock_verify.call_count == 3
+    subdirs = [c.kwargs["artifact_subdir"] for c in mock_verify.call_args_list]
+    assert subdirs == [BASELINE_SUBDIR, "wave-verification/wave-1", "wave-verification/wave-1/retry"]
+    # The retry call must include the baseline_path — otherwise classification is lost.
+    retry_call = mock_verify.call_args_list[2]
+    assert retry_call.kwargs.get("baseline_path") is not None
+    assert str(retry_call.kwargs["baseline_path"]).endswith(f"{BASELINE_SUBDIR}/verify.json")
 
 
 # ── slice-completion vs wave-integration distinction (ADR-031) ───────────────

@@ -33,9 +33,11 @@ Capture a pre-pipeline verifier **baseline** and classify each wave-verification
 
 `_dispatch_slices` in `orchestrate.py` calls `_maybe_capture_wave_baseline(...)` immediately after `_create_branch` succeeds, **before** any slice runs. It is gated on `stage.wave_verification.enabled`, idempotent (skips when the file already exists, so a resumed pipeline never overwrites the original baseline), and best-effort (a capture failure is logged and swallowed so the pipeline still proceeds without classification).
 
+On a resumed run (`ctx.resume == True`) where the original baseline file is missing, the capture is explicitly **refused**. The integration branch already carries earlier slice commits at that point, so a fresh capture would snapshot pipeline-introduced regressions as "baseline" and silently flip every real regression into a "baseline failure" — the worst possible failure mode for this feature. Missing baseline on resume degrades to pre-ADR-033 behaviour (policy applies to every failure) rather than a contaminated baseline.
+
 ### Classification
 
-`verify()` accepts a new `baseline_path` keyword. When provided and readable, it tags every failing command and probe as `baseline` or `net_new` and computes a separate `net_new_status` using the same required/probe aggregation rules as `verification_status`. The signal grows:
+`verify()` accepts a new `baseline_path` keyword. When provided and readable, it tags every failing command and probe as `baseline` or `net_new` and computes a separate `net_new_status` using the same required/probe aggregation rules as `verification_status`. The `fix_then_retry` retry verify call must also pass `baseline_path` — otherwise a fixer that resolves the only net-new failure would see baseline-only failures reclassified as net-new and the retry would still report failed, masking the successful fix. The signal grows:
 
 - `baseline_failed_command_ids`, `baseline_failed_probe_ids`
 - `new_failed_command_ids`, `new_failed_probe_ids`

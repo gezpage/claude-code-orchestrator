@@ -45,6 +45,10 @@ class _PipelineContext:
     project_standards: list
     runners: dict[str, AgentRunner]
     agent_metadata: dict[str, dict[str, str | None]]
+    # True when ``run_pipeline`` was invoked with ``--resume``. Used by the
+    # baseline-capture path to refuse snapshotting an already-mutated integration
+    # branch when the run's original baseline is gone. See ADR-033.
+    resume: bool = False
 
     def runner_for(self, stage_name: str) -> AgentRunner | None:
         # Returns None for stages without a runner (e.g. deterministic stages or test
@@ -627,6 +631,20 @@ def _maybe_capture_wave_baseline(
     if baseline_file.exists():
         return
 
+    # On a resumed run the integration branch already carries earlier slice
+    # commits, so a fresh capture here would snapshot pipeline-introduced
+    # regressions as "baseline". The ADR-033 contract is "missing baseline
+    # degrades to pre-ADR behaviour", not "synthesise a contaminated baseline".
+    # Skip the capture and let the verifier fall back to no-classification.
+    if ctx.resume:
+        ctx.logger.log(
+            "wave-verification",
+            "WARN",
+            "baseline capture skipped on resume — original baseline missing; "
+            "wave verification will fall back to no-classification",
+        )
+        return
+
     repo_root = variables.get("repo_root")
     if not repo_root:
         ctx.logger.log("wave-verification", "WARN", "baseline capture skipped — no repo_root in variables")
@@ -830,8 +848,18 @@ def _wave_fix_then_retry(
     from orchestrator.verifiers.engine import VerificationError
 
     retry_subdir = f"wave-verification/wave-{wave_idx}/retry"
+    # Re-verification must carry the same baseline as the initial wave run, or
+    # the retry would reclassify pre-existing baseline failures as net-new and
+    # mask the fact that the fixer actually resolved the regression. See ADR-033.
+    baseline_file = verifier_engine.baseline_path_for(run_folder)
+    baseline_arg = baseline_file if baseline_file.exists() else None
     try:
-        retry_sig = verifier_engine.verify(Path(repo_root), run_folder, artifact_subdir=retry_subdir)
+        retry_sig = verifier_engine.verify(
+            Path(repo_root),
+            run_folder,
+            artifact_subdir=retry_subdir,
+            baseline_path=baseline_arg,
+        )
     except VerificationError as exc:
         ctx.logger.log("wave-verification", "WARN", f"wave {wave_idx} retry could not start: {exc}")
         return failed_sig
@@ -1454,6 +1482,7 @@ def run_pipeline(
         project_standards=project_standards,
         runners=runners,
         agent_metadata=agent_metadata,
+        resume=resume,
     )
 
     # Resolved once so the finalisation phase honours the configured backend
