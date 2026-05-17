@@ -75,7 +75,18 @@ def verify(
         return _skipped_report(run_folder, artifact_subdir)
     commands, probe_names = _apply_overrides(recipe, project_cfg)
 
-    report = VerifyReport(status="passed", toolchain=recipe.toolchain)
+    # When the project overrides commands wholesale via .cco.yaml the recipe's
+    # required_any_of IDs may not exist in the override list — the project is
+    # taking responsibility for its own command set. Clear the group rather
+    # than dragging dangling IDs into aggregate_status.
+    effective_any_of: tuple[str, ...] = recipe.required_any_of
+    if project_cfg is not None and project_cfg.commands is not None:
+        effective_any_of = ()
+    report = VerifyReport(
+        status="passed",
+        toolchain=recipe.toolchain,
+        required_any_of=effective_any_of,
+    )
 
     for cmd in commands:
         report.commands.append(_run_command(cmd, repo_root))
@@ -352,6 +363,10 @@ def _summary(report: VerifyReport, *, classified: bool) -> str:
     if n_probe_failed:
         parts.append(f"{n_probe_failed} probe failure{'s' if n_probe_failed != 1 else ''}")
     parts.append(f"status={report.status}")
+    if report.required_any_of and not any(
+        c.id in report.required_any_of and c.status != "skipped" for c in report.commands
+    ):
+        parts.append("no eligible test command ran")
     if classified:
         n_new = len(report.new_failed_command_ids) + len(report.new_failed_probe_ids)
         n_base = len(report.baseline_failed_command_ids) + len(report.baseline_failed_probe_ids)

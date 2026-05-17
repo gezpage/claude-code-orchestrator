@@ -30,6 +30,16 @@ class Recipe:
     markers: tuple[str, ...]
     commands: tuple[Command, ...]
     probes: tuple[str, ...] = field(default_factory=tuple)
+    # IDs of commands that form an "at least one must run" group — usually the
+    # toolchain's test runners. Per-command ``required`` covers "if it ran, did
+    # it pass"; ``required_any_of`` covers "did anything we expected to be the
+    # test actually execute". If every listed command was skipped (no eligible
+    # invocation path), the report status is downgraded — a passed-with-zero-
+    # commands result would otherwise be silent false confidence. And if any
+    # listed command actually ran and failed, the failure is hard (the recipe
+    # is asserting that this *is* the test, even if it's marked non-required so
+    # the alternative path can also be optional).
+    required_any_of: tuple[str, ...] = field(default_factory=tuple)
 
 
 def _parse_command(raw: dict) -> Command:
@@ -52,12 +62,19 @@ def _parse_recipe(raw: dict) -> Recipe:
     markers = raw.get("markers") or []
     if not markers:
         raise ValueError(f"recipe '{raw['toolchain']}' must declare at least one marker")
+    commands = tuple(_parse_command(c) for c in raw.get("commands", []))
+    required_any_of = tuple(raw.get("required_any_of") or ())
+    declared_ids = {c.id for c in commands}
+    unknown = [name for name in required_any_of if name not in declared_ids]
+    if unknown:
+        raise ValueError(f"recipe '{raw['toolchain']}' required_any_of references unknown command id(s): {unknown}")
     return Recipe(
         toolchain=raw["toolchain"],
         priority=int(raw["priority"]),
         markers=tuple(markers),
-        commands=tuple(_parse_command(c) for c in raw.get("commands", [])),
+        commands=commands,
         probes=tuple(raw.get("probes", [])),
+        required_any_of=required_any_of,
     )
 
 

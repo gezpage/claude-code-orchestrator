@@ -8,10 +8,19 @@ priority: 50
 markers:
   - composer.json
 
-# Either composer-script style or direct phpunit invocation works; both are
-# offered as non-required so a PHP repo with one but not the other still
-# produces a coherent passed/warned report. The first to match its precondition
-# runs; the second remains as a fallback when only PHPUnit is installed.
+# Either composer-script style or direct phpunit invocation works; each is
+# guarded by its own precondition so the alternative path can still apply
+# when only one is configured. They sit in the `required_any_of` group so the
+# engine knows the recipe is asserting "at least one of these IS the test".
+# If neither runs the result downgrades to `warned` (not `passed`) — a
+# composer.json repo with no test entrypoint and no installed phpunit is
+# false-confidence territory, not a clean pass. If either actually runs and
+# fails, the run is `failed` — even though the individual command carries
+# `required: false` so the alternative path stays optional.
+required_any_of:
+  - composer-test
+  - phpunit
+
 commands:
   - id: composer-test
     command: composer test
