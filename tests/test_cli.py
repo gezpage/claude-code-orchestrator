@@ -383,7 +383,7 @@ def test_bootstrap_force_overwrites(tmp_path):
 
 
 def test_bootstrap_idempotent_second_run(tmp_path):
-    docs_root, repo_root = _make_bootstrap_inputs(tmp_path)
+    docs_root, _repo_root = _make_bootstrap_inputs(tmp_path)
     first = CliRunner().invoke(
         main,
         [

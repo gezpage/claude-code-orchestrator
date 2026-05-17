@@ -77,7 +77,12 @@ repo has no `.cco.yaml` and no bundled recipe matches it:
 - In a TTY, offer to bootstrap inline (uses the same module as the CLI
   command). The user picks a toolchain; if accepted, files are written, the
   matching standards entry is added, and the user is asked whether to
-  commit. Aborting at any step continues the pipeline without verification.
+  commit. Aborting *before* any file is written continues the pipeline
+  without verification. Aborting *after* files are written (declined commit
+  or commit failure) stops the run with a clear message asking the user to
+  commit or stash the new files and rerun — the downstream base-branch sync
+  refuses to operate on a dirty tree, so silently falling through produced
+  confusing failures.
 - In non-TTY, also print the exact `orchestrator bootstrap …` command the
   user should run.
 - On `--resume`, skip the check entirely — the warning is only useful at the

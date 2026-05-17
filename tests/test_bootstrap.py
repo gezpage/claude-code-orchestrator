@@ -280,3 +280,64 @@ def test_maybe_warn_unbootstrapped_silent_on_resume(tmp_path, capsys):
         )
     captured = capsys.readouterr()
     assert captured.out == ""
+
+
+def _bootstrap_inline_inputs(tmp_path: Path) -> tuple[Path, Path]:
+    """Build a docs-root + an empty repo that triggers the unbootstrapped warning."""
+    docs_root = tmp_path / "docs"
+    project_dir = docs_root / "projects" / "myproject"
+    project_dir.mkdir(parents=True)
+    (project_dir / "project.yaml").write_text("repo-root: /unused\n")
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    return docs_root, repo_root
+
+
+def test_maybe_warn_unbootstrapped_inline_decline_commit_exits_cleanly(tmp_path, capsys):
+    # When inline bootstrap writes files and the user declines to commit, we must
+    # stop the run cleanly so the downstream base-branch sync does not fail on a
+    # dirty tree (see PR #184 review).
+    docs_root, repo_root = _bootstrap_inline_inputs(tmp_path)
+    with (
+        patch("orchestrator._prompts.is_interactive", return_value=True),
+        patch("orchestrator._prompts.ask_confirm", side_effect=[True, False]),
+        patch("orchestrator._prompts.ask_select", return_value="python"),
+        pytest.raises(SystemExit) as exc,
+    ):
+        orchestrate._maybe_warn_unbootstrapped(
+            docs_root=str(docs_root),
+            project="myproject",
+            repo_root=str(repo_root),
+            resume=False,
+        )
+    captured = capsys.readouterr()
+    assert "working tree is now dirty" in str(exc.value)
+    assert "Commit or stash" in str(exc.value)
+    # Bootstrap files should still be on disk so the user can stash/commit them.
+    assert (repo_root / ".cco.yaml").exists()
+    assert "wrote" in captured.out
+
+
+def test_maybe_warn_unbootstrapped_inline_commit_failure_exits_cleanly(tmp_path, capsys):
+    # If the user agrees to commit but the commit fails (e.g. repo is not a git
+    # repo), we still must not fall through to the base-branch sync.
+    docs_root, repo_root = _bootstrap_inline_inputs(tmp_path)
+    with (
+        patch("orchestrator._prompts.is_interactive", return_value=True),
+        patch("orchestrator._prompts.ask_confirm", side_effect=[True, True]),
+        patch("orchestrator._prompts.ask_select", return_value="python"),
+        patch(
+            "orchestrator.bootstrap.commit_changes",
+            side_effect=subprocess.CalledProcessError(128, ["git", "commit"]),
+        ),
+        pytest.raises(SystemExit) as exc,
+    ):
+        orchestrate._maybe_warn_unbootstrapped(
+            docs_root=str(docs_root),
+            project="myproject",
+            repo_root=str(repo_root),
+            resume=False,
+        )
+    captured = capsys.readouterr()
+    assert "working tree is now dirty" in str(exc.value)
+    assert "[WARN] commit failed" in captured.out

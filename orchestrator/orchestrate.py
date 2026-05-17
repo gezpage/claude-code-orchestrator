@@ -364,12 +364,23 @@ def _maybe_warn_unbootstrapped(
     bootstrap.update_project_standards(project_yaml, toolchain)
     for path in written:
         print(f"[orchestrator]   wrote {path}")  # noqa: T201
-    if written and _prompts.ask_confirm("Commit bootstrap changes?", default=True):
+    if not written:
+        return
+    # Bootstrap left the working tree dirty. The downstream base-branch sync
+    # refuses to operate on a dirty tree, so we must either land the changes
+    # in a commit here or stop the run cleanly with instructions. We never
+    # silently fall through to the sync — that produced confusing failures.
+    if _prompts.ask_confirm("Commit bootstrap changes?", default=True):
         try:
             sha = bootstrap.commit_changes(repo_root_path, written)
             print(f"[orchestrator] Committed {sha}: chore: bootstrap orchestrator project config")  # noqa: T201
+            return
         except (subprocess.CalledProcessError, ValueError, OSError) as exc:
             print(f"[orchestrator] [WARN] commit failed: {exc}")  # noqa: T201
+    sys.exit(
+        "[orchestrator] Bootstrap files created but the working tree is now dirty.\n"
+        "  Commit or stash them, then rerun the pipeline."
+    )
 
 
 def run_pipeline(
