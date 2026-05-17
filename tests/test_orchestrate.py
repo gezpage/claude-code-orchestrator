@@ -2780,3 +2780,334 @@ def test_executive_summary_passes_pr_url_into_variables(tmp_path):
         )
 
     assert mock_rs2.call_args.args[2]["pr_url"] == "not created"
+
+
+# ── discovery unresolved-items aggregation (ADR-032) ──────────────────────────
+
+
+def test_dispatch_tracks_aggregates_unresolved_items_across_tracks(tmp_path):
+    """Each track's unresolved_questions/risks/assumptions_needed are flattened
+    into one merged list per category on the parent discovery signal — those
+    lists are the structured alignment inputs the next stage consumes.
+    """
+    from orchestrator.orchestrate import _dispatch_tracks
+
+    stage = StageConfig(name="discovery", expansion=ExpansionKind.TRACKS)
+    run_folder = tmp_path / "run"
+    run_folder.mkdir()
+    logger = MagicMock()
+    ctx = _PipelineContext(
+        docs_root=str(tmp_path),
+        project="myproject",
+        project_log_path=str(tmp_path / "log.log"),
+        logger=logger,
+        branch="feat/test",
+        project_config={"repo-root": "/tmp"},
+        project_standards=[],
+        runners={},
+        agent_metadata={},
+    )
+    variables = {"run_folder": str(run_folder), "docs_root": str(tmp_path)}
+
+    planning_signal = {
+        "stage": "discovery-planning",
+        "status": "passed",
+        "tracks": [
+            {"name": "track-a", "prompt_file": "/tmp/a.md", "focus": "x"},
+            {"name": "track-b", "prompt_file": "/tmp/b.md", "focus": "y"},
+        ],
+    }
+
+    track_a_signal = {
+        "stage": "discovery-track-a",
+        "status": "passed",
+        "findings_file": "/tmp/a-findings.md",
+        "summary": "track-a summary",
+        "unresolved_questions": ["Which auth flow to reuse?"],
+        "risks": ["Rate limiter may need tuning"],
+        "assumptions_needed": ["Assume background jobs run in the existing worker"],
+    }
+    track_b_signal = {
+        "stage": "discovery-track-b",
+        "status": "passed",
+        "findings_file": "/tmp/b-findings.md",
+        "summary": "track-b summary",
+        "unresolved_questions": ["What is the timeout?"],
+        "risks": [],
+        "assumptions_needed": [],
+    }
+
+    signals_in_order = iter([planning_signal, track_a_signal, track_b_signal])
+
+    def fake_run_stage(*args, **kwargs):
+        return next(signals_in_order)
+
+    with (
+        patch("orchestrator.orchestrate.run_stage", side_effect=fake_run_stage),
+        patch("orchestrator.orchestrate.expand_nodes", return_value={"track-a": "t1", "track-b": "t2"}),
+        patch("orchestrator.orchestrate.update_plan_md"),
+    ):
+        sig = _dispatch_tracks(stage, variables, run_folder, ctx)
+
+    assert sig["status"] == "passed"
+    assert set(sig["unresolved_questions"]) == {"Which auth flow to reuse?", "What is the timeout?"}
+    assert sig["risks"] == ["Rate limiter may need tuning"]
+    assert sig["assumptions_needed"] == ["Assume background jobs run in the existing worker"]
+
+
+def test_dispatch_tracks_returns_empty_lists_when_no_tracks_surface_items(tmp_path):
+    """A passing discovery with no unresolved items still emits the three keys
+    as empty lists, so alignment receives a well-formed contract."""
+    from orchestrator.orchestrate import _dispatch_tracks
+
+    stage = StageConfig(name="discovery", expansion=ExpansionKind.TRACKS)
+    run_folder = tmp_path / "run"
+    run_folder.mkdir()
+    ctx = _PipelineContext(
+        docs_root=str(tmp_path),
+        project="myproject",
+        project_log_path=str(tmp_path / "log.log"),
+        logger=MagicMock(),
+        branch="feat/test",
+        project_config={"repo-root": "/tmp"},
+        project_standards=[],
+        runners={},
+        agent_metadata={},
+    )
+    variables = {"run_folder": str(run_folder), "docs_root": str(tmp_path)}
+
+    planning_signal = {
+        "stage": "discovery-planning",
+        "status": "passed",
+        "tracks": [{"name": "track-a", "prompt_file": "/tmp/a.md", "focus": "x"}],
+    }
+    track_a_signal = {
+        "stage": "discovery-track-a",
+        "status": "passed",
+        "findings_file": "/tmp/a-findings.md",
+        "summary": "ok",
+    }
+
+    signals_in_order = iter([planning_signal, track_a_signal])
+
+    with (
+        patch("orchestrator.orchestrate.run_stage", side_effect=lambda *a, **k: next(signals_in_order)),
+        patch("orchestrator.orchestrate.expand_nodes", return_value={"track-a": "t1"}),
+        patch("orchestrator.orchestrate.update_plan_md"),
+    ):
+        sig = _dispatch_tracks(stage, variables, run_folder, ctx)
+
+    assert sig["unresolved_questions"] == []
+    assert sig["risks"] == []
+    assert sig["assumptions_needed"] == []
+
+
+# ── alignment policy gate (ADR-032) ───────────────────────────────────────────
+
+
+def test_apply_alignment_policy_noop_when_no_unresolved():
+    """No unresolved_remaining → signal passes through untouched, no log emitted."""
+    from orchestrator.orchestrate import _apply_alignment_policy
+    from orchestrator.profile import AlignmentPolicy
+
+    stage = StageConfig(name="alignment", alignment_policy=AlignmentPolicy(on_unresolved="block"))
+    sig = {"stage": "alignment", "status": "passed", "unresolved_remaining": []}
+    logger = MagicMock()
+    out = _apply_alignment_policy(stage, sig, logger)
+    assert out is sig
+    logger.log.assert_not_called()
+
+
+def test_apply_alignment_policy_warns_by_default_when_unresolved_remain():
+    """Default policy (None → warn) logs a warning but keeps status=passed."""
+    from orchestrator.orchestrate import _apply_alignment_policy
+
+    stage = StageConfig(name="alignment")  # no alignment_policy → default warn
+    sig = {
+        "stage": "alignment",
+        "status": "passed",
+        "unresolved_remaining": ["Decide caching strategy"],
+    }
+    logger = MagicMock()
+    out = _apply_alignment_policy(stage, sig, logger)
+    assert out["status"] == "passed"
+    logger.log.assert_called_once()
+    args = logger.log.call_args.args
+    assert args[0] == "alignment"
+    assert args[1] == "WARN"
+
+
+def test_apply_alignment_policy_blocks_when_policy_block_and_items_remain():
+    """policy=block + non-empty unresolved_remaining → signal flipped to blocked."""
+    from orchestrator.orchestrate import _apply_alignment_policy
+    from orchestrator.profile import AlignmentPolicy
+
+    stage = StageConfig(name="alignment", alignment_policy=AlignmentPolicy(on_unresolved="block"))
+    sig = {
+        "stage": "alignment",
+        "status": "passed",
+        "unresolved_remaining": ["Decide caching strategy", "Who owns retries?"],
+    }
+    logger = MagicMock()
+    out = _apply_alignment_policy(stage, sig, logger)
+    assert out["status"] == "blocked"
+    assert "2 unresolved items" in out["message"]
+    assert "Decide caching strategy" in out["message"]
+    # Original signal must not be mutated — tests downstream of the gate may
+    # still rely on the passed signal shape.
+    assert sig["status"] == "passed"
+    logger.log.assert_called_once()
+    args = logger.log.call_args.args
+    assert args[0] == "alignment"
+    assert args[1] == "ERROR"
+
+
+def test_apply_alignment_policy_noop_for_non_alignment_stage():
+    """The gate only fires for the alignment stage — other stages pass through."""
+    from orchestrator.orchestrate import _apply_alignment_policy
+    from orchestrator.profile import AlignmentPolicy
+
+    stage = StageConfig(name="specification", alignment_policy=AlignmentPolicy(on_unresolved="block"))
+    sig = {"stage": "specification", "status": "passed", "unresolved_remaining": ["irrelevant"]}
+    out = _apply_alignment_policy(stage, sig, MagicMock())
+    assert out is sig
+
+
+def test_apply_alignment_policy_noop_when_status_not_passed():
+    """Failed/blocked signals reach the normal halt path untouched."""
+    from orchestrator.orchestrate import _apply_alignment_policy
+    from orchestrator.profile import AlignmentPolicy
+
+    stage = StageConfig(name="alignment", alignment_policy=AlignmentPolicy(on_unresolved="block"))
+    sig = {"stage": "alignment", "status": "blocked", "message": "agent error"}
+    out = _apply_alignment_policy(stage, sig, MagicMock())
+    assert out is sig
+
+
+def test_pipeline_blocks_when_alignment_policy_is_block_and_items_remain(tmp_path):
+    """End-to-end gate: a passing alignment signal with unresolved_remaining
+    halts the pipeline at the alignment stage when policy is block."""
+    stages = [
+        {
+            "stage": "alignment",
+            "prompt": "prompts/alignment/autonomous.md",
+            "alignment_policy": {"on_unresolved": "block"},
+        },
+        {"stage": "specification", "prompt": "prompts/specification/default.md"},
+    ]
+    docs_root = _setup_docs(tmp_path, stages)
+    run_folder_path = tmp_path / "projects" / "myproject" / "workflow" / "runs" / "feat" / "2026-01-01-run-1"
+    run_folder_path.mkdir(parents=True)
+
+    alignment_passed_with_residue = {
+        "stage": "alignment",
+        "status": "passed",
+        "alignment_log": "/tmp/alignment-log.md",
+        "qa_pair_count": 3,
+        "qualifying_decisions": 1,
+        "accepted_assumptions": [],
+        "unresolved_remaining": ["Choose retry backoff strategy"],
+    }
+    spec_called = []
+
+    def fake_run_stage(stage, *args, **kwargs):
+        if stage == "alignment":
+            return alignment_passed_with_residue
+        spec_called.append(stage)
+        return SPEC_SIGNAL
+
+    with (
+        patch("orchestrator.orchestrate.run_stage", side_effect=fake_run_stage),
+        patch("orchestrator.orchestrate.update_plan_md") as mock_plan,
+        patch("orchestrator.orchestrate.subprocess.run", return_value=_git_ok()),
+        patch("orchestrator.orchestrate._resolve_run_folder", return_value=run_folder_path),
+    ):
+        with pytest.raises(SystemExit) as exc_info:
+            orchestrate.run_pipeline(docs_root, "myproject", "feature", "feat/test", str(tmp_path / "test.yaml"))
+
+    assert exc_info.value.code == 1
+    assert spec_called == [], "specification must not run when alignment is blocked by policy"
+    plan_calls = [(c.args[1], c.args[2]) for c in mock_plan.call_args_list]
+    assert ("alignment", "blocked") in plan_calls
+    state = yaml.safe_load((run_folder_path / "_state.yaml").read_text())
+    assert state.get("blocked_at") == "alignment"
+
+
+def test_pipeline_proceeds_when_alignment_policy_is_warn_and_items_remain(tmp_path):
+    """Default warn policy: pipeline continues past alignment even with leftovers."""
+    stages = [
+        {"stage": "alignment", "prompt": "prompts/alignment/autonomous.md"},
+        {"stage": "specification", "prompt": "prompts/specification/default.md"},
+    ]
+    docs_root = _setup_docs(tmp_path, stages)
+    run_folder_path = tmp_path / "projects" / "myproject" / "workflow" / "runs" / "feat" / "2026-01-01-run-1"
+    run_folder_path.mkdir(parents=True)
+
+    alignment_passed_with_residue = {
+        "stage": "alignment",
+        "status": "passed",
+        "alignment_log": "/tmp/alignment-log.md",
+        "qa_pair_count": 2,
+        "qualifying_decisions": 1,
+        "accepted_assumptions": ["Assume the new endpoint reuses existing auth middleware"],
+        "unresolved_remaining": ["Decide retry backoff"],
+    }
+    called_stages: list[str] = []
+
+    def fake_run_stage(stage, *args, **kwargs):
+        called_stages.append(stage)
+        if stage == "alignment":
+            return alignment_passed_with_residue
+        return SPEC_SIGNAL
+
+    with (
+        patch("orchestrator.orchestrate.run_stage", side_effect=fake_run_stage),
+        patch("orchestrator.orchestrate.update_plan_md"),
+        patch("orchestrator.orchestrate.subprocess.run", return_value=_git_ok()),
+        patch("orchestrator.orchestrate._resolve_run_folder", return_value=run_folder_path),
+    ):
+        orchestrate.run_pipeline(docs_root, "myproject", "feature", "feat/test", str(tmp_path / "test.yaml"))
+
+    assert called_stages == ["alignment", "specification"]
+    state = yaml.safe_load((run_folder_path / "_state.yaml").read_text())
+    assert state.get("blocked_at") is None or state.get("blocked_at") == ""
+
+
+def test_pipeline_proceeds_when_alignment_resolves_all_unresolved_via_assumption(tmp_path):
+    """Acceptance: discovery emits an unresolved question, alignment resolves it
+    with an accepted assumption, ``unresolved_remaining`` is empty, and the
+    pipeline advances under the default policy."""
+    stages = [
+        {"stage": "alignment", "prompt": "prompts/alignment/autonomous.md"},
+        {"stage": "specification", "prompt": "prompts/specification/default.md"},
+    ]
+    docs_root = _setup_docs(tmp_path, stages)
+    run_folder_path = tmp_path / "projects" / "myproject" / "workflow" / "runs" / "feat" / "2026-01-01-run-1"
+    run_folder_path.mkdir(parents=True)
+
+    alignment_resolved = {
+        "stage": "alignment",
+        "status": "passed",
+        "alignment_log": "/tmp/alignment-log.md",
+        "qa_pair_count": 1,
+        "qualifying_decisions": 0,
+        "accepted_assumptions": ["Assume background jobs run in the existing worker"],
+        "unresolved_remaining": [],
+    }
+    called_stages: list[str] = []
+
+    def fake_run_stage(stage, *args, **kwargs):
+        called_stages.append(stage)
+        if stage == "alignment":
+            return alignment_resolved
+        return SPEC_SIGNAL
+
+    with (
+        patch("orchestrator.orchestrate.run_stage", side_effect=fake_run_stage),
+        patch("orchestrator.orchestrate.update_plan_md"),
+        patch("orchestrator.orchestrate.subprocess.run", return_value=_git_ok()),
+        patch("orchestrator.orchestrate._resolve_run_folder", return_value=run_folder_path),
+    ):
+        orchestrate.run_pipeline(docs_root, "myproject", "feature", "feat/test", str(tmp_path / "test.yaml"))
+
+    assert called_stages == ["alignment", "specification"]

@@ -24,6 +24,8 @@ You are a discovery agent. Gather the factual context needed for alignment — d
 
 Do not make implementation decisions or recommendations. Annotate each finding with why it matters — leave all choices to alignment.
 
+**Important — do not hard-block on unresolved questions.** Unresolved questions, ambiguities, and risks are normal discovery outputs. They are inputs for alignment to resolve, not reasons to stop the pipeline. Reserve `status: blocked` for situations where discovery genuinely cannot proceed — e.g. the overview file is missing or unreadable. Do not use the word "blocker" to describe an unresolved decision; record it as an unresolved question or a risk instead.
+
 ## findings.md structure
 
 ```markdown
@@ -35,21 +37,21 @@ Do not make implementation decisions or recommendations. Annotate each finding w
 
 <Confirmed facts from code and docs. Each entry: fact + evidence (file, line, or doc reference).>
 
-## What Is Unclear or Ambiguous
+## Unresolved Questions
 
-<Open questions and gaps. Each entry: the question + where the ambiguity was observed.>
+<Open questions for alignment to resolve. One bullet per question.>
 
-## Risks and Unknowns
+## Risks
 
-<Anything that could derail the feature or require a difficult decision. Annotate with severity: Blocking / High / Medium / Low.>
+<Things that could derail the feature. Annotate severity: High / Medium / Low. Severity reflects impact if unaddressed — it does not imply the pipeline should stop.>
+
+## Assumptions Needed
+
+<Statements alignment may need to adopt as working assumptions to proceed (e.g. "assume the new endpoint reuses the existing auth middleware"). One bullet per assumption.>
 
 ## Existing Patterns and Constraints
 
 <Conventions, invariants, or prior decisions the implementation must respect.>
-
-## Suggested Questions for Alignment
-
-<Specific questions the alignment stage should resolve before specification begins.>
 ```
 
 ## Output
@@ -57,8 +59,10 @@ Do not make implementation decisions or recommendations. Annotate each finding w
 Emit exactly one line:
 
 ```
-SIGNAL_JSON: {"stage": "discovery", "status": "passed", "findings_files": ["{{ run_folder }}/discovery/findings.md"]}
+SIGNAL_JSON: {"stage": "discovery", "status": "passed", "findings_files": ["{{ run_folder }}/discovery/findings.md"], "unresolved_questions": [...], "risks": [...], "assumptions_needed": [...]}
 ```
+
+Each of `unresolved_questions`, `risks`, and `assumptions_needed` is an array of short strings — one entry per item from the matching section of `findings.md`. Empty arrays are allowed and expected when a section is empty.
 
 If you cannot proceed (missing overview, access error):
 
@@ -66,4 +70,4 @@ If you cannot proceed (missing overview, access error):
 SIGNAL_JSON: {"stage": "discovery", "status": "blocked", "message": "<reason>"}
 ```
 
-Required fields: `stage`, `status`. Required when blocked: `message`. `findings_files` is an array of paths written.
+Required fields: `stage`, `status`. Required when blocked: `message`. `findings_files` is an array of paths written. `unresolved_questions`, `risks`, and `assumptions_needed` are required when status is `passed`; pass `[]` when a category is empty.

@@ -16,6 +16,7 @@ class ExpansionKind(StrEnum):
 
 
 _WAVE_VERIFICATION_POLICIES: tuple[str, ...] = ("warn", "fix_then_retry", "block")
+_ALIGNMENT_POLICY_VALUES: tuple[str, ...] = ("warn", "block")
 
 
 @dataclass(frozen=True)
@@ -30,6 +31,26 @@ class WaveVerification:
 
 
 @dataclass(frozen=True)
+class AlignmentPolicy:
+    """Per-stage policy for handling unresolved items left over after alignment.
+
+    Discovery surfaces unresolved questions/risks/assumptions as structured
+    alignment inputs (ADR-032). Alignment resolves what it can and surfaces
+    anything still unresolved in ``unresolved_remaining``. This policy decides
+    what the orchestrator does with that residual list:
+
+    - ``warn`` (default) — log a warning and continue. Specification proceeds
+      under the accepted assumptions; remaining deferrals are visible in the
+      alignment log for follow-up.
+    - ``block`` — convert any non-empty ``unresolved_remaining`` into a blocked
+      pipeline. Use when policy requires every alignment input to be resolved
+      before specification begins.
+    """
+
+    on_unresolved: Literal["warn", "block"] = "warn"
+
+
+@dataclass(frozen=True)
 class StageConfig:
     name: str
     mode: Literal["auto", "interactive", "deterministic"] = "auto"
@@ -41,6 +62,7 @@ class StageConfig:
     slices_from_stage: str | None = None  # SLICES: which prior signal carries slice_files
     cwd_from_repo_root: bool = False
     wave_verification: WaveVerification | None = None
+    alignment_policy: AlignmentPolicy | None = None
     # Raw agent config; merged with the profile-level default at dispatch time so
     # profile parsing stays oblivious to the agent_runner module.
     agent: dict[str, object] | None = None
@@ -80,6 +102,7 @@ def _parse_stage(raw: dict) -> StageConfig:
         raise ValueError(f"Stage {raw.get('stage')!r}: 'agent' must be a mapping")
 
     wave_verification = _parse_wave_verification(raw, expansion)
+    alignment_policy = _parse_alignment_policy(raw)
 
     return StageConfig(
         name=raw["stage"],
@@ -92,6 +115,7 @@ def _parse_stage(raw: dict) -> StageConfig:
         slices_from_stage=raw.get("slices_from_stage"),
         cwd_from_repo_root=bool(raw.get("cwd_from_repo_root", False)),
         wave_verification=wave_verification,
+        alignment_policy=alignment_policy,
         agent=dict(agent) if agent else None,
     )
 
@@ -121,6 +145,27 @@ def _parse_wave_verification(raw: dict, expansion: ExpansionKind) -> WaveVerific
         enabled=bool(raw_wv.get("enabled", True)),
         on_failure=on_failure,
     )
+
+
+def _parse_alignment_policy(raw: dict) -> AlignmentPolicy | None:
+    """Parse the optional ``alignment_policy`` block on a stage.
+
+    Returns ``None`` for stages that do not declare a policy; the orchestrator
+    treats that as ``warn`` (the default) when this stage is the alignment
+    stage, and ignores it entirely on other stages. See ADR-032.
+    """
+    raw_ap = raw.get("alignment_policy")
+    if raw_ap is None:
+        return None
+    if not isinstance(raw_ap, dict):
+        raise ValueError(f"Stage {raw.get('stage')!r}: 'alignment_policy' must be a mapping")
+    on_unresolved = raw_ap.get("on_unresolved", "warn")
+    if on_unresolved not in _ALIGNMENT_POLICY_VALUES:
+        raise ValueError(
+            f"Stage {raw.get('stage')!r}: 'alignment_policy.on_unresolved' must be one of "
+            f"{list(_ALIGNMENT_POLICY_VALUES)}; got {on_unresolved!r}"
+        )
+    return AlignmentPolicy(on_unresolved=on_unresolved)
 
 
 def load_profile(profile: str | Path, bundled_dir: Path | None = None) -> Profile:

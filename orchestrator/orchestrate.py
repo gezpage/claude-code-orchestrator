@@ -340,6 +340,47 @@ def _dispatch_default(
     )
 
 
+def _apply_alignment_policy(stage: StageConfig, sig: dict, logger: OrchestratorLogger) -> dict:
+    """Gate the alignment stage's signal against the configured policy.
+
+    Discovery surfaces unresolved questions/risks/assumptions as structured
+    alignment inputs; alignment resolves what it can and reports leftover items
+    in ``unresolved_remaining``. This function inspects that list and either:
+
+    - logs a warning and returns the signal unchanged (``warn``, the default),
+    - or converts the signal to ``status: blocked`` (``block``).
+
+    The gate only fires for the ``alignment`` stage, and only when the signal
+    is currently passing — failed/blocked signals reach the normal halt path
+    untouched. Interactive alignment does not emit ``unresolved_remaining`` in
+    its signal (the artifact-existence check is the gate), so the policy is a
+    no-op there too. See ADR-032.
+    """
+    if stage.name != "alignment" or sig.get("status") != "passed":
+        return sig
+    remaining = sig.get("unresolved_remaining")
+    if not isinstance(remaining, list) or not remaining:
+        return sig
+    policy = stage.alignment_policy
+    on_unresolved = policy.on_unresolved if policy is not None else "warn"
+    n = len(remaining)
+    if on_unresolved == "block":
+        first = str(remaining[0])
+        preview = first if len(first) <= 120 else first[:117] + "..."
+        msg = f"alignment left {n} unresolved item{'s' if n != 1 else ''}: {preview}"
+        logger.log("alignment", "ERROR", f"alignment_policy=block — {msg}")
+        blocked = dict(sig)
+        blocked["status"] = "blocked"
+        blocked["message"] = msg
+        return blocked
+    logger.log(
+        "alignment",
+        "WARN",
+        f"alignment_policy=warn — {n} unresolved item{'s' if n != 1 else ''} after alignment; specification proceeds",
+    )
+    return sig
+
+
 def _dispatch_interactive(
     stage: StageConfig,
     variables: dict,
@@ -460,6 +501,9 @@ def _dispatch_tracks(
 
     aggregated_tracks = []
     findings_files = []
+    unresolved_questions: list[str] = []
+    risks: list[str] = []
+    assumptions_needed: list[str] = []
     for track in tracks:
         track_sig = track_results[track["name"]]
         ff = track_sig.get("findings_file", "")
@@ -472,12 +516,28 @@ def _dispatch_tracks(
         )
         if ff:
             findings_files.append(ff)
+        # Unresolved items are structured alignment inputs — flatten them across
+        # tracks so the alignment stage sees one merged list per category. The
+        # presence of an item is what alignment needs to resolve; deduping is
+        # left to alignment because two tracks may surface the same risk under
+        # different wording. See ADR-032.
+        for key, bucket in (
+            ("unresolved_questions", unresolved_questions),
+            ("risks", risks),
+            ("assumptions_needed", assumptions_needed),
+        ):
+            val = track_sig.get(key)
+            if isinstance(val, list):
+                bucket.extend(str(v) for v in val if v)
 
     return {
         "stage": stage.name,
         "status": "passed",
         "tracks": aggregated_tracks,
         "findings_files": findings_files,
+        "unresolved_questions": unresolved_questions,
+        "risks": risks,
+        "assumptions_needed": assumptions_needed,
     }
 
 
@@ -1336,6 +1396,8 @@ def run_pipeline(
                 logger.log(stage_name, "ERROR", f"unhandled exception in '{stage_name}':\n{traceback.format_exc()}")
                 raise
             elapsed = time.monotonic() - t0
+
+            sig = _apply_alignment_policy(stage, sig, logger)
 
             signals[stage_name] = sig
 

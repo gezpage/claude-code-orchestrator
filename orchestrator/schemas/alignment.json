@@ -8,7 +8,9 @@
     "message": {"type": "string"},
     "alignment_log": {"type": "string"},
     "qa_pair_count": {"type": "integer"},
-    "qualifying_decisions": {"type": "integer"}
+    "qualifying_decisions": {"type": "integer"},
+    "accepted_assumptions": {"type": "array", "items": {"type": "string"}},
+    "unresolved_remaining": {"type": "array", "items": {"type": "string"}}
   },
   "additionalProperties": true
 }
