@@ -9,10 +9,16 @@ structured, not to abstract over git.
 from __future__ import annotations
 
 import subprocess
+from typing import TypedDict
 
 
 class GitStateError(RuntimeError):
     """Raised when the orchestrator detects unexpected or unsafe git state."""
+
+
+class WorktreeEntry(TypedDict):
+    path: str
+    branch: str | None
 
 
 def _run(repo_root: str, *args: str) -> subprocess.CompletedProcess[str]:
@@ -43,17 +49,46 @@ def branch_exists(repo_root: str, branch: str) -> bool:
     return r.returncode == 0
 
 
-def worktree_registered(repo_root: str, path: str) -> bool:
-    """True iff `path` appears in `git worktree list` for the given repo."""
+def list_worktrees(repo_root: str) -> list[WorktreeEntry]:
+    """Parsed `git worktree list --porcelain`. Returns [{"path", "branch"}, ...].
+
+    `branch` is the short branch name (`refs/heads/X` → `X`) or `None` for
+    detached HEADs. Returns an empty list if git fails — callers treat
+    "couldn't ask git" the same as "registry empty" for cleanup purposes.
+    """
     r = _run(repo_root, "worktree", "list", "--porcelain")
     if r.returncode != 0:
-        return False
-    target = str(path).rstrip("/")
+        return []
+    worktrees: list[WorktreeEntry] = []
+    current: WorktreeEntry | None = None
     for line in r.stdout.splitlines():
         if line.startswith("worktree "):
-            if line[len("worktree ") :].rstrip("/") == target:
-                return True
-    return False
+            if current is not None:
+                worktrees.append(current)
+            current = {"path": line[len("worktree ") :].rstrip("/"), "branch": None}
+        elif line.startswith("branch ") and current is not None:
+            ref = line[len("branch ") :]
+            current["branch"] = ref[len("refs/heads/") :] if ref.startswith("refs/heads/") else ref
+        elif line == "" and current is not None:
+            worktrees.append(current)
+            current = None
+    if current is not None:
+        worktrees.append(current)
+    return worktrees
+
+
+def worktree_registered(repo_root: str, path: str) -> bool:
+    """True iff `path` appears in `git worktree list` for the given repo."""
+    target = str(path).rstrip("/")
+    return any(wt["path"] == target for wt in list_worktrees(repo_root))
+
+
+def worktree_for_branch(repo_root: str, branch: str) -> str | None:
+    """Path of the worktree currently checked out on `branch`, or None."""
+    for wt in list_worktrees(repo_root):
+        if wt["branch"] == branch:
+            return wt["path"]
+    return None
 
 
 def has_merge_conflicts(repo_root: str) -> bool:

@@ -270,6 +270,8 @@ def patch_run_stage(overrides: Mapping[str, Any] | None = None) -> Iterator[Fake
         patch("orchestrator.orchestrate.git_state.branch_exists", return_value=False),
         patch("orchestrator.orchestrate.git_state.current_branch", return_value="main"),
         patch("orchestrator.orchestrate.git_state.worktree_registered", return_value=False),
+        patch("orchestrator.orchestrate.git_state.list_worktrees", return_value=[]),
+        patch("orchestrator.orchestrate.git_state.worktree_for_branch", return_value=None),
         patch("orchestrator.orchestrate.git_state.has_merge_conflicts", return_value=False),
         patch("orchestrator.orchestrate.git_state.abort_merge"),
     ):

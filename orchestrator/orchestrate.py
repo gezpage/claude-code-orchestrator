@@ -173,15 +173,37 @@ def _create_worktree(repo_root: str, temp_branch: str, base_branch: str, logger,
 
 
 def _remove_worktree(repo_root: str, wt_path: str, temp_branch: str, logger, stage_name: str) -> None:
-    if git_state.worktree_registered(repo_root, wt_path):
+    """Clean up a slice worktree using git's registry as the source of truth.
+
+    Parallel runs have shown the orchestrator's recorded `wt_path` can drift
+    from what `git worktree list` actually holds — usually a stale entry on
+    the same branch under a different path. Match on either path OR branch,
+    remove every matching worktree first, then delete the branch only when
+    nothing still references it.
+    """
+    target = str(wt_path).rstrip("/")
+    registry = git_state.list_worktrees(repo_root)
+
+    matches = [wt["path"] for wt in registry if wt["path"] == target or wt["branch"] == temp_branch]
+    if not matches:
+        logger.log(stage_name, "INFO", f"worktree {wt_path} not registered — skipping remove")
+    for path in matches:
         r1 = subprocess.run(
-            ["git", "-C", repo_root, "worktree", "remove", "--force", wt_path], capture_output=True, text=True
+            ["git", "-C", repo_root, "worktree", "remove", "--force", path],
+            capture_output=True,
+            text=True,
         )
         if r1.returncode != 0:
-            logger.log(stage_name, "WARN", f"git worktree remove failed for {wt_path}: {r1.stderr.strip()}")
-    else:
-        logger.log(stage_name, "INFO", f"worktree {wt_path} not registered — skipping remove")
-    if git_state.branch_exists(repo_root, temp_branch):
+            logger.log(stage_name, "WARN", f"git worktree remove failed for {path}: {r1.stderr.strip()}")
+
+    holder = git_state.worktree_for_branch(repo_root, temp_branch)
+    if holder is not None:
+        logger.log(
+            stage_name,
+            "WARN",
+            f"branch '{temp_branch}' still held by worktree at {holder} — skipping branch delete (resolve manually)",
+        )
+    elif git_state.branch_exists(repo_root, temp_branch):
         r2 = subprocess.run(["git", "-C", repo_root, "branch", "-D", temp_branch], capture_output=True, text=True)
         if r2.returncode != 0:
             logger.log(stage_name, "WARN", f"git branch -D {temp_branch} failed: {r2.stderr.strip()}")
