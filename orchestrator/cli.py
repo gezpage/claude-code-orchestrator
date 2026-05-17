@@ -150,7 +150,19 @@ def resume(run_folder, docs_root):
     default=False,
     help="Overwrite existing files whose contents differ from the template.",
 )
-def bootstrap_cmd(docs_root, project, toolchain, commit, dry_run, force):
+@click.option(
+    "--enable-glossary",
+    "enable_glossary",
+    is_flag=False,
+    flag_value=bootstrap.DEFAULT_GLOSSARY_PATH,
+    default=None,
+    help=(
+        "Add a domain_language block to project.yaml (codebase-backed glossary, "
+        f"opt-in per ADR-027). Bare flag uses '{bootstrap.DEFAULT_GLOSSARY_PATH}'; "
+        "pass a value to override (relative to repo-root)."
+    ),
+)
+def bootstrap_cmd(docs_root, project, toolchain, commit, dry_run, force, enable_glossary):
     """Bootstrap a target repo for deterministic verification."""
     is_tty = _prompts.is_interactive()
 
@@ -220,16 +232,31 @@ def bootstrap_cmd(docs_root, project, toolchain, commit, dry_run, force):
             sys.exit(1)
         force = True
 
-    if not plan.new_files and not (force and conflicts):
-        click.echo("[orchestrator] Nothing to do — all template files are already present.")
-        return
+    plan_is_noop = not plan.new_files and not (force and conflicts)
+    if plan_is_noop:
+        click.echo("[orchestrator] Template files already present — checking optional extras.")
 
-    written = bootstrap.apply_plan(plan, force=force)
+    written = [] if plan_is_noop else bootstrap.apply_plan(plan, force=force)
     for path in written:
         click.echo(f"  wrote {path.relative_to(repo_root)}")
 
     if bootstrap.update_project_standards(project_yaml, toolchain):
         click.echo(f"  updated standards in {project_yaml}")
+
+    glossary_path = _resolve_glossary_choice(enable_glossary, is_tty)
+    if glossary_path:
+        added = bootstrap.update_project_domain_language(project_yaml, glossary_path)
+        if added:
+            click.echo(f"  added domain_language: {glossary_path} to {project_yaml}")
+            seeded = bootstrap.ensure_glossary_file(repo_root, glossary_path)
+            if seeded is not None:
+                click.echo(f"  seeded empty glossary at {seeded.relative_to(repo_root)}")
+                written.append(seeded)
+        else:
+            click.echo(f"  domain_language already configured in {project_yaml} — leaving as-is")
+
+    if not written:
+        return
 
     if commit is None:
         commit = is_tty and _prompts.ask_confirm("Commit bootstrap changes now?", default=False)
@@ -240,6 +267,29 @@ def bootstrap_cmd(docs_root, project, toolchain, commit, dry_run, force):
             click.echo(f"[orchestrator] Committed {sha}: chore: bootstrap orchestrator project config")
         except (OSError, ValueError) as exc:
             raise click.ClickException(f"commit failed: {exc}") from exc
+
+
+def _resolve_glossary_choice(cli_value: str | None, is_tty: bool) -> str | None:
+    """Decide whether to scaffold a domain_language block and at what path.
+
+    Returns the relative glossary path to use, or None to skip. ``cli_value``
+    is ``--enable-glossary``: ``None`` when the flag was not passed, the
+    default path when passed without a value, or a user-supplied path. When
+    the flag is absent we prompt in a TTY (default no) and skip silently
+    otherwise — opt-in per ADR-027.
+    """
+    if cli_value is not None:
+        return cli_value.strip() or bootstrap.DEFAULT_GLOSSARY_PATH
+    if not is_tty:
+        return None
+    if not _prompts.ask_confirm("Enable codebase-backed domain-language glossary?", default=False):
+        return None
+    path = _prompts.ask_text(
+        "Path under repo-root",
+        default=bootstrap.DEFAULT_GLOSSARY_PATH,
+        validate=lambda v: True if v.strip() else "Path is required",
+    )
+    return path.strip() or bootstrap.DEFAULT_GLOSSARY_PATH
 
 
 def _print_plan(plan: "bootstrap.BootstrapPlan") -> None:

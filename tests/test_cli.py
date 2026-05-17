@@ -412,7 +412,7 @@ def test_bootstrap_idempotent_second_run(tmp_path):
         ],
     )
     assert second.exit_code == 0, second.output
-    assert "Nothing to do" in second.output
+    assert "already present" in second.output
 
 
 def test_bootstrap_non_tty_missing_toolchain_errors(tmp_path):
@@ -451,6 +451,128 @@ def test_bootstrap_missing_project_yaml_errors(tmp_path):
     )
     assert result.exit_code != 0
     assert "project.yaml" in result.output
+
+
+def test_bootstrap_enable_glossary_default_path(tmp_path):
+    docs_root, repo_root = _make_bootstrap_inputs(tmp_path)
+    result = CliRunner().invoke(
+        main,
+        [
+            "bootstrap",
+            "--docs-root",
+            str(docs_root),
+            "--project",
+            "myproject",
+            "--toolchain",
+            "python",
+            "--enable-glossary",
+            "--no-commit",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    import yaml as _yaml
+
+    project_yaml = docs_root / "projects" / "myproject" / "project.yaml"
+    data = _yaml.safe_load(project_yaml.read_text())
+    assert data["domain_language"] == {"path": "docs/glossary.md"}
+    # Seed glossary file written under repo-root, not docs-root.
+    assert (repo_root / "docs" / "glossary.md").is_file()
+    assert (repo_root / "docs" / "glossary.md").read_text() == "# Domain language\n"
+
+
+def test_bootstrap_enable_glossary_custom_path(tmp_path):
+    docs_root, repo_root = _make_bootstrap_inputs(tmp_path)
+    result = CliRunner().invoke(
+        main,
+        [
+            "bootstrap",
+            "--docs-root",
+            str(docs_root),
+            "--project",
+            "myproject",
+            "--toolchain",
+            "python",
+            "--enable-glossary=knowledge/lexicon.md",
+            "--no-commit",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    import yaml as _yaml
+
+    data = _yaml.safe_load((docs_root / "projects" / "myproject" / "project.yaml").read_text())
+    assert data["domain_language"] == {"path": "knowledge/lexicon.md"}
+    assert (repo_root / "knowledge" / "lexicon.md").is_file()
+
+
+def test_bootstrap_without_enable_glossary_does_not_touch_project_yaml(tmp_path):
+    docs_root, repo_root = _make_bootstrap_inputs(tmp_path)
+    result = CliRunner().invoke(
+        main,
+        [
+            "bootstrap",
+            "--docs-root",
+            str(docs_root),
+            "--project",
+            "myproject",
+            "--toolchain",
+            "python",
+            "--no-commit",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    import yaml as _yaml
+
+    data = _yaml.safe_load((docs_root / "projects" / "myproject" / "project.yaml").read_text())
+    # Strict opt-in: glossary is silently skipped when the flag is absent in a non-TTY run.
+    assert "domain_language" not in data
+    assert not (repo_root / "docs" / "glossary.md").exists()
+
+
+def test_bootstrap_enable_glossary_idempotent_on_second_run(tmp_path):
+    docs_root, repo_root = _make_bootstrap_inputs(tmp_path)
+    project_yaml = docs_root / "projects" / "myproject" / "project.yaml"
+    # First run scaffolds the block + seed file.
+    first = CliRunner().invoke(
+        main,
+        [
+            "bootstrap",
+            "--docs-root",
+            str(docs_root),
+            "--project",
+            "myproject",
+            "--toolchain",
+            "python",
+            "--enable-glossary",
+            "--no-commit",
+        ],
+    )
+    assert first.exit_code == 0, first.output
+    # The user has since written real content into the glossary.
+    (repo_root / "docs" / "glossary.md").write_text("# My glossary\n\n## Order\n\nA customer order.\n")
+    # Second run with a *different* glossary path must not change either the
+    # project.yaml block or the existing glossary file — opt-in is strictly
+    # additive and never silently moves a user's configured location.
+    second = CliRunner().invoke(
+        main,
+        [
+            "bootstrap",
+            "--docs-root",
+            str(docs_root),
+            "--project",
+            "myproject",
+            "--toolchain",
+            "python",
+            "--enable-glossary=other/spot.md",
+            "--no-commit",
+        ],
+    )
+    assert second.exit_code == 0, second.output
+    import yaml as _yaml
+
+    data = _yaml.safe_load(project_yaml.read_text())
+    assert data["domain_language"] == {"path": "docs/glossary.md"}
+    assert (repo_root / "docs" / "glossary.md").read_text() == "# My glossary\n\n## Order\n\nA customer order.\n"
+    assert not (repo_root / "other" / "spot.md").exists()
 
 
 def test_bootstrap_repo_root_missing_errors(tmp_path):

@@ -352,6 +352,52 @@ def apply_plan(plan: BootstrapPlan, *, force: bool = False) -> list[Path]:
     return written
 
 
+DEFAULT_GLOSSARY_PATH = "docs/glossary.md"
+
+
+def update_project_domain_language(project_yaml_path: Path, glossary_path: str) -> bool:
+    """Append a ``domain_language: { path: ... }`` block to project.yaml if absent.
+
+    Returns True iff project.yaml was modified. Idempotent — a re-run with an
+    existing ``domain_language`` key (even with a different path) is a no-op so
+    bootstrap never silently changes a user's configured glossary location.
+    """
+    rel = glossary_path.strip()
+    if not rel:
+        raise ValueError("glossary_path must be a non-empty string")
+    if not project_yaml_path.is_file():
+        return False
+    import yaml  # local import — keeps bootstrap stdlib-only for callers that skip this path
+
+    raw = project_yaml_path.read_text()
+    data = yaml.safe_load(raw) or {}
+    if isinstance(data.get("domain_language"), dict):
+        return False
+    sep = "" if raw.endswith("\n") else "\n"
+    block = yaml.safe_dump({"domain_language": {"path": rel}}, sort_keys=False)
+    project_yaml_path.write_text(raw + sep + block)
+    return True
+
+
+def ensure_glossary_file(repo_root: Path, glossary_path: str) -> Path | None:
+    """Seed an empty glossary at ``<repo_root>/<glossary_path>`` if it does not exist.
+
+    Returns the absolute path of the newly-created file, or None if a file
+    already lived there. The seed is a minimal markdown stub so the first run
+    does not log a "configured but canonical file not found" warning. Parent
+    directories are created as needed.
+    """
+    rel = glossary_path.strip()
+    if not rel:
+        raise ValueError("glossary_path must be a non-empty string")
+    target = (Path(repo_root) / rel).resolve()
+    if target.exists():
+        return None
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text("# Domain language\n")
+    return target
+
+
 def update_project_standards(project_yaml_path: Path, toolchain: str) -> bool:
     """Append the matching `standards:` entry to project.yaml if missing.
 

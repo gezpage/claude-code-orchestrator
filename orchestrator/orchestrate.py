@@ -362,6 +362,22 @@ def _maybe_warn_unbootstrapped(
     written = bootstrap.apply_plan(plan, force=bool(plan.conflicts))
     project_yaml = Path(docs_root) / "projects" / project / "project.yaml"
     bootstrap.update_project_standards(project_yaml, toolchain)
+    try:
+        if _prompts.ask_confirm("Enable codebase-backed domain-language glossary?", default=False):
+            glossary_path = (
+                _prompts.ask_text(
+                    "Path under repo-root",
+                    default=bootstrap.DEFAULT_GLOSSARY_PATH,
+                    validate=lambda v: True if v.strip() else "Path is required",
+                )
+                or bootstrap.DEFAULT_GLOSSARY_PATH
+            )
+            if bootstrap.update_project_domain_language(project_yaml, glossary_path):
+                seeded = bootstrap.ensure_glossary_file(repo_root_path, glossary_path)
+                if seeded is not None:
+                    written.append(seeded)
+    except _prompts.PromptNotAvailable:
+        pass
     for path in written:
         print(f"[orchestrator]   wrote {path}")  # noqa: T201
     if not written:
