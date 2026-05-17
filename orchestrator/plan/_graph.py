@@ -65,6 +65,12 @@ class Node:
     # ``Commit #abc1234`` line per commit. When the graph's ``pr`` node has a
     # URL set, the renderer upgrades these to clickable GitHub commit links.
     commits: list[str] = field(default_factory=list)
+    # When False, the renderer skips the ``{id}_prompt`` input partner for
+    # this node. Aggregate/container nodes (e.g. the PROMPTS-expansion parent
+    # ``review``) carry no prompt artifact of their own — their per-reviewer
+    # sub-nodes do — so without this flag the renderer would emit an empty
+    # input card with an unlinked ``Prompt`` placeholder. See issue #194.
+    materialize_prompt: bool = True
 
 
 @dataclass

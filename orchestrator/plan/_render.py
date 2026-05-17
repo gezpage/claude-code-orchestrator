@@ -181,12 +181,15 @@ def _aux_index(nodes: dict[str, Node]) -> dict[str, _Aux]:
 
     Only ``rect``-shape stage nodes get partners. Deterministic stages produce
     no prompt file, so their prompt input is suppressed; their panel still
-    renders (e.g. verification's verify.json artefact lands there).
+    renders (e.g. verification's verify.json artefact lands there). Aggregate
+    nodes that opt out via ``Node.materialize_prompt=False`` also lose their
+    prompt input — there is no prompt artifact to link to, and the prior
+    behaviour of rendering an unlinked ``Prompt`` placeholder was misleading.
     """
     result: dict[str, _Aux] = {}
     for nid, node in nodes.items():
         is_stage = node.shape == "rect" and nid not in {"Start", "Done"}
-        has_prompt = is_stage and node.mode != "deterministic"
+        has_prompt = is_stage and node.mode != "deterministic" and node.materialize_prompt
         has_panel = is_stage
         result[nid] = _Aux(has_prompt, has_panel)
     return result

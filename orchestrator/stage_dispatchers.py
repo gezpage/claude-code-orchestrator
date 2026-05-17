@@ -444,8 +444,13 @@ def _run_fix_verification_cycle(
     input, then re-runs deterministic verification. Returns the updated verification
     signal on success or a blocked signal if the fix makes no commits or re-verification
     still fails. See ADR-021.
+
+    Also injects a first-class ``fix_verification`` node into the plan graph so
+    the diagram and Run Summary reflect the remediation step instead of hiding
+    its artifacts in the "Other files" strip. See issue #194.
     """
     from orchestrator.orchestrate import _fmt_elapsed, run_deterministic_stage, run_stage
+    from orchestrator.plan import add_fix_verification_node, update_plan_md
 
     repo_root = variables.get("repo_root", "")
     verify_md_path = verify_sig.get("verify_md_path", "")
@@ -460,6 +465,14 @@ def _run_fix_verification_cycle(
         "repo_root": repo_root,
     }
 
+    fix_meta = ctx.agent_metadata.get("implementation", {}) or {}
+    add_fix_verification_node(
+        run_folder,
+        status="in_progress",
+        backend=fix_meta.get("backend") or "",
+        model=fix_meta.get("model") or "",
+    )
+
     before_head = review_cycle_mod._head_sha(repo_root)
     fix_t0 = time.monotonic()
     fix_sig = run_stage(
@@ -472,6 +485,7 @@ def _run_fix_verification_cycle(
         ctx.project_log_path,
         cwd=repo_root or None,
         runner=ctx.runner_for("implementation"),
+        node_id="fix_verification",
     )
     fix_elapsed = time.monotonic() - fix_t0
     fix_status = fix_sig.get("status", "unknown")
@@ -486,7 +500,20 @@ def _run_fix_verification_cycle(
     if fix_status != "passed" or not actual_hashes:
         msg = f"fix-verification made no commits (agent status={fix_status!r}, commits={actual_hashes!r})"
         ctx.logger.log("fix-verification", "ERROR", msg)
+        update_plan_md(run_folder, "fix_verification", "blocked", elapsed_secs=fix_elapsed)
         return {"stage": "fix-verification", "status": "blocked", "message": msg}
+
+    fix_sig_for_plan = dict(fix_sig)
+    fix_sig_for_plan["commit_hashes"] = actual_hashes
+    update_plan_md(
+        run_folder,
+        "fix_verification",
+        "passed",
+        elapsed_secs=fix_elapsed,
+        signal=fix_sig_for_plan,
+        impl_name="Default",
+        repo_root=repo_root or None,
+    )
 
     ctx.logger.log("verification", "INFO", "re-running verification after fix-verification")
     new_verify_sig = run_deterministic_stage("verification", repo_root, run_folder, ctx.project_log_path)

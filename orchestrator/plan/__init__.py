@@ -1,6 +1,6 @@
 from orchestrator.plan._constants import worst_status
 from orchestrator.plan._expand import expand_nodes
-from orchestrator.plan._fix import add_fix_cycle_node
+from orchestrator.plan._fix import add_fix_cycle_node, add_fix_verification_node
 from orchestrator.plan._init import init_plan_md
 from orchestrator.plan._update import (
     mark_pipeline_done,
@@ -15,6 +15,7 @@ from orchestrator.plan._update import (
 
 __all__ = [
     "add_fix_cycle_node",
+    "add_fix_verification_node",
     "expand_nodes",
     "init_plan_md",
     "mark_pipeline_done",

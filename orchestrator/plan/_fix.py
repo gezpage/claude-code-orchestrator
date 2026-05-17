@@ -1,11 +1,12 @@
-"""Fix-cycle node injection for review stages.
+"""Fix-cycle node injection for review and verification stages.
 
-Thread safety: add_fix_cycle_node acquires _plan_lock before delegating.
-_add_fix_cycle_node must NOT be called without holding the lock.
+Thread safety: public helpers acquire _plan_lock before delegating. Private
+helpers must NOT be called without holding the lock.
 """
 
 from pathlib import Path
 
+from orchestrator.plan._constants import _STATUS_CLASS
 from orchestrator.plan._graph import Edge, Node, Subgraph, load_graph, save_graph
 from orchestrator.plan._render import replace_mermaid_block
 from orchestrator.plan._update import _plan_lock
@@ -79,6 +80,80 @@ def _add_fix_cycle_node(run_folder: Path, cycle_num: int, reviewers: list[str]) 
     graph.edges.append(Edge(steps=[[fix_node_id], rerun_ids]))
     if downstream:
         graph.edges.append(Edge(steps=[rerun_ids, downstream]))
+
+    save_graph(run_folder, graph)
+    replace_mermaid_block(plan_path, graph)
+
+
+_FIX_VERIFICATION_NODE_ID = "fix_verification"
+_VERIFICATION_NODE_ID = "verification"
+
+
+def add_fix_verification_node(
+    run_folder: Path,
+    *,
+    status: str = "in_progress",
+    backend: str = "",
+    model: str = "",
+) -> None:
+    """Inject a first-class ``fix_verification`` node between ``verification``
+    and its downstream successor when a fix-verification cycle fires.
+
+    Without this, the fix-verification agent's prompt/output files land in the
+    "Other files" strip below the diagram and the workflow visually skips the
+    remediation step entirely. See issue #194.
+
+    Idempotent: re-calling with an existing node is a no-op so the helper can
+    be invoked safely on resume. Best-effort: silently no-ops when the plan,
+    graph, or verification node is missing.
+    """
+    with _plan_lock:
+        _add_fix_verification_node(run_folder, status=status, backend=backend, model=model)
+
+
+def _add_fix_verification_node(
+    run_folder: Path,
+    *,
+    status: str,
+    backend: str,
+    model: str,
+) -> None:
+    run_folder = Path(run_folder)
+    plan_path = run_folder / "plan.md"
+    if not plan_path.exists():
+        return
+    graph = load_graph(run_folder)
+    if graph is None or _VERIFICATION_NODE_ID not in graph.nodes:
+        return
+    if _FIX_VERIFICATION_NODE_ID in graph.nodes:
+        return
+
+    verify_node = graph.nodes[_VERIFICATION_NODE_ID]
+    css_class = _STATUS_CLASS.get(status, "pending")
+    graph.add_node(
+        Node(
+            id=_FIX_VERIFICATION_NODE_ID,
+            display="Fix Verification",
+            status=status,
+            css_class=css_class,
+            subgraph=verify_node.subgraph,
+            mode="auto",
+            stage_dir="fix-verification",
+            backend=backend,
+            model=model,
+        )
+    )
+
+    # Splice the new node between verification and every existing downstream
+    # successor of verification. We rewrite the first step (source) of edges
+    # that originate from a bare verification source; this preserves any
+    # multi-step / fan-out shape downstream while moving its anchor to
+    # fix_verification. Edges where verification appears as a target are left
+    # untouched.
+    for edge in graph.edges:
+        if edge.steps and edge.steps[0] == [_VERIFICATION_NODE_ID]:
+            edge.steps[0] = [_FIX_VERIFICATION_NODE_ID]
+    graph.edges.append(Edge(steps=[[_VERIFICATION_NODE_ID], [_FIX_VERIFICATION_NODE_ID]]))
 
     save_graph(run_folder, graph)
     replace_mermaid_block(plan_path, graph)
