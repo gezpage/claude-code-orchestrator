@@ -53,9 +53,9 @@ def patched():
     """
     with (
         patch("orchestrator.orchestrate._create_branch") as cb,
-        patch("orchestrator.orchestrate._create_worktree", return_value="/tmp/wt") as cwt,
-        patch("orchestrator.orchestrate._remove_worktree") as rwt,
-        patch("orchestrator.orchestrate._merge_worktree_branch") as mwt,
+        patch("orchestrator.slice_dispatcher._create_worktree", return_value="/tmp/wt") as cwt,
+        patch("orchestrator.slice_dispatcher._remove_worktree") as rwt,
+        patch("orchestrator.slice_dispatcher._merge_worktree_branch") as mwt,
         patch("orchestrator.orchestrate.expand_nodes"),
         patch("orchestrator.orchestrate.update_plan_md"),
         patch("orchestrator.orchestrate.run_stage") as rs,
