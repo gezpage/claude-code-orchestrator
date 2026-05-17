@@ -136,13 +136,13 @@ def test_update_project_standards_skips_when_already_present(tmp_path):
     assert changed is False
 
 
-def test_update_project_standards_skips_php(tmp_path):
-    # PHP is intentionally absent from STANDARDS_FOR_TOOLCHAIN today.
+def test_update_project_standards_maps_php(tmp_path):
     project_yaml = tmp_path / "project.yaml"
     project_yaml.write_text("repo-root: /tmp/repo\n")
     changed = bootstrap.update_project_standards(project_yaml, "php")
-    assert changed is False
-    assert "standards" not in yaml.safe_load(project_yaml.read_text())
+    assert changed is True
+    data = yaml.safe_load(project_yaml.read_text())
+    assert data["standards"] == ["php"]
 
 
 def test_update_project_standards_maps_node_to_nodejs(tmp_path):
@@ -152,6 +152,104 @@ def test_update_project_standards_maps_node_to_nodejs(tmp_path):
     assert changed is True
     data = yaml.safe_load(project_yaml.read_text())
     assert data["standards"] == ["nodejs"]
+
+
+# ── update_project_domain_language ──────────────────────────────────────────
+
+
+def test_update_project_domain_language_appends_when_missing(tmp_path):
+    project_yaml = tmp_path / "project.yaml"
+    project_yaml.write_text("repo-root: /tmp/repo\nbase-branch: main\n")
+    changed = bootstrap.update_project_domain_language(project_yaml, "docs/glossary.md")
+    assert changed is True
+    data = yaml.safe_load(project_yaml.read_text())
+    assert data["domain_language"] == {"path": "docs/glossary.md"}
+    # Pre-existing keys are preserved.
+    assert data["repo-root"] == "/tmp/repo"
+    assert data["base-branch"] == "main"
+
+
+def test_update_project_domain_language_idempotent_when_block_exists(tmp_path):
+    project_yaml = tmp_path / "project.yaml"
+    project_yaml.write_text("repo-root: /tmp/repo\ndomain_language:\n  path: legacy/g.md\n")
+    changed = bootstrap.update_project_domain_language(project_yaml, "docs/glossary.md")
+    assert changed is False
+    # User's existing configured path must not be overwritten.
+    data = yaml.safe_load(project_yaml.read_text())
+    assert data["domain_language"]["path"] == "legacy/g.md"
+
+
+def test_update_project_domain_language_rejects_blank_path(tmp_path):
+    project_yaml = tmp_path / "project.yaml"
+    project_yaml.write_text("repo-root: /tmp/repo\n")
+    with pytest.raises(ValueError, match="non-empty"):
+        bootstrap.update_project_domain_language(project_yaml, "   ")
+
+
+def test_update_project_domain_language_missing_file_returns_false(tmp_path):
+    project_yaml = tmp_path / "absent.yaml"
+    assert bootstrap.update_project_domain_language(project_yaml, "docs/glossary.md") is False
+
+
+def test_update_project_domain_language_appends_newline_when_missing(tmp_path):
+    project_yaml = tmp_path / "project.yaml"
+    # No trailing newline — historical hand-edited files sometimes look like this.
+    project_yaml.write_text("repo-root: /tmp/repo")
+    changed = bootstrap.update_project_domain_language(project_yaml, "docs/glossary.md")
+    assert changed is True
+    data = yaml.safe_load(project_yaml.read_text())
+    assert data["repo-root"] == "/tmp/repo"
+    assert data["domain_language"] == {"path": "docs/glossary.md"}
+
+
+# ── ensure_glossary_file ────────────────────────────────────────────────────
+
+
+def test_ensure_glossary_file_creates_when_missing(tmp_path):
+    created = bootstrap.ensure_glossary_file(tmp_path, "docs/glossary.md")
+    assert created is not None
+    assert created == (tmp_path / "docs" / "glossary.md").resolve()
+    assert created.is_file()
+    assert created.read_text() == "# Domain language\n"
+
+
+def test_ensure_glossary_file_noop_when_present(tmp_path):
+    (tmp_path / "docs").mkdir()
+    target = tmp_path / "docs" / "glossary.md"
+    target.write_text("# Existing user content\n")
+    created = bootstrap.ensure_glossary_file(tmp_path, "docs/glossary.md")
+    assert created is None
+    # Existing content must survive untouched.
+    assert target.read_text() == "# Existing user content\n"
+
+
+def test_ensure_glossary_file_rejects_blank_path(tmp_path):
+    with pytest.raises(ValueError, match="non-empty"):
+        bootstrap.ensure_glossary_file(tmp_path, "")
+
+
+def test_ensure_glossary_file_rejects_parent_escape(tmp_path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    outside = tmp_path / "outside.md"
+    with pytest.raises(ValueError, match="escape attempt"):
+        bootstrap.ensure_glossary_file(repo, "../outside.md")
+    # Nothing was written above the repo root.
+    assert not outside.exists()
+
+
+def test_ensure_glossary_file_rejects_absolute_path(tmp_path):
+    with pytest.raises(ValueError, match="absolute path"):
+        bootstrap.ensure_glossary_file(tmp_path, "/etc/passwd")
+
+
+def test_assert_glossary_path_under_repo_returns_resolved_target(tmp_path):
+    target = bootstrap.assert_glossary_path_under_repo(tmp_path, "docs/g.md")
+    assert target == (tmp_path / "docs" / "g.md").resolve()
+
+
+def test_default_glossary_path_constant():
+    assert bootstrap.DEFAULT_GLOSSARY_PATH == "docs/glossary.md"
 
 
 # ── commit_changes ──────────────────────────────────────────────────────────
@@ -298,9 +396,10 @@ def test_maybe_warn_unbootstrapped_inline_decline_commit_exits_cleanly(tmp_path,
     # stop the run cleanly so the downstream base-branch sync does not fail on a
     # dirty tree (see PR #184 review).
     docs_root, repo_root = _bootstrap_inline_inputs(tmp_path)
+    # ask_confirm calls in order: bootstrap-now? → glossary? → commit?
     with (
         patch("orchestrator._prompts.is_interactive", return_value=True),
-        patch("orchestrator._prompts.ask_confirm", side_effect=[True, False]),
+        patch("orchestrator._prompts.ask_confirm", side_effect=[True, False, False]),
         patch("orchestrator._prompts.ask_select", return_value="python"),
         pytest.raises(SystemExit) as exc,
     ):
@@ -322,9 +421,10 @@ def test_maybe_warn_unbootstrapped_inline_commit_failure_exits_cleanly(tmp_path,
     # If the user agrees to commit but the commit fails (e.g. repo is not a git
     # repo), we still must not fall through to the base-branch sync.
     docs_root, repo_root = _bootstrap_inline_inputs(tmp_path)
+    # ask_confirm calls in order: bootstrap-now? → glossary? → commit?
     with (
         patch("orchestrator._prompts.is_interactive", return_value=True),
-        patch("orchestrator._prompts.ask_confirm", side_effect=[True, True]),
+        patch("orchestrator._prompts.ask_confirm", side_effect=[True, False, True]),
         patch("orchestrator._prompts.ask_select", return_value="python"),
         patch(
             "orchestrator.bootstrap.commit_changes",
