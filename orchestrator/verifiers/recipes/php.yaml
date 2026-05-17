@@ -1,0 +1,24 @@
+toolchain: php
+priority: 50
+
+# composer.json is the foundational marker for any modern PHP project that
+# wants reproducible deps and a test runner. We deliberately do not match on
+# phpunit.xml alone — a stray phpunit.xml in a Node or Python repo (e.g. a
+# fixture or scaffold) would otherwise mis-detect as PHP.
+markers:
+  - composer.json
+
+# Either composer-script style or direct phpunit invocation works; both are
+# offered as non-required so a PHP repo with one but not the other still
+# produces a coherent passed/warned report. The first to match its precondition
+# runs; the second remains as a fallback when only PHPUnit is installed.
+commands:
+  - id: composer-test
+    command: composer test
+    required: false
+    if_composer_script_exists: test
+
+  - id: phpunit
+    command: vendor/bin/phpunit
+    required: false
+    if_file_exists: vendor/bin/phpunit

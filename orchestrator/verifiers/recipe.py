@@ -18,6 +18,8 @@ class Command:
     command: str
     required: bool = True
     if_script_exists: str | None = None
+    if_composer_script_exists: str | None = None
+    if_file_exists: str | None = None
     timeout_seconds: int = _DEFAULT_TIMEOUT_SECONDS
 
 
@@ -36,6 +38,8 @@ def _parse_command(raw: dict) -> Command:
         command=raw["command"],
         required=bool(raw.get("required", True)),
         if_script_exists=raw.get("if_script_exists"),
+        if_composer_script_exists=raw.get("if_composer_script_exists"),
+        if_file_exists=raw.get("if_file_exists"),
         timeout_seconds=int(raw.get("timeout_seconds", _DEFAULT_TIMEOUT_SECONDS)),
     )
 

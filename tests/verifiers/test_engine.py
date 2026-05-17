@@ -268,6 +268,69 @@ def test_artifacts_show_baseline_comparison_section(tmp_path: Path):
     assert "Kind" in md
 
 
+# ---------------------------------------------------------------------------
+# PHP recipe — composer / phpunit precondition behaviour
+# ---------------------------------------------------------------------------
+
+
+def _make_php_repo(tmp_path: Path, composer: dict | None = None, with_phpunit_binary: bool = False) -> Path:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    if composer is not None:
+        (repo / "composer.json").write_text(json.dumps(composer))
+    if with_phpunit_binary:
+        bin_dir = repo / "vendor" / "bin"
+        bin_dir.mkdir(parents=True)
+        (bin_dir / "phpunit").write_text("#!/bin/sh\nexit 0\n")
+    return repo
+
+
+def test_php_repo_with_composer_test_script_runs_composer(tmp_path: Path):
+    repo = _make_php_repo(tmp_path, composer={"scripts": {"test": "phpunit"}})
+    run_folder = _make_run_folder(tmp_path)
+    with patch("orchestrator.verifiers.engine.subprocess.run", return_value=_completed(0)) as mock_run:
+        sig = verify(repo, run_folder)
+    assert sig["toolchain"] == "php"
+    invoked = [c.args[0] for c in mock_run.call_args_list]
+    assert "composer test" in invoked
+    # phpunit binary not present → that command is skipped, not invoked.
+    assert "vendor/bin/phpunit" not in invoked
+    assert sig["verification_status"] in {"passed", "warned"}
+
+
+def test_php_repo_without_composer_test_falls_back_to_phpunit(tmp_path: Path):
+    repo = _make_php_repo(tmp_path, composer={}, with_phpunit_binary=True)
+    run_folder = _make_run_folder(tmp_path)
+    with patch("orchestrator.verifiers.engine.subprocess.run", return_value=_completed(0)) as mock_run:
+        sig = verify(repo, run_folder)
+    invoked = [c.args[0] for c in mock_run.call_args_list]
+    # composer test must be skipped because scripts.test is absent.
+    assert "composer test" not in invoked
+    assert "vendor/bin/phpunit" in invoked
+    assert sig["verification_status"] in {"passed", "warned"}
+
+
+def test_php_repo_with_neither_skips_all_commands(tmp_path: Path):
+    repo = _make_php_repo(tmp_path, composer={})
+    run_folder = _make_run_folder(tmp_path)
+    with patch("orchestrator.verifiers.engine.subprocess.run") as mock_run:
+        sig = verify(repo, run_folder)
+    assert mock_run.call_count == 0
+    # Both commands skipped (non-required) — aggregate_status treats this as passed.
+    assert sig["toolchain"] == "php"
+    assert sig["verification_status"] == "passed"
+
+
+def test_php_phpunit_failure_marks_warned(tmp_path: Path):
+    """phpunit is non-required in the bundled recipe — a failure warns, not fails."""
+    repo = _make_php_repo(tmp_path, composer={}, with_phpunit_binary=True)
+    run_folder = _make_run_folder(tmp_path)
+    with patch("orchestrator.verifiers.engine.subprocess.run", return_value=_completed(1)):
+        sig = verify(repo, run_folder)
+    assert sig["verification_status"] == "warned"
+    assert "phpunit" in sig["failed_command_ids"]
+
+
 def test_no_baseline_path_means_no_classification(tmp_path: Path):
     """Calling verify without baseline_path leaves classification fields empty."""
     repo = _make_repo(tmp_path, {"name": "x", "version": "0.0.1", "scripts": {"test": "jest"}})

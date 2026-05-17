@@ -30,10 +30,22 @@ def test_bundled_go_recipe_loads():
     assert build.required
 
 
+def test_bundled_php_recipe_loads():
+    recipe = load_recipe_by_toolchain("php")
+    assert recipe.toolchain == "php"
+    assert "composer.json" in recipe.markers
+    composer_cmd = next(c for c in recipe.commands if c.id == "composer-test")
+    assert composer_cmd.command == "composer test"
+    assert composer_cmd.if_composer_script_exists == "test"
+    phpunit_cmd = next(c for c in recipe.commands if c.id == "phpunit")
+    assert phpunit_cmd.command == "vendor/bin/phpunit"
+    assert phpunit_cmd.if_file_exists == "vendor/bin/phpunit"
+
+
 def test_load_bundled_returns_all_recipes():
     recipes = load_bundled_recipes()
     names = {r.toolchain for r in recipes}
-    assert {"node", "go"} <= names
+    assert {"node", "go", "php"} <= names
 
 
 def test_unknown_toolchain_lists_available():

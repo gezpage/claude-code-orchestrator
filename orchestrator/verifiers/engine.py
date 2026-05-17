@@ -279,14 +279,27 @@ def _run_command(cmd: Command, repo_root: Path) -> CommandResult:
 
 
 def _evaluate_precondition(cmd: Command, repo_root: Path) -> str | None:
-    """Return a skip reason if the command's precondition is not met, else None.
+    """Return a skip reason if any of the command's preconditions is not met, else None.
 
-    Currently only `if_script_exists` is supported. It checks the Node `package.json`
-    scripts map. This is the one place that knows about Node's script convention —
-    a recipe-level concept, but the check itself is mechanical enough to live here.
-    Other ecosystems can add analogous fields without leaking ecosystem branching
-    into the engine's main flow.
+    Three preconditions are supported, each gating on a different ecosystem signal:
+    - ``if_script_exists`` — Node ``package.json`` ``scripts`` map.
+    - ``if_composer_script_exists`` — PHP ``composer.json`` ``scripts`` map.
+    - ``if_file_exists`` — any path relative to repo root.
+
+    All declared preconditions must pass; the first failure decides the reason.
+    The checks themselves are mechanical (read JSON, look up a key, stat a path)
+    so they live here rather than leaking ecosystem branches across the engine.
     """
+    reason = _check_node_script(cmd, repo_root)
+    if reason is not None:
+        return reason
+    reason = _check_composer_script(cmd, repo_root)
+    if reason is not None:
+        return reason
+    return _check_file_exists(cmd, repo_root)
+
+
+def _check_node_script(cmd: Command, repo_root: Path) -> str | None:
     if cmd.if_script_exists is None:
         return None
     manifest = repo_root / "package.json"
@@ -299,6 +312,30 @@ def _evaluate_precondition(cmd: Command, repo_root: Path) -> str | None:
     scripts = data.get("scripts") or {}
     if cmd.if_script_exists not in scripts:
         return f"no '{cmd.if_script_exists}' script in package.json"
+    return None
+
+
+def _check_composer_script(cmd: Command, repo_root: Path) -> str | None:
+    if cmd.if_composer_script_exists is None:
+        return None
+    manifest = repo_root / "composer.json"
+    if not manifest.exists():
+        return f"composer.json not found (needed for if_composer_script_exists: {cmd.if_composer_script_exists})"
+    try:
+        data = json.loads(manifest.read_text())
+    except json.JSONDecodeError:
+        return "composer.json is not valid JSON"
+    scripts = data.get("scripts") or {}
+    if cmd.if_composer_script_exists not in scripts:
+        return f"no '{cmd.if_composer_script_exists}' script in composer.json"
+    return None
+
+
+def _check_file_exists(cmd: Command, repo_root: Path) -> str | None:
+    if cmd.if_file_exists is None:
+        return None
+    if not (repo_root / cmd.if_file_exists).exists():
+        return f"file not found: {cmd.if_file_exists}"
     return None
 
 
