@@ -1,7 +1,7 @@
 from pathlib import Path
 from unittest.mock import patch
 
-from orchestrator.standards import _extract_h1, _strip_frontmatter, discover, load
+from orchestrator.standards import _canonical, _extract_h1, _strip_frontmatter, discover, load
 
 
 def _make_skill(skills_dir: Path, identifier: str, content: str) -> None:
@@ -14,6 +14,11 @@ GENERAL_CONTENT = "---\nname: harsh-general-engineering-standards\ndescription: 
 PHP_CONTENT = (
     "---\nname: harsh-php-engineering-standards\ndescription: PHP rules.\n---\n\n# PHP Standards\n\nUse strict_types.\n"
 )
+GO_CONTENT = "---\nname: harsh-go-engineering-standards\ndescription: Go rules.\n---\n\n# Go Standards\n\nUse gofmt.\n"
+NODEJS_CONTENT = (
+    "---\nname: harsh-nodejs-engineering-standards\ndescription: Node rules.\n---\n\n# Node Standards\n\nUse npm.\n"
+)
+TYPESCRIPT_CONTENT = "---\nname: harsh-typescript-engineering-standards\ndescription: TS rules.\n---\n\n# TypeScript Standards\n\nUse strict.\n"
 ORPHAN_DIR_CONTENT = "# Not a skill"  # dir without SKILL.md
 
 
@@ -179,3 +184,101 @@ class TestLoad:
         with patch("orchestrator.standards._SKILLS_DIR", tmp_path):
             result = load(["php"])
         assert "\n\n---\n\n" in result
+
+
+class TestCanonical:
+    def test_golang_aliases_to_go(self):
+        assert _canonical("golang") == "go"
+
+    def test_node_aliases_to_nodejs(self):
+        assert _canonical("node") == "nodejs"
+
+    def test_nodejs_unchanged(self):
+        assert _canonical("nodejs") == "nodejs"
+
+    def test_node_dot_js_aliases_to_nodejs(self):
+        assert _canonical("node.js") == "nodejs"
+
+    def test_javascript_aliases_to_nodejs(self):
+        assert _canonical("javascript") == "nodejs"
+
+    def test_js_aliases_to_nodejs(self):
+        assert _canonical("js") == "nodejs"
+
+    def test_ts_aliases_to_typescript(self):
+        assert _canonical("ts") == "typescript"
+
+    def test_py_aliases_to_python(self):
+        assert _canonical("py") == "python"
+
+    def test_canonical_names_unchanged(self):
+        for name in ["go", "python", "php", "typescript", "java", "nodejs"]:
+            assert _canonical(name) == name
+
+    def test_unknown_identifier_returned_lowercased(self):
+        assert _canonical("Rust") == "rust"
+
+    def test_mixed_case_alias_resolved(self):
+        assert _canonical("Golang") == "go"
+        assert _canonical("JavaScript") == "nodejs"
+
+
+class TestLoadAliases:
+    def test_golang_alias_resolves_to_go_skill(self, tmp_path):
+        _make_skill(tmp_path, "general", GENERAL_CONTENT)
+        _make_skill(tmp_path, "go", GO_CONTENT)
+        with patch("orchestrator.standards._SKILLS_DIR", tmp_path):
+            result = load(["golang"])
+        assert "Go Standards" in result
+
+    def test_node_alias_resolves_to_nodejs_skill(self, tmp_path):
+        _make_skill(tmp_path, "general", GENERAL_CONTENT)
+        _make_skill(tmp_path, "nodejs", NODEJS_CONTENT)
+        with patch("orchestrator.standards._SKILLS_DIR", tmp_path):
+            result = load(["node"])
+        assert "Node Standards" in result
+
+    def test_javascript_alias_resolves_to_nodejs_skill(self, tmp_path):
+        _make_skill(tmp_path, "general", GENERAL_CONTENT)
+        _make_skill(tmp_path, "nodejs", NODEJS_CONTENT)
+        with patch("orchestrator.standards._SKILLS_DIR", tmp_path):
+            result = load(["javascript"])
+        assert "Node Standards" in result
+
+    def test_ts_alias_resolves_to_typescript_skill(self, tmp_path):
+        _make_skill(tmp_path, "general", GENERAL_CONTENT)
+        _make_skill(tmp_path, "typescript", TYPESCRIPT_CONTENT)
+        with patch("orchestrator.standards._SKILLS_DIR", tmp_path):
+            result = load(["ts"])
+        assert "TypeScript Standards" in result
+
+    def test_alias_and_canonical_not_duplicated(self, tmp_path):
+        _make_skill(tmp_path, "general", GENERAL_CONTENT)
+        _make_skill(tmp_path, "go", GO_CONTENT)
+        with patch("orchestrator.standards._SKILLS_DIR", tmp_path):
+            result = load(["go", "golang"])
+        assert result.count("Go Standards") == 1
+
+    def test_unknown_identifier_warning_preserves_original_spelling(self, tmp_path, caplog):
+        _make_skill(tmp_path, "general", GENERAL_CONTENT)
+        with patch("orchestrator.standards._SKILLS_DIR", tmp_path):
+            import logging
+
+            with caplog.at_level(logging.WARNING, logger="orchestrator.standards"):
+                load(["RustOnSteroids"])
+        assert "RustOnSteroids" in caplog.text
+
+
+class TestCommittedSkills:
+    """Verify the real .claude/skills/ tree ships the canonical language skills."""
+
+    def test_canonical_language_skills_discoverable(self):
+        result = discover()
+        # These all live in this repo on disk; alias forms are tested above via _canonical.
+        for ident in ["general", "go", "java", "nodejs", "php", "python", "typescript"]:
+            assert ident in result, f"missing skill: harsh-{ident}-engineering-standards"
+
+    def test_committed_skills_use_compact_form(self):
+        result = discover()
+        for ident in ["general", "go", "java", "nodejs", "php", "python", "typescript"]:
+            assert result[ident].name == "COMPACT.md", f"skill {ident} should use COMPACT.md for prompt injection"

@@ -15,7 +15,10 @@ coverage.xml
 *.log
 .idea/
 .vscode/
-.claude/
+.claude/*
+!.claude/skills/
+.claude/skills/*
+!.claude/skills/harsh-*-engineering-standards/
 .env
 .env.*
 .DS_Store
