@@ -306,6 +306,72 @@ def _resolve_run_folder(docs_root: str, project: str, feature_path: str, resume:
     return paths.resolve_run_folder(docs_root, project, feature_slug, date_str, n)
 
 
+def _maybe_warn_unbootstrapped(
+    docs_root: str,
+    project: str,
+    repo_root: str,
+    resume: bool,
+) -> None:
+    """Warn (and optionally offer bootstrap) when the target repo has no toolchain markers.
+
+    A "likely unbootstrapped" repo is one with no `.cco.yaml` and no recipe match.
+    Deterministic verification would silently skip — that masquerades as success
+    and is the failure mode the bootstrap command exists to prevent. See ADR-037.
+
+    On resume we skip the check entirely; the warning is only useful at start.
+    The pipeline never aborts on this check — a verifier-less repo is a valid
+    state for prose-only work. We just refuse to be quiet about it.
+    """
+    if resume:
+        return
+    # Local import — `bootstrap` is otherwise unused by orchestrate.py and we want
+    # to keep its import graph (verifiers.recipe) lazy from this entrypoint.
+    from orchestrator import _prompts, bootstrap
+
+    repo_root_path = Path(repo_root)
+    if not bootstrap.looks_unbootstrapped(repo_root_path):
+        return
+
+    print(  # noqa: T201
+        "[orchestrator] [WARN] This project does not appear to be bootstrapped for "
+        "deterministic verification: no `.cco.yaml` and no recognised toolchain markers "
+        f"in {repo_root}. Verification will be skipped and `plan.md` can read as passing "
+        "even though no tests ran."
+    )
+    if not _prompts.is_interactive():
+        print(  # noqa: T201
+            "[orchestrator]   Run `orchestrator bootstrap --docs-root "
+            f"{docs_root} --project {project} --toolchain <python|node|typescript|php|go|java>` "
+            "before the next run to enable deterministic verification."
+        )
+        return
+
+    try:
+        if not _prompts.ask_confirm("Bootstrap this project now?", default=False):
+            return
+        toolchain = _prompts.ask_select("Toolchain", choices=list(bootstrap.SUPPORTED_TOOLCHAINS), default="python")
+    except _prompts.PromptNotAvailable:
+        return
+
+    plan = bootstrap.plan_bootstrap(repo_root_path, toolchain)
+    if plan.conflicts and not _prompts.ask_confirm(
+        f"{len(plan.conflicts)} file(s) differ from template — overwrite?", default=False
+    ):
+        print("[orchestrator] Bootstrap aborted. Continuing without verification.")  # noqa: T201
+        return
+    written = bootstrap.apply_plan(plan, force=bool(plan.conflicts))
+    project_yaml = Path(docs_root) / "projects" / project / "project.yaml"
+    bootstrap.update_project_standards(project_yaml, toolchain)
+    for path in written:
+        print(f"[orchestrator]   wrote {path}")  # noqa: T201
+    if written and _prompts.ask_confirm("Commit bootstrap changes?", default=True):
+        try:
+            sha = bootstrap.commit_changes(repo_root_path, written)
+            print(f"[orchestrator] Committed {sha}: chore: bootstrap orchestrator project config")  # noqa: T201
+        except (subprocess.CalledProcessError, ValueError, OSError) as exc:
+            print(f"[orchestrator] [WARN] commit failed: {exc}")  # noqa: T201
+
+
 def run_pipeline(
     docs_root: str,
     project: str,
@@ -334,6 +400,8 @@ def run_pipeline(
         sys.exit(f"[orchestrator] [ERROR] {exc}")
     # Re-read project config in case preflight persisted new defaults.
     project_config = _load_project_config(docs_root, project)
+
+    _maybe_warn_unbootstrapped(docs_root, project, project_config["repo-root"], resume)
 
     project_context = Path(docs_root) / "projects" / project / "context.md"
     if not project_context.exists():

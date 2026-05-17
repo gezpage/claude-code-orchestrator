@@ -15,6 +15,16 @@ def test_main_help():
     assert "run" in result.output
     assert "stage" in result.output
     assert "resume" in result.output
+    assert "bootstrap" in result.output
+
+
+def test_bootstrap_help():
+    result = CliRunner().invoke(main, ["bootstrap", "--help"])
+    assert result.exit_code == 0
+    assert "--toolchain" in result.output
+    assert "--dry-run" in result.output
+    assert "--force" in result.output
+    assert "--commit" in result.output
 
 
 def test_run_help():
@@ -267,3 +277,198 @@ def test_full_yaml_stage_order():
         "harvest",
     ]
     assert names == expected
+
+
+# ── bootstrap: writes the planned files ──────────────────────────────────────
+
+
+def _make_bootstrap_inputs(tmp_path: Path) -> tuple[Path, Path]:
+    """Create a docs-root with a project.yaml pointing at a fresh repo-root."""
+    docs_root = tmp_path / "docs"
+    repo_root = tmp_path / "repo"
+    (docs_root / "projects" / "myproject").mkdir(parents=True)
+    repo_root.mkdir()
+    (docs_root / "projects" / "myproject" / "project.yaml").write_text(f"repo-root: {repo_root}\n")
+    return docs_root, repo_root
+
+
+def test_bootstrap_python_writes_files(tmp_path):
+    docs_root, repo_root = _make_bootstrap_inputs(tmp_path)
+    result = CliRunner().invoke(
+        main,
+        [
+            "bootstrap",
+            "--docs-root",
+            str(docs_root),
+            "--project",
+            "myproject",
+            "--toolchain",
+            "python",
+            "--no-commit",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    assert (repo_root / ".cco.yaml").is_file()
+    assert "toolchain: python" in (repo_root / ".cco.yaml").read_text()
+    assert (repo_root / "pyproject.toml").is_file()
+    # project.yaml gained the matching standards entry.
+    project_yaml = docs_root / "projects" / "myproject" / "project.yaml"
+    import yaml as _yaml
+
+    assert _yaml.safe_load(project_yaml.read_text())["standards"] == ["python"]
+
+
+def test_bootstrap_dry_run_writes_nothing(tmp_path):
+    docs_root, repo_root = _make_bootstrap_inputs(tmp_path)
+    result = CliRunner().invoke(
+        main,
+        [
+            "bootstrap",
+            "--docs-root",
+            str(docs_root),
+            "--project",
+            "myproject",
+            "--toolchain",
+            "python",
+            "--dry-run",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    assert "dry-run" in result.output
+    assert not (repo_root / ".cco.yaml").exists()
+    assert not (repo_root / "pyproject.toml").exists()
+
+
+def test_bootstrap_existing_cco_yaml_blocks_without_force(tmp_path):
+    docs_root, repo_root = _make_bootstrap_inputs(tmp_path)
+    (repo_root / ".cco.yaml").write_text("verification:\n  toolchain: rust\n")
+    result = CliRunner().invoke(
+        main,
+        [
+            "bootstrap",
+            "--docs-root",
+            str(docs_root),
+            "--project",
+            "myproject",
+            "--toolchain",
+            "python",
+            "--no-commit",
+        ],
+    )
+    # Non-TTY (CliRunner) treats conflicts as a UsageError.
+    assert result.exit_code != 0
+    # The existing file is untouched.
+    assert "rust" in (repo_root / ".cco.yaml").read_text()
+
+
+def test_bootstrap_force_overwrites(tmp_path):
+    docs_root, repo_root = _make_bootstrap_inputs(tmp_path)
+    (repo_root / ".cco.yaml").write_text("verification:\n  toolchain: rust\n")
+    result = CliRunner().invoke(
+        main,
+        [
+            "bootstrap",
+            "--docs-root",
+            str(docs_root),
+            "--project",
+            "myproject",
+            "--toolchain",
+            "python",
+            "--force",
+            "--no-commit",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    assert "toolchain: python" in (repo_root / ".cco.yaml").read_text()
+
+
+def test_bootstrap_idempotent_second_run(tmp_path):
+    docs_root, repo_root = _make_bootstrap_inputs(tmp_path)
+    first = CliRunner().invoke(
+        main,
+        [
+            "bootstrap",
+            "--docs-root",
+            str(docs_root),
+            "--project",
+            "myproject",
+            "--toolchain",
+            "python",
+            "--no-commit",
+        ],
+    )
+    assert first.exit_code == 0, first.output
+    second = CliRunner().invoke(
+        main,
+        [
+            "bootstrap",
+            "--docs-root",
+            str(docs_root),
+            "--project",
+            "myproject",
+            "--toolchain",
+            "python",
+            "--no-commit",
+        ],
+    )
+    assert second.exit_code == 0, second.output
+    assert "Nothing to do" in second.output
+
+
+def test_bootstrap_non_tty_missing_toolchain_errors(tmp_path):
+    docs_root, _ = _make_bootstrap_inputs(tmp_path)
+    result = CliRunner().invoke(
+        main,
+        [
+            "bootstrap",
+            "--docs-root",
+            str(docs_root),
+            "--project",
+            "myproject",
+            "--no-commit",
+        ],
+    )
+    assert result.exit_code != 0
+    assert "toolchain" in result.output.lower()
+
+
+def test_bootstrap_missing_project_yaml_errors(tmp_path):
+    docs_root = tmp_path / "docs"
+    (docs_root / "projects" / "myproject").mkdir(parents=True)
+    # No project.yaml.
+    result = CliRunner().invoke(
+        main,
+        [
+            "bootstrap",
+            "--docs-root",
+            str(docs_root),
+            "--project",
+            "myproject",
+            "--toolchain",
+            "python",
+            "--no-commit",
+        ],
+    )
+    assert result.exit_code != 0
+    assert "project.yaml" in result.output
+
+
+def test_bootstrap_repo_root_missing_errors(tmp_path):
+    docs_root = tmp_path / "docs"
+    (docs_root / "projects" / "myproject").mkdir(parents=True)
+    (docs_root / "projects" / "myproject" / "project.yaml").write_text("repo-root: /no/such/path\n")
+    result = CliRunner().invoke(
+        main,
+        [
+            "bootstrap",
+            "--docs-root",
+            str(docs_root),
+            "--project",
+            "myproject",
+            "--toolchain",
+            "python",
+            "--no-commit",
+        ],
+    )
+    assert result.exit_code != 0
+    assert "repo-root" in result.output
