@@ -136,13 +136,13 @@ def test_update_project_standards_skips_when_already_present(tmp_path):
     assert changed is False
 
 
-def test_update_project_standards_skips_php(tmp_path):
-    # PHP is intentionally absent from STANDARDS_FOR_TOOLCHAIN today.
+def test_update_project_standards_maps_php(tmp_path):
     project_yaml = tmp_path / "project.yaml"
     project_yaml.write_text("repo-root: /tmp/repo\n")
     changed = bootstrap.update_project_standards(project_yaml, "php")
-    assert changed is False
-    assert "standards" not in yaml.safe_load(project_yaml.read_text())
+    assert changed is True
+    data = yaml.safe_load(project_yaml.read_text())
+    assert data["standards"] == ["php"]
 
 
 def test_update_project_standards_maps_node_to_nodejs(tmp_path):
@@ -226,6 +226,26 @@ def test_ensure_glossary_file_noop_when_present(tmp_path):
 def test_ensure_glossary_file_rejects_blank_path(tmp_path):
     with pytest.raises(ValueError, match="non-empty"):
         bootstrap.ensure_glossary_file(tmp_path, "")
+
+
+def test_ensure_glossary_file_rejects_parent_escape(tmp_path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    outside = tmp_path / "outside.md"
+    with pytest.raises(ValueError, match="escape attempt"):
+        bootstrap.ensure_glossary_file(repo, "../outside.md")
+    # Nothing was written above the repo root.
+    assert not outside.exists()
+
+
+def test_ensure_glossary_file_rejects_absolute_path(tmp_path):
+    with pytest.raises(ValueError, match="absolute path"):
+        bootstrap.ensure_glossary_file(tmp_path, "/etc/passwd")
+
+
+def test_assert_glossary_path_under_repo_returns_resolved_target(tmp_path):
+    target = bootstrap.assert_glossary_path_under_repo(tmp_path, "docs/g.md")
+    assert target == (tmp_path / "docs" / "g.md").resolve()
 
 
 def test_default_glossary_path_constant():

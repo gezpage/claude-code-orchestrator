@@ -34,12 +34,13 @@ SUPPORTED_TOOLCHAINS: tuple[str, ...] = (
 
 # Maps a bootstrap toolchain id to the harsh-*-engineering-standards identifier
 # that orchestrator.standards.discover() returns. "node" maps to "nodejs" because
-# the skill folder is `harsh-nodejs-engineering-standards`. "php" has no skill
-# today, so it is intentionally absent from this map.
+# the skill folder is `harsh-nodejs-engineering-standards`. Every supported
+# toolchain now has a committed standards skill (PR #185 added php).
 STANDARDS_FOR_TOOLCHAIN: dict[str, str] = {
     "python": "python",
     "node": "nodejs",
     "typescript": "typescript",
+    "php": "php",
     "go": "go",
     "java": "java",
 }
@@ -355,12 +356,36 @@ def apply_plan(plan: BootstrapPlan, *, force: bool = False) -> list[Path]:
 DEFAULT_GLOSSARY_PATH = "docs/glossary.md"
 
 
+def assert_glossary_path_under_repo(repo_root: Path, glossary_path: str) -> Path:
+    """Validate that ``glossary_path`` resolves under ``repo_root``.
+
+    The CLI advertises ``--enable-glossary[=PATH]`` as relative to repo-root.
+    A path like ``../outside.md`` or ``/etc/passwd`` would let bootstrap write
+    outside the target repo and break the downstream ``commit_changes`` call
+    (which computes paths relative to repo_root). Reject both forms early.
+
+    Returns the resolved absolute target so callers can reuse it.
+    """
+    rel = glossary_path.strip()
+    if not rel:
+        raise ValueError("glossary_path must be a non-empty string")
+    if Path(rel).is_absolute():
+        raise ValueError(f"glossary_path must be relative to repo-root, got absolute path: {rel}")
+    root = Path(repo_root).resolve()
+    target = (root / rel).resolve()
+    if not target.is_relative_to(root):
+        raise ValueError(f"glossary_path must resolve under repo-root, got escape attempt: {rel}")
+    return target
+
+
 def update_project_domain_language(project_yaml_path: Path, glossary_path: str) -> bool:
     """Append a ``domain_language: { path: ... }`` block to project.yaml if absent.
 
     Returns True iff project.yaml was modified. Idempotent — a re-run with an
     existing ``domain_language`` key (even with a different path) is a no-op so
     bootstrap never silently changes a user's configured glossary location.
+    Callers are expected to have validated containment via
+    ``assert_glossary_path_under_repo`` first (the CLI does this).
     """
     rel = glossary_path.strip()
     if not rel:
@@ -385,12 +410,11 @@ def ensure_glossary_file(repo_root: Path, glossary_path: str) -> Path | None:
     Returns the absolute path of the newly-created file, or None if a file
     already lived there. The seed is a minimal markdown stub so the first run
     does not log a "configured but canonical file not found" warning. Parent
-    directories are created as needed.
+    directories are created as needed. Raises ``ValueError`` when the path is
+    absolute or escapes repo-root — defensively re-validated here so a
+    programmatic caller cannot bypass the CLI-level check.
     """
-    rel = glossary_path.strip()
-    if not rel:
-        raise ValueError("glossary_path must be a non-empty string")
-    target = (Path(repo_root) / rel).resolve()
+    target = assert_glossary_path_under_repo(repo_root, glossary_path)
     if target.exists():
         return None
     target.parent.mkdir(parents=True, exist_ok=True)

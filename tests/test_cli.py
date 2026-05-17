@@ -528,6 +528,32 @@ def test_bootstrap_without_enable_glossary_does_not_touch_project_yaml(tmp_path)
     assert not (repo_root / "docs" / "glossary.md").exists()
 
 
+def test_bootstrap_enable_glossary_rejects_path_escape(tmp_path):
+    docs_root, repo_root = _make_bootstrap_inputs(tmp_path)
+    result = CliRunner().invoke(
+        main,
+        [
+            "bootstrap",
+            "--docs-root",
+            str(docs_root),
+            "--project",
+            "myproject",
+            "--toolchain",
+            "python",
+            "--enable-glossary=../escape.md",
+            "--no-commit",
+        ],
+    )
+    assert result.exit_code != 0
+    assert "escape attempt" in result.output
+    # Nothing was written outside the repo and the docs-side block was not added.
+    import yaml as _yaml
+
+    data = _yaml.safe_load((docs_root / "projects" / "myproject" / "project.yaml").read_text())
+    assert "domain_language" not in data
+    assert not (tmp_path / "escape.md").exists()
+
+
 def test_bootstrap_enable_glossary_idempotent_on_second_run(tmp_path):
     docs_root, repo_root = _make_bootstrap_inputs(tmp_path)
     project_yaml = docs_root / "projects" / "myproject" / "project.yaml"

@@ -372,10 +372,15 @@ def _maybe_warn_unbootstrapped(
                 )
                 or bootstrap.DEFAULT_GLOSSARY_PATH
             )
-            if bootstrap.update_project_domain_language(project_yaml, glossary_path):
-                seeded = bootstrap.ensure_glossary_file(repo_root_path, glossary_path)
-                if seeded is not None:
-                    written.append(seeded)
+            try:
+                bootstrap.assert_glossary_path_under_repo(repo_root_path, glossary_path)
+            except ValueError as exc:
+                print(f"[orchestrator] [WARN] glossary path rejected: {exc}")  # noqa: T201
+            else:
+                if bootstrap.update_project_domain_language(project_yaml, glossary_path):
+                    seeded = bootstrap.ensure_glossary_file(repo_root_path, glossary_path)
+                    if seeded is not None:
+                        written.append(seeded)
     except _prompts.PromptNotAvailable:
         pass
     for path in written:

@@ -245,6 +245,10 @@ def bootstrap_cmd(docs_root, project, toolchain, commit, dry_run, force, enable_
 
     glossary_path = _resolve_glossary_choice(enable_glossary, is_tty)
     if glossary_path:
+        try:
+            bootstrap.assert_glossary_path_under_repo(repo_root, glossary_path)
+        except ValueError as exc:
+            raise click.UsageError(str(exc)) from exc
         added = bootstrap.update_project_domain_language(project_yaml, glossary_path)
         if added:
             click.echo(f"  added domain_language: {glossary_path} to {project_yaml}")
