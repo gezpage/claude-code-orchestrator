@@ -8,6 +8,10 @@
     "message": {"type": "string"},
     "plan_file": {"type": "string"},
     "slice_files": {"type": "array", "items": {"type": "string"}},
+    "slice_inputs": {
+      "type": "array",
+      "items": {"type": "array", "items": {"type": "string"}}
+    },
     "slice_groups": {
       "type": "array",
       "items": {"type": "array", "items": {"type": "string"}}

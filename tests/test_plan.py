@@ -8,6 +8,7 @@ from orchestrator.plan import (
     mark_pr_blocked,
     rerender_plan_md,
     resolve_review_subnode_statuses,
+    set_node_inputs,
     set_pr_node,
     update_plan_md,
     worst_status,
@@ -1434,3 +1435,216 @@ def test_mark_pr_blocked_noop_when_no_pr_node(tmp_path):
     before = (run_folder / "plan.md").read_text()
     mark_pr_blocked(run_folder)
     assert (run_folder / "plan.md").read_text() == before
+
+
+# --- Input box redesign / commits / set_node_inputs ---
+
+
+def test_input_box_renders_title_and_prompt_link(tmp_path):
+    """Every input parallelogram must lead with the bold ``Input`` title and
+    surface the prompt link in its body when a ``-prompt.md`` exists."""
+    run_folder = _make_run_folder(tmp_path)
+    profile = _simple_profile("specification")
+    init_plan_md(run_folder, profile)
+    spec_dir = run_folder / "specification"
+    spec_dir.mkdir()
+    (spec_dir / "specification-prompt.md").write_text("p")
+    rerender_plan_md(run_folder)
+    content = (run_folder / "plan.md").read_text()
+    # Title appears inside the materialised _prompt node body.
+    assert "<span style='font-size:18px;font-weight:bold;'>Input</span>" in content
+    # Prompt link is still anchored to the prompt file, just inside the new body div.
+    assert (
+        "<a href='specification/specification-prompt.md' style='color:inherit;text-decoration:underline;'>Prompt</a>"
+    ) in content
+
+
+def test_input_box_omits_prompt_link_when_no_file(tmp_path):
+    """Before the prompt file is written the body should still show the literal
+    ``Prompt`` text inside the box — so the box is never empty."""
+    run_folder = _make_run_folder(tmp_path)
+    profile = _simple_profile("specification")
+    init_plan_md(run_folder, profile)
+    content = (run_folder / "plan.md").read_text()
+    assert "<span style='font-size:18px;font-weight:bold;'>Input</span>" in content
+    # No <a href=... -prompt.md> yet — body shows the literal word.
+    assert "Prompt</a>" not in content
+
+
+def test_set_node_inputs_surfaces_pills_inside_input_box(tmp_path):
+    """``set_node_inputs`` populates ``node.inputs`` and re-renders the diagram so
+    each input file appears as a pill-style link inside the input parallelogram."""
+    run_folder = _make_run_folder(tmp_path)
+    profile = _simple_profile("specification")
+    init_plan_md(run_folder, profile)
+    spec_dir = run_folder / "specification"
+    spec_dir.mkdir()
+    (spec_dir / "specification-prompt.md").write_text("p")
+    (spec_dir / "prd.md").write_text("prd")
+
+    set_node_inputs(run_folder, "specification", ["specification/prd.md"])
+
+    content = (run_folder / "plan.md").read_text()
+    # Pill must live INSIDE the input parallelogram declaration (between the
+    # ``specification_prompt[/`` opening and its closing ``"/]``).
+    start = content.index("specification_prompt[/")
+    end = content.index("/]", start)
+    box = content[start:end]
+    assert "<a href='specification/prd.md' style='display:inline-block;" in box
+    assert ">prd</a>" in box
+
+
+def test_set_node_inputs_resolves_docs_root_paths(tmp_path):
+    """Absolute paths that live in the docs root (outside the run folder)
+    should resolve to ``/#<docs-relative>`` URLs — the docs-site routing
+    convention — not to broken slashes."""
+    docs_root = tmp_path / "docs"
+    feature_dir = docs_root / "projects" / "myproj" / "features" / "myfeat"
+    feature_dir.mkdir(parents=True)
+    overview = feature_dir / "overview.md"
+    overview.write_text("# overview")
+
+    run_folder = docs_root / "projects" / "myproj" / "workflow" / "runs" / "myfeat" / "2026-05-09-run-1"
+    run_folder.mkdir(parents=True)
+
+    profile = _simple_profile("specification")
+    init_plan_md(run_folder, profile)
+    set_node_inputs(run_folder, "specification", [str(overview)])
+
+    content = (run_folder / "plan.md").read_text()
+    assert "/#projects/myproj/features/myfeat/overview.md" in content
+
+
+def test_set_node_inputs_noops_when_node_missing(tmp_path):
+    """Unknown stage ids must silently no-op so callers don't need to gate on
+    init state."""
+    run_folder = _make_run_folder(tmp_path)
+    profile = _simple_profile("specification")
+    init_plan_md(run_folder, profile)
+    before = (run_folder / "plan.md").read_text()
+    set_node_inputs(run_folder, "nonexistent", ["whatever"])
+    assert (run_folder / "plan.md").read_text() == before
+
+
+def test_panel_renders_commits_between_prose_and_pills(tmp_path):
+    """Commits stamped on ``Node.commits`` via a passed signal render as one
+    ``Commit #<sha>`` line per hash, placed between the prose summary and any
+    artifact pills (per the agreed visual order)."""
+    run_folder = _make_run_folder(tmp_path)
+    profile = _simple_profile("implementation")
+    init_plan_md(run_folder, profile)
+    impl_dir = run_folder / "implementation"
+    impl_dir.mkdir()
+    (impl_dir / "implementation-output.md").write_text("Implemented the slice.\n")
+    (impl_dir / "extra.md").write_text("extra")
+
+    update_plan_md(
+        run_folder,
+        "implementation",
+        "passed",
+        elapsed_secs=10,
+        signal={"commit_hashes": ["abc1234deadbeef", "def5678cafebabe"]},
+    )
+    content = (run_folder / "plan.md").read_text()
+    # Without a PR URL, commits are plain text (short SHAs).
+    assert "Commit #abc1234" in content
+    assert "Commit #def5678" in content
+    assert "Commit #abc1234deadbeef" not in content
+
+    # Order: prose ("Implemented the slice.") → commits → pill ("extra").
+    panel_start = content.index('implementation_panel["')
+    panel_end = content.index('"]', panel_start)
+    panel = content[panel_start:panel_end]
+    prose_idx = panel.index("Implemented the slice.")
+    commit_idx = panel.index("Commit #abc1234")
+    pill_idx = panel.index(">extra</a>")
+    assert prose_idx < commit_idx < pill_idx
+
+
+def test_panel_commits_link_to_github_when_pr_url_set(tmp_path):
+    """Once ``set_pr_node`` stamps a GitHub PR URL on the pr node, every panel's
+    commit lines upgrade from plain text to clickable links pointing at the
+    repo's ``/commit/<sha>`` page."""
+    run_folder = _make_run_folder(tmp_path)
+    profile = _simple_profile("implementation")
+    init_plan_md(run_folder, profile, create_pr=True)
+    impl_dir = run_folder / "implementation"
+    impl_dir.mkdir()
+    (impl_dir / "implementation-output.md").write_text("did stuff")
+    update_plan_md(
+        run_folder,
+        "implementation",
+        "passed",
+        elapsed_secs=10,
+        signal={"commit_hashes": ["abc1234deadbeef"]},
+    )
+    # Before PR creation: plain text.
+    assert "Commit #abc1234</a>" not in (run_folder / "plan.md").read_text()
+
+    set_pr_node(run_folder, "https://github.com/acme/widgets/pull/42")
+    content = (run_folder / "plan.md").read_text()
+    assert "https://github.com/acme/widgets/commit/abc1234" in content
+    # Link uses the body-link style (color:inherit + underline) so it does not
+    # compete with the green Output header.
+    assert "color:inherit;text-decoration:underline;'>Commit #abc1234</a>" in content
+
+
+def test_panel_no_commits_block_when_signal_omits_hashes(tmp_path):
+    """A passed signal without ``commit_hashes`` must not synthesise an empty
+    commits block (no ``Commit #`` text, no spurious ``<br/>`` runs)."""
+    run_folder = _make_run_folder(tmp_path)
+    profile = _simple_profile("specification")
+    init_plan_md(run_folder, profile)
+    spec_dir = run_folder / "specification"
+    spec_dir.mkdir()
+    (spec_dir / "specification-output.md").write_text("ok")
+    update_plan_md(run_folder, "specification", "passed", elapsed_secs=10, signal={})
+    assert "Commit #" not in (run_folder / "plan.md").read_text()
+
+
+def test_extract_input_paths_filters_to_existing_files(tmp_path):
+    """``_extract_input_paths`` walks the variables dict using the existing
+    *_path / *_file / *_paths / *_files convention, keeping only entries that
+    resolve to real files. Directories, missing files, and the prompt file
+    itself are skipped."""
+    from orchestrator.run_stage import _extract_input_paths
+
+    real_one = tmp_path / "a.md"
+    real_one.write_text("a")
+    real_two = tmp_path / "b.md"
+    real_two.write_text("b")
+    prompt = tmp_path / "stage-prompt.md"
+    prompt.write_text("p")
+    a_dir = tmp_path / "subdir"
+    a_dir.mkdir()
+
+    variables = {
+        "overview_md_path": str(real_one),
+        "context_path": str(real_two),
+        "missing_path": str(tmp_path / "ghost.md"),
+        "feature_path": str(a_dir),  # directory — must be skipped
+        "repo_root": str(tmp_path),  # also directory
+        "adr_paths": [str(real_one), str(tmp_path / "missing.md")],
+        "irrelevant": "not a path key",
+    }
+    inputs = _extract_input_paths(variables, exclude={prompt.resolve()})
+    assert str(real_one.resolve()) in inputs
+    assert str(real_two.resolve()) in inputs
+    assert all("ghost" not in p and "missing" not in p for p in inputs)
+    assert str(a_dir.resolve()) not in inputs
+    assert str(tmp_path.resolve()) not in inputs
+    # Real_one appears via both overview_md_path and adr_paths — dedup keeps one.
+    assert sum(1 for p in inputs if p == str(real_one.resolve())) == 1
+
+
+def test_extract_input_paths_excludes_the_prompt_file(tmp_path):
+    """The prompt file itself must never be surfaced as an input pill — it
+    already appears as the bold ``Prompt`` link inside the input box, and a
+    duplicate would just be noise."""
+    from orchestrator.run_stage import _extract_input_paths
+
+    prompt = tmp_path / "p.md"
+    prompt.write_text("p")
+    variables = {"prompt_path": str(prompt)}
+    inputs = _extract_input_paths(variables, exclude={prompt.resolve()})
+    assert inputs == []

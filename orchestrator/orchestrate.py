@@ -463,6 +463,8 @@ def _run_track(
         prompt_file=track["prompt_file"],
         schema_name="discovery_track",
         runner=ctx.runner_for(stage.name),
+        inputs=list(track.get("inputs") or []),
+        node_id=tid,
     )
     track_elapsed = time.monotonic() - t_start
     if tid:
@@ -489,6 +491,7 @@ def _dispatch_tracks(
         output_suffix="planning",
         schema_name="discovery_planning",
         runner=ctx.runner_for(stage.name),
+        node_id=f"{stage.name}_planning",
     )
     if planning_sig.get("status") != "passed":
         return planning_sig
@@ -582,6 +585,7 @@ def _run_slice(
     sub_id: str,
     cwd: str | None,
     standards: list | None,
+    inputs: list[str] | None = None,
 ) -> tuple[dict, float]:
     """Run a single implementation slice. Returns (signal, elapsed_secs)."""
     t0 = time.monotonic()
@@ -597,6 +601,7 @@ def _run_slice(
         cwd=cwd,
         standards=standards,
         runner=ctx.runner_for(stage_name),
+        inputs=inputs,
     )
     return sig, time.monotonic() - t0
 
@@ -974,9 +979,18 @@ def _dispatch_slices(
     prior_sig = signals.get(stage.slices_from_stage or "", {}) if stage.slices_from_stage else {}
     slice_files: list[str] = prior_sig.get("slice_files", [])
     slice_groups: list[list[str]] = prior_sig.get("slice_groups", [])
+    slice_inputs: list[list[str]] = prior_sig.get("slice_inputs", [])
 
     pre_count = len(slice_files)
-    slice_files = [sf for sf in slice_files if _SLICE_RE.search(Path(sf).name)]
+    # Pair each slice_files entry with its (optional) per-slice inputs list so
+    # filtering keeps them aligned by index. The planner emits slice_inputs in
+    # the same order as slice_files; older planner runs that omit it leave the
+    # list empty and we fall back to no input pills (the Prompt link still
+    # renders alone).
+    paired = list(zip(slice_files, slice_inputs + [[]] * (len(slice_files) - len(slice_inputs)), strict=False))
+    paired = [(sf, ins) for sf, ins in paired if _SLICE_RE.search(Path(sf).name)]
+    slice_files = [sf for sf, _ in paired]
+    slice_inputs_by_file: dict[str, list[str]] = {sf: list(ins) for sf, ins in paired}
     if len(slice_files) != pre_count:
         ctx.logger.log(
             stage.name, "WARN", f"filtered {pre_count - len(slice_files)} non-slice file(s) from slice_files"
@@ -1012,6 +1026,7 @@ def _dispatch_slices(
                 sub_id,
                 variables.get("repo_root"),
                 stage_standards,
+                inputs=slice_inputs_by_file.get(slice_file),
             )
             if sig.get("status") != "passed":
                 ctx.logger.log(
@@ -1078,6 +1093,7 @@ def _dispatch_slices(
                                 sub_id,
                                 wt_path,
                                 stage_standards,
+                                slice_inputs_by_file.get(slice_file),
                             )
                             futures2[fut] = (sub_id, slice_file)
 
@@ -1209,6 +1225,7 @@ def _dispatch_prompts(
             output_suffix=reviewer,
             cwd=variables.get("repo_root") or None,
             runner=ctx.runner_for(stage.name),
+            node_id=sub_id,
         )
         elapsed = time.monotonic() - t0
         # A reviewer sub-stage that did not pass (runner failure, missing signal,

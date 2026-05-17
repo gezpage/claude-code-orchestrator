@@ -16,6 +16,7 @@ You are a discovery planning agent. Analyse the feature request and design a set
    - `risk` — side-effects, breaking changes, failure modes
 3. For each track, write a prompt file to `$RUN_FOLDER/discovery/discovery-{name}-prompt.md`.
 4. For tracks that explore source code, include targeted `find` or `grep` instructions scoped to `$REPO_ROOT` — not the docs root.
+5. For each track, list the files the discovery agent will need to **read** (the feature overview, any source files referenced by path in the prompt). Emit this as the `inputs` array on the track object. Inputs only — omit files the track will create.
 
 **Track focus quality**: a good track focus is a specific question, not a topic. Prefer "what auth boundaries does this feature cross?" over "authentication". Prefer "which shared utilities does the checkout path touch?" over "shared code". Specific questions produce specific findings.
 
@@ -58,7 +59,7 @@ Replace `{name}` and `{track-name}` with the actual track name (lowercase, hyphe
 When all prompt files are written, emit:
 
 ```
-SIGNAL_JSON: {"stage": "discovery-planning", "status": "passed", "tracks": [{"name": "{name}", "prompt_file": "{{ run_folder }}/discovery/discovery-{name}-prompt.md", "focus": "<one sentence>"}]}
+SIGNAL_JSON: {"stage": "discovery-planning", "status": "passed", "tracks": [{"name": "{name}", "prompt_file": "{{ run_folder }}/discovery/discovery-{name}-prompt.md", "focus": "<one sentence>", "inputs": ["{{ docs_root }}/{{ feature_path }}/overview.md", "..."]}]}
 ```
 
 If you cannot proceed (missing overview, access error):
@@ -67,4 +68,4 @@ If you cannot proceed (missing overview, access error):
 SIGNAL_JSON: {"stage": "discovery-planning", "status": "blocked", "message": "<reason>"}
 ```
 
-Required fields: `stage`, `status`. When passed: `tracks` array with one entry per prompt written.
+Required fields: `stage`, `status`. When passed: `tracks` array with one entry per prompt written; each track carries `name`, `prompt_file`, `focus`, and `inputs` (the list of files the discovery agent will read).

@@ -28,6 +28,12 @@ from orchestrator.plan._helpers import _node_label
 # Files that should never appear in the diagram (plan.md is the diagram's host).
 _LEGEND_SKIP = {"plan.md"}
 _OVERVIEW_NODE_ID = "overview"
+_PR_NODE_ID = "pr"
+# Match the canonical GitHub PR URL form so we can derive a per-commit URL
+# (`<base>/commit/<sha>`) from the PR URL the orchestrator already stamps on the
+# pr stage's panel via ``set_pr_node``. SSH and non-GitHub remotes don't match
+# — those just fall through to plain text in the commits block.
+_GITHUB_PR_URL_RE = re.compile(r"^(https://github\.com/[^/]+/[^/]+)/pull/\d+")
 
 # Prompt-link styling lives inside the prompt parallelogram label. color:inherit
 # defers to the node's class fill so the link reads cleanly on the blue input
@@ -64,7 +70,9 @@ def render_block(graph: Graph, run_folder: Path | None = None) -> str:
     """
     node_files, legend_files = _scan_files(graph, run_folder) if run_folder else ({}, [])
     href_prefix = _href_prefix(run_folder) if run_folder else ""
+    docs_root_dir = _docs_root_from_run_folder(run_folder) if run_folder else None
     overview_url = _overview_url(run_folder) if run_folder else ""
+    commit_base_url = _commit_base_url(graph)
 
     aux = _aux_index(graph.nodes)
     has_overview = "Start" in graph.nodes
@@ -82,10 +90,14 @@ def render_block(graph: Graph, run_folder: Path | None = None) -> str:
     # reads top-to-bottom in chain order.
     for nid, node in graph.nodes.items():
         if aux[nid].has_prompt:
-            lines.append(f"    {_prompt_node_decl(nid, node_files.get(nid, []), href_prefix)}")
+            lines.append(
+                f"    {_prompt_node_decl(nid, node, node_files.get(nid, []), href_prefix, run_folder, docs_root_dir)}"
+            )
         lines.append(f"    {_node_decl(node)}")
         if aux[nid].has_panel:
-            lines.append(f"    {_panel_node_decl(nid, node, node_files.get(nid, []), href_prefix, run_folder)}")
+            lines.append(
+                f"    {_panel_node_decl(nid, node, node_files.get(nid, []), href_prefix, run_folder, commit_base_url)}"
+            )
 
     # Edges are emitted in fixed order: internal partner edges, Start→overview,
     # then per-pair user edges. Each edge gets a sequential mermaid index used
@@ -305,25 +317,63 @@ def _overview_node_decl(overview_url: str) -> str:
     return f"{_OVERVIEW_NODE_ID}[/\"<span style='{_TITLE_STYLE};'>{inner}</span>\"/]"
 
 
-def _prompt_node_decl(nid: str, files: list[Path], href_prefix: str) -> str:
+def _prompt_node_decl(
+    nid: str,
+    node: Node,
+    files: list[Path],
+    href_prefix: str,
+    run_folder: Path | None,
+    docs_root_dir: Path | None,
+) -> str:
+    """Render the input parallelogram: 'Input' title, Prompt link, file pills.
+
+    The body shares ``_PANEL_DIV_STYLE`` with the output panel so the two boxes
+    read as a matched pair on either side of the stage node. Input pills come
+    from ``node.inputs`` (stamped pre-dispatch by ``set_node_inputs``) and use
+    the same ``_PILL_STYLE`` as the output panel's artifact pills.
+    """
     prompt_file = next((f for f in files if f.name.endswith("-prompt.md")), None)
     if prompt_file is None:
-        inner = "Prompt"
+        prompt_link = "Prompt"
     else:
         url = _file_url(prompt_file, href_prefix)
-        inner = f"<a href='{url}' style='{_PROMPT_LINK_STYLE};'>Prompt</a>"
-    return f"{nid}_prompt[/\"<span style='{_TITLE_STYLE};'>{inner}</span>\"/]"
+        prompt_link = f"<a href='{url}' style='{_PROMPT_LINK_STYLE};'>Prompt</a>"
+
+    parts: list[str] = [
+        f"<span style='{_TITLE_STYLE};'>Input</span>",
+        "<br/><br/>",
+        prompt_link,
+    ]
+    if node.inputs:
+        parts.append("<br/><br/>")
+        parts.append(_join_input_pills(node.inputs, run_folder, href_prefix, docs_root_dir))
+
+    body = "".join(parts)
+    return f"{nid}_prompt[/\"<div style='{_PANEL_DIV_STYLE};'>{body}</div>\"/]"
 
 
-def _panel_node_decl(nid: str, node: Node, files: list[Path], href_prefix: str, run_folder: Path | None) -> str:
-    label = _panel_label(node, files, href_prefix, run_folder)
+def _panel_node_decl(
+    nid: str,
+    node: Node,
+    files: list[Path],
+    href_prefix: str,
+    run_folder: Path | None,
+    commit_base_url: str | None,
+) -> str:
+    label = _panel_label(node, files, href_prefix, run_folder, commit_base_url)
     return f'{nid}_panel["{label}"]'
 
 
 _NODE_URL_STYLE = "font-size:16px;font-weight:bold;color:#dcfce7;text-decoration:underline;font-family:sans-serif;word-break:break-all"
 
 
-def _panel_label(node: Node, files: list[Path], href_prefix: str, run_folder: Path | None) -> str:
+def _panel_label(
+    node: Node,
+    files: list[Path],
+    href_prefix: str,
+    run_folder: Path | None,
+    commit_base_url: str | None,
+) -> str:
     output_file = next((f for f in files if f.name.endswith("-output.md")), None)
     other_files = [f for f in files if not (f.name.endswith("-output.md") or f.name.endswith("-prompt.md"))]
 
@@ -334,11 +384,43 @@ def _panel_label(node: Node, files: list[Path], href_prefix: str, run_folder: Pa
         url = _file_url(output_file, href_prefix)
         parts.append(f"<a href='{url}' style='{_OUTPUT_HEADER_STYLE};'>Output</a><br/><br/>")
     parts.append(_panel_body(node, output_file, run_folder))
+    if node.commits:
+        parts.append("<br/><br/>")
+        parts.append(_render_commits(node.commits, commit_base_url))
     if other_files:
         parts.append("<br/><br/>")
         parts.append(_join_pills(other_files, href_prefix))
 
     return f"<div style='{_PANEL_DIV_STYLE};'>{''.join(parts)}</div>"
+
+
+def _render_commits(commits: list[str], commit_base_url: str | None) -> str:
+    """Render one ``Commit #<sha>`` line per commit, optionally hyperlinked.
+
+    Commits use the same ``_PROMPT_LINK_STYLE`` (color:inherit + underline) so
+    they read as native body links rather than competing with the green Output
+    header. When ``commit_base_url`` is absent (mid-run, before the PR is
+    created) we render plain text — ``set_pr_node`` triggers a re-render once
+    the URL lands, so the upgrade happens automatically.
+    """
+    lines: list[str] = []
+    for sha in commits:
+        if commit_base_url:
+            lines.append(f"<a href='{commit_base_url}/commit/{sha}' style='{_PROMPT_LINK_STYLE};'>Commit #{sha}</a>")
+        else:
+            lines.append(f"Commit #{sha}")
+    return "<br/>".join(lines)
+
+
+def _commit_base_url(graph: Graph) -> str | None:
+    """Derive the GitHub repo base URL (``https://github.com/owner/repo``) from
+    the pr node's PR URL, or return None when no PR has been opened yet.
+    """
+    pr_node = graph.nodes.get(_PR_NODE_ID)
+    if pr_node is None or not pr_node.url:
+        return None
+    m = _GITHUB_PR_URL_RE.match(pr_node.url)
+    return m.group(1) if m else None
 
 
 _PANEL_STATUS_TEXT = {
@@ -490,6 +572,80 @@ def _pill(file_path: Path, href_prefix: str) -> str:
     url = _file_url(file_path, href_prefix)
     display = _link_display(file_path.name)
     return f"<a href='{url}' style='{_PILL_STYLE};'>{display}</a>"
+
+
+def _join_input_pills(
+    inputs: list[str],
+    run_folder: Path | None,
+    href_prefix: str,
+    docs_root_dir: Path | None,
+) -> str:
+    """Render input pills, resolving each path to a URL anchored at run folder,
+    docs root, or falling back to a non-clickable label when neither applies.
+    """
+    return "".join(_input_pill(value, run_folder, href_prefix, docs_root_dir) for value in inputs)
+
+
+def _input_pill(
+    value: str,
+    run_folder: Path | None,
+    href_prefix: str,
+    docs_root_dir: Path | None,
+) -> str:
+    display = _link_display(Path(value).name)
+    url = _input_url(value, run_folder, href_prefix, docs_root_dir)
+    if url is None:
+        return f"<span style='{_PILL_STYLE};'>{display}</span>"
+    return f"<a href='{url}' style='{_PILL_STYLE};'>{display}</a>"
+
+
+def _input_url(
+    value: str,
+    run_folder: Path | None,
+    href_prefix: str,
+    docs_root_dir: Path | None,
+) -> str | None:
+    """Resolve an input path to a docs-site URL.
+
+    Tries, in order: relative-to-run-folder (use ``href_prefix``), then
+    relative-to-docs-root (use ``/#`` prefix). Anything else (e.g. files in
+    the repo root that the docs site does not host) returns None so the
+    caller renders a non-clickable label rather than a broken link.
+    """
+    path = Path(value)
+    if not path.is_absolute():
+        # Already relative — assume relative to run_folder (the original
+        # convention used by output pills).
+        return _file_url(path, href_prefix) if href_prefix else path.as_posix()
+    if run_folder is not None:
+        try:
+            rel = path.resolve().relative_to(Path(run_folder).resolve())
+        except ValueError:
+            pass
+        else:
+            return _file_url(rel, href_prefix) if href_prefix else rel.as_posix()
+    if docs_root_dir is not None:
+        try:
+            rel = path.resolve().relative_to(Path(docs_root_dir).resolve())
+        except ValueError:
+            pass
+        else:
+            return "/#" + rel.as_posix()
+    return None
+
+
+def _docs_root_from_run_folder(run_folder: Path) -> Path | None:
+    """Strip the conventional six-segment tail (``projects/.../runs/.../<run>``)
+    off the run folder to recover the docs-root directory. Returns None when
+    the layout doesn't match — same anchoring rule as ``_href_prefix``.
+    """
+    parts = Path(run_folder).resolve().parts
+    if len(parts) < 6:
+        return None
+    tail = parts[-6:]
+    if tail[0] != "projects" or tail[2] != "workflow" or tail[3] != "runs":
+        return None
+    return Path(*parts[:-6])
 
 
 def _file_url(file_path: Path, href_prefix: str) -> str:

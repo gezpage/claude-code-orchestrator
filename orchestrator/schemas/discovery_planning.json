@@ -14,7 +14,8 @@
         "properties": {
           "name": {"type": "string"},
           "prompt_file": {"type": "string"},
-          "focus": {"type": "string"}
+          "focus": {"type": "string"},
+          "inputs": {"type": "array", "items": {"type": "string"}}
         }
       }
     }
