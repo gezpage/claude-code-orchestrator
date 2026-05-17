@@ -130,6 +130,10 @@ def _dispatch_patches(verify_side_effect=None, verify_return=None, run_stage_sid
         else {"return_value": {"status": "passed", "commit_hashes": ["a1"]}}
     )
     e(patch("orchestrator.orchestrate.run_stage", **rs_kw))
+    # ``_wave_fix_then_retry`` lives in ``orchestrator.wave_verification`` and
+    # imports ``run_stage`` independently of ``orchestrate``'s binding, so the
+    # retry dispatch needs its own patch to stay intercepted. See issue #154.
+    e(patch("orchestrator.wave_verification.run_stage", **rs_kw))
     e(patch("orchestrator.orchestrate.update_plan_md"))
     e(patch("orchestrator.orchestrate.expand_nodes"))
     v_kw = {"side_effect": verify_side_effect} if verify_side_effect is not None else {"return_value": verify_return}
