@@ -93,21 +93,27 @@ def _missing_declared_artifacts(sig: dict) -> list[Path]:
     return [path for path in _declared_artifact_paths(sig) if not path.exists()]
 
 
-def _extract_input_paths(variables: dict, exclude: set[Path]) -> list[str]:
+def _extract_input_paths(variables: dict, prompt_text: str, exclude: set[Path]) -> list[str]:
     """Pick ``*_path`` / ``*_file`` / ``*_paths`` / ``*_files`` values from the
-    prompt-variables dict that resolve to existing files.
+    prompt-variables dict that resolve to existing files **and** actually appear
+    in the rendered prompt body.
 
     Mirrors the convention :func:`_declared_artifact_paths` already relies on:
     keys ending in ``_path`` / ``_file`` are scalar paths; ``_paths`` /
     ``_files`` are lists. Anything that isn't an existing file is skipped —
     so directory variables (e.g. ``feature_path``, ``repo_root``) and not-yet-
-    written downstream artifacts drop out automatically. Order matches first
-    encounter so the rendered pills follow the prompt's variable ordering.
+    written downstream artifacts drop out automatically. The prompt-body
+    intersection drops variables that are defined globally but not referenced
+    by this stage's prompt (e.g. ``project_context_path`` for decomposition /
+    implementation / review stages — see #186). Order matches first encounter
+    so the rendered pills follow the prompt's variable ordering.
     """
     seen: list[str] = []
     seen_set: set[str] = set()
 
     def add(raw: str) -> None:
+        if raw not in prompt_text:
+            return
         try:
             path = Path(raw)
         except (TypeError, ValueError):
@@ -248,7 +254,7 @@ def run_stage(
     if inputs is not None:
         resolved_inputs = inputs
     elif variables:
-        resolved_inputs = _extract_input_paths(variables, exclude={prompt_path.resolve()})
+        resolved_inputs = _extract_input_paths(variables, prompt, exclude={prompt_path.resolve()})
     else:
         resolved_inputs = []
     stage_node_id = node_id or output_suffix or stage
