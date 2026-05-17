@@ -8,6 +8,25 @@ _PREFIX = "harsh-"
 _SUFFIX = "-engineering-standards"
 _GENERAL_ID = "general"
 
+# Maps user-friendly spellings in `project.yaml` standards: entries to the
+# canonical skill identifier (the bit between `harsh-` and `-engineering-standards`
+# in the directory name). Canonical names match the verifier toolchain names so a
+# single string can drive both.
+_ALIASES = {
+    "golang": "go",
+    "node": "nodejs",
+    "node.js": "nodejs",
+    "javascript": "nodejs",
+    "js": "nodejs",
+    "ts": "typescript",
+    "py": "python",
+}
+
+
+def _canonical(identifier: str) -> str:
+    """Return the canonical skill identifier for a user-supplied name."""
+    return _ALIASES.get(identifier.lower(), identifier.lower())
+
 
 def discover() -> dict[str, Path]:
     """Return {identifier: path} for every harsh-*-engineering-standards dir found.
@@ -60,16 +79,20 @@ def load(requested: list[str]) -> str:
     Returns "" when no skills are found (safe — caller skips the empty block).
     """
     available = discover()
-    identifiers = []
+    identifiers: list[str] = []
+    seen: set[str] = set()
     if _GENERAL_ID in available:
         identifiers.append(_GENERAL_ID)
-    for ident in requested:
-        if ident == _GENERAL_ID:
+        seen.add(_GENERAL_ID)
+    for raw in requested:
+        ident = _canonical(raw)
+        if ident in seen:
             continue
         if ident in available:
             identifiers.append(ident)
+            seen.add(ident)
         else:
-            logger.warning("standards: no skill found for identifier '%s' — skipping", ident)
+            logger.warning("standards: no skill found for identifier '%s' — skipping", raw)
 
     sections = []
     for ident in identifiers:
