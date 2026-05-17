@@ -26,7 +26,9 @@ For commits, we considered emitting plain text vs hyperlinks. Hyperlinks need a 
 
 ## Decision
 
-The Input parallelogram is redesigned as a body block (sharing the panel's `_PANEL_DIV_STYLE`) with:
+The Input box switches from the classic parallelogram (`[/"..."/]`) to mermaid's `card` shape, and the Output box switches from the classic rectangle (`["..."]`) to mermaid's `doc` shape — both via the newer `nid@{ shape: ..., label: "..." }` declaration syntax. The card silhouette (notched corner) reads as the agent's "index card" of inputs, and the doc silhouette (wavy bottom edge) reads as the page the agent wrote. The pair gives the strongest semantic mapping ("card → process → document") while reclaiming the horizontal area the parallelogram's slanted sides were wasting on the now-multi-line input body. Requires mermaid ≥ 11.3 in the renderer.
+
+The Input box itself is a body block (sharing the panel's `_PANEL_DIV_STYLE`) with:
 
 1. An **"Input" title** in the same big-title span used elsewhere.
 2. A **"Prompt" link** (or literal text before the prompt file exists).

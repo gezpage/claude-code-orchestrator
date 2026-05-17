@@ -349,7 +349,8 @@ def _prompt_node_decl(
         parts.append(_join_input_pills(node.inputs, run_folder, href_prefix, docs_root_dir))
 
     body = "".join(parts)
-    return f"{nid}_prompt[/\"<div style='{_PANEL_DIV_STYLE};'>{body}</div>\"/]"
+    label = f"<div style='{_PANEL_DIV_STYLE};'>{body}</div>"
+    return f'{nid}_prompt@{{ shape: card, label: "{label}" }}'
 
 
 def _panel_node_decl(
@@ -361,7 +362,7 @@ def _panel_node_decl(
     commit_base_url: str | None,
 ) -> str:
     label = _panel_label(node, files, href_prefix, run_folder, commit_base_url)
-    return f'{nid}_panel["{label}"]'
+    return f'{nid}_panel@{{ shape: doc, label: "{label}" }}'
 
 
 _NODE_URL_STYLE = "font-size:16px;font-weight:bold;color:#dcfce7;text-decoration:underline;font-family:sans-serif;word-break:break-all"

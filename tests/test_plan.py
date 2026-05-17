@@ -1304,7 +1304,7 @@ def test_panel_body_passed_renders_done_not_pending(tmp_path):
     content = (run_folder / "plan.md").read_text()
     # Isolate the review parent's panel line so other pending nodes' panels
     # don't pollute the assertion.
-    review_panel_lines = [line for line in content.splitlines() if line.lstrip().startswith("review_panel[")]
+    review_panel_lines = [line for line in content.splitlines() if line.lstrip().startswith("review_panel@")]
     assert len(review_panel_lines) == 1
     panel = review_panel_lines[0]
     assert ">pending</div>" not in panel
@@ -1329,7 +1329,7 @@ def _seed_review_run_with_log(tmp_path, *, output_body: str, review_log: str | N
         (review_dir / "review-log.md").write_text(review_log)
     update_plan_md(run_folder, "review_tests", "passed", elapsed_secs=1.0)
     content = (run_folder / "plan.md").read_text()
-    panel_line = next(line for line in content.splitlines() if line.lstrip().startswith("review_tests_panel["))
+    panel_line = next(line for line in content.splitlines() if line.lstrip().startswith("review_tests_panel@"))
     return run_folder, panel_line
 
 
@@ -1381,8 +1381,8 @@ def test_review_panel_picks_correct_round_section(tmp_path):
     update_plan_md(run_folder, "review_tests", "passed", elapsed_secs=1.0)
     update_plan_md(run_folder, "review_tests_2", "passed", elapsed_secs=1.0)
     content = (run_folder / "plan.md").read_text()
-    round1 = next(line for line in content.splitlines() if line.lstrip().startswith("review_tests_panel["))
-    round2 = next(line for line in content.splitlines() if line.lstrip().startswith("review_tests_2_panel["))
+    round1 = next(line for line in content.splitlines() if line.lstrip().startswith("review_tests_panel@"))
+    round2 = next(line for line in content.splitlines() if line.lstrip().startswith("review_tests_2_panel@"))
     assert "First round verdict prose." in round1
     assert "Second round verdict prose." not in round1
     assert "Second round verdict prose." in round2
@@ -1485,10 +1485,10 @@ def test_set_node_inputs_surfaces_pills_inside_input_box(tmp_path):
     set_node_inputs(run_folder, "specification", ["specification/prd.md"])
 
     content = (run_folder / "plan.md").read_text()
-    # Pill must live INSIDE the input parallelogram declaration (between the
-    # ``specification_prompt[/`` opening and its closing ``"/]``).
-    start = content.index("specification_prompt[/")
-    end = content.index("/]", start)
+    # Pill must live INSIDE the input card declaration (between the
+    # ``specification_prompt@{`` opening and its closing ``" }``).
+    start = content.index("specification_prompt@{")
+    end = content.index('" }', start)
     box = content[start:end]
     assert "<a href='specification/prd.md' style='display:inline-block;" in box
     assert ">prd</a>" in box
@@ -1552,8 +1552,8 @@ def test_panel_renders_commits_between_prose_and_pills(tmp_path):
     assert "Commit #abc1234deadbeef" not in content
 
     # Order: prose ("Implemented the slice.") → commits → pill ("extra").
-    panel_start = content.index('implementation_panel["')
-    panel_end = content.index('"]', panel_start)
+    panel_start = content.index("implementation_panel@{")
+    panel_end = content.index('" }', panel_start)
     panel = content[panel_start:panel_end]
     prose_idx = panel.index("Implemented the slice.")
     commit_idx = panel.index("Commit #abc1234")
