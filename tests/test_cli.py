@@ -529,7 +529,7 @@ def test_bootstrap_without_enable_glossary_does_not_touch_project_yaml(tmp_path)
 
 
 def test_bootstrap_enable_glossary_rejects_path_escape(tmp_path):
-    docs_root, repo_root = _make_bootstrap_inputs(tmp_path)
+    docs_root, _repo_root = _make_bootstrap_inputs(tmp_path)
     result = CliRunner().invoke(
         main,
         [
