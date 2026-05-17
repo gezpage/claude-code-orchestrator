@@ -33,7 +33,7 @@ def test_bundled_go_recipe_loads():
 def test_load_bundled_returns_all_recipes():
     recipes = load_bundled_recipes()
     names = {r.toolchain for r in recipes}
-    assert {"node", "go", "python"} <= names
+    assert {"node", "go", "python", "java"} <= names
 
 
 def test_bundled_python_recipe_loads():

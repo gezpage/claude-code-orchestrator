@@ -18,6 +18,10 @@ class Command:
     command: str
     required: bool = True
     if_script_exists: str | None = None
+    # Skip command if the named file or glob pattern is absent from the repo root.
+    if_file_exists: str | None = None
+    # Skip command if the named file exists in the repo root (used to prefer wrapper scripts).
+    if_file_not_exists: str | None = None
     timeout_seconds: int = _DEFAULT_TIMEOUT_SECONDS
 
 
@@ -41,6 +45,8 @@ def _parse_command(raw: dict) -> Command:
         command=raw["command"],
         required=bool(raw.get("required", True)),
         if_script_exists=raw.get("if_script_exists"),
+        if_file_exists=raw.get("if_file_exists"),
+        if_file_not_exists=raw.get("if_file_not_exists"),
         timeout_seconds=int(raw.get("timeout_seconds", _DEFAULT_TIMEOUT_SECONDS)),
     )
 

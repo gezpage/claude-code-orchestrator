@@ -278,27 +278,45 @@ def _run_command(cmd: Command, repo_root: Path) -> CommandResult:
     )
 
 
+_GLOB_CHARS = frozenset("*?[")
+
+
+def _file_present(repo_root: Path, pattern: str) -> bool:
+    """Return True if `pattern` matches at least one path under `repo_root`.
+
+    Glob characters (`*`, `?`, `[`) trigger Path.glob; literal paths use .exists().
+    """
+    if any(ch in pattern for ch in _GLOB_CHARS):
+        return next(iter(repo_root.glob(pattern)), None) is not None
+    return (repo_root / pattern).exists()
+
+
 def _evaluate_precondition(cmd: Command, repo_root: Path) -> str | None:
     """Return a skip reason if the command's precondition is not met, else None.
 
-    Currently only `if_script_exists` is supported. It checks the Node `package.json`
-    scripts map. This is the one place that knows about Node's script convention —
-    a recipe-level concept, but the check itself is mechanical enough to live here.
-    Other ecosystems can add analogous fields without leaking ecosystem branching
-    into the engine's main flow.
+    Checks `if_script_exists` (Node package.json scripts), `if_file_exists` (file or
+    glob must be present), and `if_file_not_exists` (file must be absent — used to
+    prefer wrapper scripts over plain CLI commands). Other ecosystems can add analogous
+    fields without leaking ecosystem branching into the engine's main flow.
     """
-    if cmd.if_script_exists is None:
-        return None
-    manifest = repo_root / "package.json"
-    if not manifest.exists():
-        return f"package.json not found (needed for if_script_exists: {cmd.if_script_exists})"
-    try:
-        data = json.loads(manifest.read_text())
-    except json.JSONDecodeError:
-        return "package.json is not valid JSON"
-    scripts = data.get("scripts") or {}
-    if cmd.if_script_exists not in scripts:
-        return f"no '{cmd.if_script_exists}' script in package.json"
+    if cmd.if_script_exists is not None:
+        manifest = repo_root / "package.json"
+        if not manifest.exists():
+            return f"package.json not found (needed for if_script_exists: {cmd.if_script_exists})"
+        try:
+            data = json.loads(manifest.read_text())
+        except json.JSONDecodeError:
+            return "package.json is not valid JSON"
+        scripts = data.get("scripts") or {}
+        if cmd.if_script_exists not in scripts:
+            return f"no '{cmd.if_script_exists}' script in package.json"
+
+    if cmd.if_file_exists is not None and not _file_present(repo_root, cmd.if_file_exists):
+        return f"required file not found: {cmd.if_file_exists}"
+
+    if cmd.if_file_not_exists is not None and _file_present(repo_root, cmd.if_file_not_exists):
+        return f"skipped: {cmd.if_file_not_exists} present (prefer wrapper)"
+
     return None
 
 
