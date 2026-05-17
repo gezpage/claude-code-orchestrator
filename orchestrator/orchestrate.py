@@ -1456,11 +1456,15 @@ def run_pipeline(
     runners, agent_metadata = _build_stage_runners(profile)
     # Resolved here (not in the post-loop section) so the initial diagram can
     # stamp the executive_summary node with the runner that will write it.
-    finalisation_agent = resolve_agent_config(profile.agent, None)
-    agent_metadata.setdefault(
-        "executive_summary",
-        {"backend": finalisation_agent.backend, "model": finalisation_agent.model},
-    )
+    # When the profile does not declare executive_summary, this stays None and
+    # the finalisation step is skipped entirely. See ADR-036.
+    finalisation_agent: AgentConfig | None = None
+    if profile.executive_summary is not None:
+        finalisation_agent = resolve_agent_config(profile.agent, profile.executive_summary.agent)
+        agent_metadata.setdefault(
+            "executive_summary",
+            {"backend": finalisation_agent.backend, "model": finalisation_agent.model},
+        )
     init_plan_md(
         run_folder,
         profile,
@@ -1667,21 +1671,24 @@ def run_pipeline(
                 agent_config=pr_draft_agent_config,
             )
     finally:
-        # Always fires — pass, fail, or blocked. Failures here log a warning and
-        # never change the pipeline exit status. See ADR-028.
-        _finalize_summary(
-            run_folder=run_folder,
-            docs_root=docs_root,
-            project=project,
-            project_log_path=project_log_path,
-            feature_path=feature_path,
-            repo_root=project_config["repo-root"],
-            impl_branch=branch,
-            base_branch=preflight.base_branch,
-            pr_url=pr_url,
-            logger=logger,
-            agent_config=finalisation_agent,
-        )
+        # Always fires when the profile declared executive_summary — pass, fail,
+        # or blocked. Failures here log a warning and never change the pipeline
+        # exit status. Profiles that omit executive_summary skip this entirely.
+        # See ADR-028 and ADR-036.
+        if finalisation_agent is not None:
+            _finalize_summary(
+                run_folder=run_folder,
+                docs_root=docs_root,
+                project=project,
+                project_log_path=project_log_path,
+                feature_path=feature_path,
+                repo_root=project_config["repo-root"],
+                impl_branch=branch,
+                base_branch=preflight.base_branch,
+                pr_url=pr_url,
+                logger=logger,
+                agent_config=finalisation_agent,
+            )
 
 
 def _finalize_pr(

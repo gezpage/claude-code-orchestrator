@@ -69,6 +69,22 @@ class StageConfig:
 
 
 @dataclass(frozen=True)
+class ExecutiveSummary:
+    """Profile-level declaration that the executive_summary finalisation runs.
+
+    Presence of the ``executive_summary`` block in the profile YAML opts the
+    profile into post-pipeline summary generation. Absence disables it entirely
+    — no graph node, no dispatch, no warning. See ADR-036.
+
+    ``agent`` is an optional override merged on top of the profile-level
+    ``agent`` via ``resolve_agent_config`` so profiles can pin a cheaper model
+    for summary generation without affecting pipeline stages.
+    """
+
+    agent: dict[str, object] | None = None
+
+
+@dataclass(frozen=True)
 class Profile:
     name: str
     stages: tuple[StageConfig, ...]
@@ -77,6 +93,10 @@ class Profile:
     # Merged on top of `agent` via resolve_agent_config so profiles can pin a
     # cheaper model for PR drafting without affecting pipeline stages. See ADR-029.
     pr_draft_agent: dict[str, object] | None = None
+    # Opt-in declaration for the executive_summary finalisation stage.
+    # Profiles that omit this block do not run executive summary generation.
+    # See ADR-036.
+    executive_summary: ExecutiveSummary | None = None
 
 
 _BUNDLED_PROFILES_DIR = Path(__file__).parent / "profiles"
@@ -201,9 +221,30 @@ def load_profile(profile: str | Path, bundled_dir: Path | None = None) -> Profil
                 raise ValueError(f"Profile {raw.get('name')!r}: 'pr_draft.agent' must be a mapping")
             pr_draft_agent = dict(pr_draft_agent_raw)
 
+    executive_summary = _parse_executive_summary(raw)
+
     return Profile(
         name=raw.get("name", ""),
         stages=tuple(_parse_stage(s) for s in raw.get("stages", [])),
         agent=dict(profile_agent) if profile_agent else None,
         pr_draft_agent=pr_draft_agent,
+        executive_summary=executive_summary,
     )
+
+
+def _parse_executive_summary(raw: dict) -> ExecutiveSummary | None:
+    """Parse the optional profile-level ``executive_summary`` block.
+
+    Returns ``None`` when the block is absent — the profile is opting out and
+    the orchestrator skips summary generation entirely. An empty mapping
+    (``executive_summary: {}``) enables it with default agent resolution.
+    """
+    raw_es = raw.get("executive_summary")
+    if raw_es is None:
+        return None
+    if not isinstance(raw_es, dict):
+        raise ValueError(f"Profile {raw.get('name')!r}: 'executive_summary' must be a mapping")
+    agent_raw = raw_es.get("agent")
+    if agent_raw is not None and not isinstance(agent_raw, dict):
+        raise ValueError(f"Profile {raw.get('name')!r}: 'executive_summary.agent' must be a mapping")
+    return ExecutiveSummary(agent=dict(agent_raw) if agent_raw else None)

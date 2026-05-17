@@ -8,6 +8,8 @@ pr_draft:
   agent:
     model: claude-sonnet-4-6
 
+executive_summary: {}
+
 stages:
   - stage: specification
     prompt: prompts/specification/minimal.md

@@ -13,7 +13,7 @@ from orchestrator.plan import (
     update_plan_md,
     worst_status,
 )
-from orchestrator.profile import ExpansionKind, Profile, StageConfig
+from orchestrator.profile import ExecutiveSummary, ExpansionKind, Profile, StageConfig
 
 
 def _make_run_folder(tmp_path):
@@ -22,10 +22,14 @@ def _make_run_folder(tmp_path):
     return run_folder
 
 
-def _simple_profile(*stage_names) -> Profile:
+def _simple_profile(*stage_names, executive_summary: bool = True) -> Profile:
+    # Default-on mirrors the bundled-profile YAML convention (every shipped
+    # profile opts in to executive_summary). Tests asserting the opt-out path
+    # pass ``executive_summary=False`` to omit the block. See ADR-036.
     return Profile(
         name="test",
         stages=tuple(StageConfig(name=s, prompt=f"prompts/{s}/default.md") for s in stage_names),
+        executive_summary=ExecutiveSummary() if executive_summary else None,
     )
 
 
@@ -216,6 +220,7 @@ def test_init_plan_md_start_done_with_review(tmp_path):
             StageConfig(name="review", expansion=ExpansionKind.PROMPTS, prompts={"arch": "prompts/review/arch.md"}),
             StageConfig(name="harvest", prompt="prompts/harvest/default.md"),
         ),
+        executive_summary=ExecutiveSummary(),
     )
     init_plan_md(run_folder, profile)
     content = (run_folder / "plan.md").read_text()
@@ -1128,6 +1133,7 @@ def test_set_pr_node_splices_after_fix_cycle_predecessor(tmp_path):
                 prompts={"tests": "prompts/review/tests.md"},
             ),
         ),
+        executive_summary=ExecutiveSummary(),
     )
     init_plan_md(run_folder, profile)
     add_fix_cycle_node(run_folder, cycle_num=1, reviewers=["tests"])
