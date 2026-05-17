@@ -495,14 +495,28 @@ def test_typescript_repo_typecheck_skipped_when_script_absent(tmp_path: Path):
     assert sig["verification_status"] == "passed"
 
 
-def test_typescript_repo_missing_test_script_skips_not_fails(tmp_path: Path):
+def test_typescript_repo_missing_test_script_downgrades_to_warned(tmp_path: Path):
+    """A TypeScript repo with no `test` script ran zero deterministic commands.
+    `required_any_of` must downgrade the report to `warned` — a `passed` result
+    here is silent false confidence (same shape as the PHP fix in #173)."""
     repo = _make_ts_repo(tmp_path, {"name": "x", "version": "0.0.1", "scripts": {}})
     run_folder = _make_run_folder(tmp_path)
     with patch("orchestrator.verifiers.engine.subprocess.run") as mock_run:
         sig = verify(repo, run_folder)
     assert mock_run.call_count == 0
     assert sig["toolchain"] == "typescript"
-    assert sig["verification_status"] in {"passed", "warned"}
+    assert sig["verification_status"] == "warned"
+    assert "no eligible test command ran" in sig["summary"]
+
+
+def test_typescript_failing_test_marks_failed(tmp_path: Path):
+    """The test command failing is still a hard failure — required_any_of doesn't soften it."""
+    repo = _make_ts_repo(tmp_path, {"name": "x", "version": "0.0.1", "scripts": {"test": "vitest"}})
+    run_folder = _make_run_folder(tmp_path)
+    with patch("orchestrator.verifiers.engine.subprocess.run", return_value=_completed(1)):
+        sig = verify(repo, run_folder)
+    assert sig["verification_status"] == "failed"
+    assert "test" in sig["failed_command_ids"]
 
 
 def test_plain_js_repo_not_misdetected_as_typescript(tmp_path: Path):

@@ -83,6 +83,9 @@ def test_bundled_typescript_recipe_loads():
     assert not tc_cmd.required
     assert tc_cmd.if_script_exists == "typecheck"
     assert "node_manifest_sanity" in recipe.probes
+    # `test` is grouped under required_any_of so an all-skipped result downgrades
+    # to `warned` instead of silently passing.
+    assert recipe.required_any_of == ("test",)
 
 
 def test_bundled_python_recipe_loads():

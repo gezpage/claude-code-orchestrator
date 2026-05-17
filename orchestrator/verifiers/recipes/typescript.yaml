@@ -15,6 +15,15 @@ any_markers:
   - src/**/*.ts
   - src/**/*.tsx
 
+# `test` is the toolchain's required test command, but it is gated on a
+# matching `scripts.test` entry — so the engine skips (does not fail) it when
+# the script is missing. `required_any_of` escalates the all-skipped case to
+# `warned`: a TypeScript project with no `test` script ran no deterministic
+# verification at all, and a `passed` report there is silent false confidence
+# (the same misleading shape that motivated the PHP fix in #173).
+required_any_of:
+  - test
+
 commands:
   - id: test
     command: npm test
