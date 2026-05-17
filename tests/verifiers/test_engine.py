@@ -6,7 +6,13 @@ from unittest.mock import MagicMock, patch
 import pytest
 import yaml
 
-from orchestrator.verifiers.engine import VerificationError, verify
+from orchestrator.verifiers.engine import (
+    BASELINE_SUBDIR,
+    VerificationError,
+    baseline_path_for,
+    capture_baseline,
+    verify,
+)
 
 
 def _make_repo(tmp_path: Path, manifest: dict | None = None) -> Path:
@@ -155,3 +161,119 @@ def test_artifacts_contain_machine_and_human_summary(tmp_path: Path):
     md = (run_folder / "verification" / "VERIFY.md").read_text()
     assert "Verification Report" in md
     assert "node" in md
+
+
+# ---------------------------------------------------------------------------
+# Baseline vs net-new classification (ADR-033)
+# ---------------------------------------------------------------------------
+
+
+def test_capture_baseline_writes_to_baseline_subdir(tmp_path: Path):
+    """The baseline capture lands under baseline-verification/ so wave reports don't collide."""
+    repo = _make_repo(tmp_path, {"name": "x", "version": "0.0.1", "scripts": {"test": "jest"}})
+    run_folder = _make_run_folder(tmp_path)
+    with patch("orchestrator.verifiers.engine.subprocess.run", return_value=_completed(0)):
+        capture_baseline(repo, run_folder)
+    assert (run_folder / BASELINE_SUBDIR / "verify.json").exists()
+    assert baseline_path_for(run_folder) == run_folder / BASELINE_SUBDIR / "verify.json"
+
+
+def test_baseline_unchanged_failure_classified_as_baseline(tmp_path: Path):
+    """A failing command that already failed in baseline must be marked baseline, not net_new."""
+    repo = _make_repo(tmp_path, {"name": "x", "version": "0.0.1", "scripts": {"test": "jest"}})
+    run_folder = _make_run_folder(tmp_path)
+    # Baseline: test fails.
+    with patch("orchestrator.verifiers.engine.subprocess.run", return_value=_completed(1)):
+        capture_baseline(repo, run_folder)
+    # Wave run: same test still fails.
+    with patch("orchestrator.verifiers.engine.subprocess.run", return_value=_completed(1)):
+        sig = verify(repo, run_folder, baseline_path=baseline_path_for(run_folder))
+    assert sig["baseline_compared"] is True
+    assert "test" in sig["baseline_failed_command_ids"]
+    assert "test" not in sig["new_failed_command_ids"]
+    # Verification status reflects the actual command result; net-new is clean.
+    assert sig["verification_status"] == "failed"
+    assert sig["net_new_status"] == "passed"
+
+
+def test_net_new_failure_classified_as_net_new(tmp_path: Path):
+    """A command that passed in baseline but fails now must be flagged as a regression."""
+    repo = _make_repo(tmp_path, {"name": "x", "version": "0.0.1", "scripts": {"test": "jest"}})
+    run_folder = _make_run_folder(tmp_path)
+    # Baseline: test passes.
+    with patch("orchestrator.verifiers.engine.subprocess.run", return_value=_completed(0)):
+        capture_baseline(repo, run_folder)
+    # Wave: test fails.
+    with patch("orchestrator.verifiers.engine.subprocess.run", return_value=_completed(1)):
+        sig = verify(repo, run_folder, baseline_path=baseline_path_for(run_folder))
+    assert sig["baseline_compared"] is True
+    assert "test" in sig["new_failed_command_ids"]
+    assert "test" not in sig["baseline_failed_command_ids"]
+    assert sig["verification_status"] == "failed"
+    assert sig["net_new_status"] == "failed"
+
+
+def test_resolved_baseline_failure_listed(tmp_path: Path):
+    """A baseline failure that no longer fails appears in resolved_command_ids."""
+    repo = _make_repo(tmp_path, {"name": "x", "version": "0.0.1", "scripts": {"test": "jest"}})
+    run_folder = _make_run_folder(tmp_path)
+    with patch("orchestrator.verifiers.engine.subprocess.run", return_value=_completed(1)):
+        capture_baseline(repo, run_folder)
+    with patch("orchestrator.verifiers.engine.subprocess.run", return_value=_completed(0)):
+        sig = verify(repo, run_folder, baseline_path=baseline_path_for(run_folder))
+    assert sig["baseline_compared"] is True
+    assert "test" in sig["resolved_command_ids"]
+    assert sig["verification_status"] == "passed"
+    assert sig["net_new_status"] == "passed"
+
+
+def test_missing_baseline_falls_back_to_no_classification(tmp_path: Path):
+    """A missing baseline file must not raise — verify just runs without comparison."""
+    repo = _make_repo(tmp_path, {"name": "x", "version": "0.0.1", "scripts": {"test": "jest"}})
+    run_folder = _make_run_folder(tmp_path)
+    bogus = tmp_path / "does-not-exist.json"
+    with patch("orchestrator.verifiers.engine.subprocess.run", return_value=_completed(1)):
+        sig = verify(repo, run_folder, baseline_path=bogus)
+    assert sig["baseline_compared"] is False
+    assert sig["new_failed_command_ids"] == []
+    assert sig["baseline_failed_command_ids"] == []
+    # Without classification, net_new_status mirrors verification_status.
+    assert sig["net_new_status"] == sig["verification_status"] == "failed"
+
+
+def test_corrupt_baseline_falls_back_to_no_classification(tmp_path: Path):
+    """A malformed baseline file is treated as missing, never crashes the verifier."""
+    repo = _make_repo(tmp_path, {"name": "x", "version": "0.0.1", "scripts": {"test": "jest"}})
+    run_folder = _make_run_folder(tmp_path)
+    baseline = run_folder / BASELINE_SUBDIR / "verify.json"
+    baseline.parent.mkdir(parents=True)
+    baseline.write_text("{not valid json")
+    with patch("orchestrator.verifiers.engine.subprocess.run", return_value=_completed(1)):
+        sig = verify(repo, run_folder, baseline_path=baseline)
+    assert sig["baseline_compared"] is False
+
+
+def test_artifacts_show_baseline_comparison_section(tmp_path: Path):
+    """VERIFY.md surfaces the baseline-vs-net-new breakdown so reviewers see it directly."""
+    repo = _make_repo(tmp_path, {"name": "x", "version": "0.0.1", "scripts": {"test": "jest"}})
+    run_folder = _make_run_folder(tmp_path)
+    with patch("orchestrator.verifiers.engine.subprocess.run", return_value=_completed(1)):
+        capture_baseline(repo, run_folder)
+    with patch("orchestrator.verifiers.engine.subprocess.run", return_value=_completed(1)):
+        verify(repo, run_folder, baseline_path=baseline_path_for(run_folder))
+    md = (run_folder / "verification" / "VERIFY.md").read_text()
+    assert "Baseline Comparison" in md
+    assert "Net-new status" in md
+    # Failure kind column appears in the command table.
+    assert "Kind" in md
+
+
+def test_no_baseline_path_means_no_classification(tmp_path: Path):
+    """Calling verify without baseline_path leaves classification fields empty."""
+    repo = _make_repo(tmp_path, {"name": "x", "version": "0.0.1", "scripts": {"test": "jest"}})
+    run_folder = _make_run_folder(tmp_path)
+    with patch("orchestrator.verifiers.engine.subprocess.run", return_value=_completed(1)):
+        sig = verify(repo, run_folder)
+    assert sig["baseline_compared"] is False
+    assert sig["baseline_failed_command_ids"] == []
+    assert sig["new_failed_command_ids"] == []

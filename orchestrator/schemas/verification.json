@@ -14,7 +14,15 @@
     "command_ids": {"type": "array", "items": {"type": "string"}},
     "failed_command_ids": {"type": "array", "items": {"type": "string"}},
     "probe_ids": {"type": "array", "items": {"type": "string"}},
-    "failed_probe_ids": {"type": "array", "items": {"type": "string"}}
+    "failed_probe_ids": {"type": "array", "items": {"type": "string"}},
+    "net_new_status": {"type": "string", "enum": ["passed", "warned", "failed", "skipped"]},
+    "baseline_failed_command_ids": {"type": "array", "items": {"type": "string"}},
+    "baseline_failed_probe_ids": {"type": "array", "items": {"type": "string"}},
+    "new_failed_command_ids": {"type": "array", "items": {"type": "string"}},
+    "new_failed_probe_ids": {"type": "array", "items": {"type": "string"}},
+    "resolved_command_ids": {"type": "array", "items": {"type": "string"}},
+    "resolved_probe_ids": {"type": "array", "items": {"type": "string"}},
+    "baseline_compared": {"type": "boolean"}
   },
   "additionalProperties": true
 }
