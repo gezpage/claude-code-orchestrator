@@ -112,10 +112,7 @@ def test_no_toolchain_returns_skipped_not_blocked(tmp_path: Path):
 def _make_python_repo(tmp_path: Path, marker: str = "pyproject.toml") -> Path:
     repo = tmp_path / "repo"
     repo.mkdir()
-    if marker == "tests":
-        (repo / "tests").mkdir()
-    else:
-        (repo / marker).write_text("")
+    (repo / marker).write_text("")
     return repo
 
 
@@ -131,13 +128,29 @@ def test_python_repo_detected_and_pytest_invoked(tmp_path: Path):
     assert any("python -m pytest" in cmd for cmd in invoked)
 
 
-def test_python_repo_detected_from_tests_dir_alone(tmp_path: Path):
-    # `tests/` alone is enough to identify the project as Python.
-    repo = _make_python_repo(tmp_path, "tests")
+def test_python_repo_detected_via_test_file_glob(tmp_path: Path):
+    # A `.py` file under tests/ is enough to identify the project as Python — bare
+    # `tests/` is intentionally not a marker on its own.
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "tests").mkdir()
+    (repo / "tests" / "test_quote.py").write_text("")
     run_folder = _make_run_folder(tmp_path)
     with patch("orchestrator.verifiers.engine.subprocess.run", return_value=_completed(0)):
         sig = verify(repo, run_folder)
     assert sig["toolchain"] == "python"
+
+
+def test_python_bare_tests_dir_alone_does_not_select_python(tmp_path: Path):
+    # Bare `tests/` with no .py files inside must not mis-detect as Python; the
+    # verifier falls through to skipped instead of dispatching pytest.
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "tests").mkdir()
+    run_folder = _make_run_folder(tmp_path)
+    sig = verify(repo, run_folder)
+    assert sig["toolchain"] == "none"
+    assert sig["verification_status"] == "skipped"
 
 
 def test_python_failing_pytest_marks_failed(tmp_path: Path):

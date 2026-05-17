@@ -41,8 +41,13 @@ def test_bundled_python_recipe_loads():
     assert recipe.toolchain == "python"
     # Python recipe uses any_markers since project type can be signalled by any of several files.
     assert recipe.markers == ()
-    expected = {"pyproject.toml", "requirements.txt", "setup.py", "setup.cfg", "pytest.ini", "tox.ini", "tests"}
+    expected = {"pyproject.toml", "requirements.txt", "setup.py", "setup.cfg", "pytest.ini", "tox.ini"}
     assert expected <= set(recipe.any_markers)
+    # Bare `tests/` is deliberately not a marker — it appears in non-Python repos
+    # and would mis-detect them as Python on alphabetical tiebreak. Python test
+    # files are matched via glob patterns instead.
+    assert "tests" not in recipe.any_markers
+    assert "tests/**/*.py" in recipe.any_markers
     test_cmd = next(c for c in recipe.commands if c.id == "test")
     assert test_cmd.command == "python -m pytest"
     assert test_cmd.required
