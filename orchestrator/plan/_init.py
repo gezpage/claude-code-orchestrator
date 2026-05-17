@@ -138,6 +138,24 @@ def build_initial_graph(
         )
         chain_ids.append("pr")
 
+    # The executive_summary stage is dispatched outside the profile loop by
+    # `_finalize_summary`, but it always runs (see ADR-028). Surface it in the
+    # graph so the diagram shows the finalisation path explicitly rather than
+    # leaving the summary artifact in the legend.
+    summary_backend, summary_model = _meta("executive_summary")
+    graph.add_node(
+        Node(
+            id="executive_summary",
+            display="Executive Summary",
+            css_class="pending",
+            mode="auto",
+            stage_dir="executive_summary",
+            backend=summary_backend,
+            model=summary_model,
+        )
+    )
+    chain_ids.append("executive_summary")
+
     graph.add_node(Node(id="Done", shape="stadium", raw_label="■ Done", css_class="startend"))
 
     if not chain_ids:

@@ -29,6 +29,10 @@ from orchestrator.plan._helpers import _node_label
 _LEGEND_SKIP = {"plan.md"}
 _OVERVIEW_NODE_ID = "overview"
 _PR_NODE_ID = "pr"
+_EXECUTIVE_SUMMARY_NODE_ID = "executive_summary"
+# Root-level files claimed by a stage node rather than the legend. Keyed by the
+# file's basename so subdir matching is unaffected.
+_ROOT_FILE_OWNERS: dict[str, str] = {"executive_summary.md": _EXECUTIVE_SUMMARY_NODE_ID}
 # Match the canonical GitHub PR URL form so we can derive a per-commit URL
 # (`<base>/commit/<sha>`) from the PR URL the orchestrator already stamps on the
 # pr stage's panel via ``set_pr_node``. SSH and non-GitHub remotes don't match
@@ -76,7 +80,6 @@ def render_block(graph: Graph, run_folder: Path | None = None) -> str:
 
     aux = _aux_index(graph.nodes)
     has_overview = "Start" in graph.nodes
-    any_passed = any(n.status == "passed" for nid, n in graph.nodes.items() if nid not in {"Start", "Done"})
 
     lines: list[str] = ["```mermaid"]
     if graph.init_directive:
@@ -99,42 +102,24 @@ def render_block(graph: Graph, run_folder: Path | None = None) -> str:
                 f"    {_panel_node_decl(nid, node, node_files.get(nid, []), href_prefix, run_folder, commit_base_url)}"
             )
 
-    # Edges are emitted in fixed order: internal partner edges, Start→overview,
-    # then per-pair user edges. Each edge gets a sequential mermaid index used
-    # below to drive linkStyle directives that thicken the "completed path".
-    bold_indices: list[int] = []
-    edge_index = 0
-
     # Internal chain edges that wire each stage's materialised partners together.
     # Both prompt→stage and stage→panel are visible arrows so the data-flow
     # relationship (prompt drives the stage, stage produces the panel output)
-    # reads clearly in the diagram.
+    # reads clearly in the diagram. All edges render with the default thin
+    # stroke (lineColor from the init directive) so the diagram reads as a
+    # single uniform flow rather than highlighting a "completed trail".
     for nid in graph.nodes:
-        passed = _is_passed(nid, graph.nodes)
         if aux[nid].has_prompt:
             lines.append(f"    {nid}_prompt --> {nid}")
-            if passed:
-                bold_indices.append(edge_index)
-            edge_index += 1
         if aux[nid].has_panel:
             lines.append(f"    {nid} --> {nid}_panel")
-            if passed:
-                bold_indices.append(edge_index)
-            edge_index += 1
 
-    # Start --> overview is fixed; rewritten user edges connect overview onward.
     if has_overview:
         lines.append(f"    Start --> {_OVERVIEW_NODE_ID}")
-        if any_passed:
-            bold_indices.append(edge_index)
-        edge_index += 1
 
     for edge in graph.edges:
-        for rendered, tgt_ids in _render_edge(edge, aux, has_overview):
+        for rendered, _ in _render_edge(edge, aux, has_overview):
             lines.append(f"    {rendered}")
-            if all(_target_completed(tid, graph.nodes) for tid in tgt_ids):
-                bold_indices.append(edge_index)
-            edge_index += 1
 
     lines.extend(_CLASSDEFS)
     for nid, node in graph.nodes.items():
@@ -146,38 +131,11 @@ def render_block(graph: Graph, run_folder: Path | None = None) -> str:
     if has_overview:
         lines.append(f"    class {_OVERVIEW_NODE_ID} input")
 
-    if bold_indices:
-        # #9ca3af (gray-400) reads as an emphasized trail against both the
-        # dark-gray dark-mode background and the light-gray light-mode background
-        # while staying neutral; stroke-width 3 carries the "completed" emphasis.
-        lines.append(f"    linkStyle {','.join(str(i) for i in bold_indices)} stroke-width:3px,stroke:#9ca3af")
-
     lines.append("```")
     block = "\n".join(lines) + "\n"
     if legend_files:
         block += _other_files_section(legend_files, href_prefix)
     return block
-
-
-def _is_passed(nid: str, nodes: dict[str, Node]) -> bool:
-    n = nodes.get(nid)
-    return n is not None and n.status == "passed"
-
-
-def _target_completed(rewritten_id: str, nodes: dict[str, Node]) -> bool:
-    """Given a rewritten edge target (e.g. ``X_prompt``, ``Y_panel``, ``Done``),
-    return whether its underlying stage is in the completed state.
-
-    Used to decide whether an edge belongs on the bold "progress trail".
-    """
-    if rewritten_id == _OVERVIEW_NODE_ID:
-        return any(n.status == "passed" for nid, n in nodes.items() if nid not in {"Start", "Done"})
-    base = rewritten_id
-    for suffix in ("_prompt", "_panel"):
-        if base.endswith(suffix):
-            base = base[: -len(suffix)]
-            break
-    return _is_passed(base, nodes)
 
 
 # --- "Other files" buttons rendered below the mermaid fence -----------------
@@ -736,10 +694,16 @@ def _scan_files(
         rel = path.relative_to(run_folder)
         if rel.name in _LEGEND_SKIP:
             continue
-        # Hidden files (e.g. _plan_graph.yaml, _state.yaml) at the root go to the legend.
         parts = rel.parts
         if len(parts) == 1:
-            legend_files.append(rel)
+            # Root-level files default to the legend, but a small allowlist
+            # (e.g. executive_summary.md) attaches to a named stage node so the
+            # corresponding artefact renders inside its output panel.
+            owner_id = _ROOT_FILE_OWNERS.get(rel.name)
+            if owner_id and owner_id in graph.nodes:
+                node_files.setdefault(owner_id, []).append(rel)
+            else:
+                legend_files.append(rel)
             continue
         stage_dir = parts[0]
         nodes = by_stage_dir.get(stage_dir, [])
