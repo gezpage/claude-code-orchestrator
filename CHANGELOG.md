@@ -8,6 +8,7 @@ Format: [Unreleased] at the top, dated releases below, newest first.
 ## [Unreleased]
 
 ### Added
+- 2026-05-17: Characterization test suites for `orchestrator/orchestrate.py` seams targeted for extraction under issue #154 — wave verification, slice dispatch, discovery/alignment, plan update, and resume/baseline. Five focused files in `tests/` pin observable contracts (baseline vs net-new classification, slice filtering and wave grouping, discovery-as-input/alignment-as-gate, plan-md status stamping, resume-safe baseline handling) without coupling to internal implementation, so subsequent refactor PRs can move code without regressing behaviour. Tests only; no production changes.
 - 2026-05-17: Wave verification now distinguishes baseline failures (already failing before the pipeline ran) from net-new regressions introduced by the current slice/wave. `_dispatch_slices` captures a one-shot baseline verifier report under `baseline-verification/` before any slice runs; each subsequent `wave-verification/wave-N/verify.json` tags failures as `baseline` or `net_new` and carries a separate `net_new_status`. The `on_failure: block | fix_then_retry` policies now gate on `net_new_status` only — projects carrying known-failing tests can safely set `block` without false halts. Baseline-only failures always warn and continue regardless of policy. The wave plan.md section and `VERIFY.md` artifact surface the breakdown. Issue #151. See ADR-033.
 
 ### Changed
