@@ -15,7 +15,7 @@ You are the **only** implementation agent for this run. Implement the entire fea
 **Domain-language glossary:** `{{ run_glossary_path }}` (read-only reference)
 {% endif %}
 
-The plan is operational guidance; the PRD and `context.md` remain authoritative. If the plan and the PRD disagree on what should be built, the **PRD wins** — and if the disagreement is material, emit `blocked` rather than guessing.
+The plan is operational guidance; the PRD and the generated context artifact at `{{ context_path }}` remain authoritative. If the plan and the PRD disagree on what should be built, the **PRD wins** — and if the disagreement is material, emit `blocked` rather than guessing.
 
 ## Instructions
 
