@@ -30,10 +30,40 @@ def test_bundled_go_recipe_loads():
     assert build.required
 
 
+def test_bundled_php_recipe_loads():
+    recipe = load_recipe_by_toolchain("php")
+    assert recipe.toolchain == "php"
+    assert "composer.json" in recipe.markers
+    composer_cmd = next(c for c in recipe.commands if c.id == "composer-test")
+    assert composer_cmd.command == "composer test"
+    assert composer_cmd.if_composer_script_exists == "test"
+    phpunit_cmd = next(c for c in recipe.commands if c.id == "phpunit")
+    assert phpunit_cmd.command == "vendor/bin/phpunit"
+    assert phpunit_cmd.if_file_exists == "vendor/bin/phpunit"
+    assert recipe.required_any_of == ("composer-test", "phpunit")
+
+
+def test_required_any_of_unknown_id_raises(tmp_path: Path):
+    p = tmp_path / "bad.yaml"
+    p.write_text(
+        yaml.dump(
+            {
+                "toolchain": "bad",
+                "priority": 1,
+                "markers": ["x"],
+                "commands": [{"id": "t", "command": "true"}],
+                "required_any_of": ["t", "missing"],
+            }
+        )
+    )
+    with pytest.raises(ValueError, match="required_any_of references unknown command id"):
+        load_recipe_by_toolchain("bad", recipes_dir=tmp_path)
+
+
 def test_load_bundled_returns_all_recipes():
     recipes = load_bundled_recipes()
     names = {r.toolchain for r in recipes}
-    assert {"node", "go", "python", "java"} <= names
+    assert {"node", "go", "php", "python", "java"} <= names
 
 
 def test_bundled_python_recipe_loads():

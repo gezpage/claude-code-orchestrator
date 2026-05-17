@@ -48,6 +48,12 @@ class VerifyReport:
     toolchain: str
     commands: list[CommandResult] = field(default_factory=list)
     probes: list[ProbeRecord] = field(default_factory=list)
+    # Command IDs that form an "at least one must run" group. Carried through
+    # from ``Recipe.required_any_of`` so :func:`aggregate_status` (and the
+    # markdown writer's "no test ran" hint) can apply the policy without
+    # re-reading the recipe. Empty tuple = no such group; original aggregate
+    # semantics apply unchanged.
+    required_any_of: tuple[str, ...] = field(default_factory=tuple)
     # Status computed from net-new failures only — equal to ``status`` when no
     # baseline classification was performed. See ADR-033.
     net_new_status: str = "passed"
@@ -70,8 +76,16 @@ def aggregate_status(report: VerifyReport) -> str:
     something the recipe author can mark optional.
 
     A non-required command that was *skipped* because its precondition was not
-    met (e.g. `if_script_exists` missed) is the recipe's own gating logic — not
-    a warning. Only an outright `failed` non-required command warrants a warn.
+    met (e.g. ``if_script_exists`` missed) is the recipe's own gating logic —
+    not a warning. Only an outright ``failed`` non-required command warrants a
+    warn.
+
+    ``required_any_of`` adds a recipe-level OR-group on top: if any listed
+    command actually ran and failed the result is ``failed`` (even when the
+    command itself is non-required, because the recipe is asserting that this
+    group *is* the toolchain's test); if every listed command was skipped the
+    result is at least ``warned`` (a passed-with-zero-commands report would
+    otherwise be silent false confidence).
 
     When a recipe matched but every command and probe was skipped — i.e. zero
     actual signal was produced — the status is ``skipped`` rather than
@@ -83,6 +97,12 @@ def aggregate_status(report: VerifyReport) -> str:
     has_probe_failure = any(p.status == "failed" for p in report.probes)
     if has_required_failure or has_probe_failure:
         return "failed"
+    if report.required_any_of:
+        group = [c for c in report.commands if c.id in report.required_any_of]
+        if any(c.status == "failed" for c in group):
+            return "failed"
+        if not any(c.status == "passed" for c in group):
+            return "warned"
     has_non_required_failure = any(c.status == "failed" and not c.required for c in report.commands)
     if has_non_required_failure:
         return "warned"
@@ -154,11 +174,23 @@ def classify_against_baseline(
 
 
 def _net_new_status(report: VerifyReport) -> str:
-    """Compute aggregate status considering only net-new failures."""
+    """Compute aggregate status considering only net-new failures.
+
+    Mirrors :func:`aggregate_status` precedence — including the
+    ``required_any_of`` OR-group escalation — so policy gates on regressions
+    match the rules that gate on overall health.
+    """
     has_required_new = any(c.status == "failed" and c.required and c.failure_kind == "net_new" for c in report.commands)
     has_probe_new = any(p.status == "failed" and p.failure_kind == "net_new" for p in report.probes)
     if has_required_new or has_probe_new:
         return "failed"
+    if report.required_any_of:
+        group_new_failure = any(
+            c.status == "failed" and c.id in report.required_any_of and c.failure_kind == "net_new"
+            for c in report.commands
+        )
+        if group_new_failure:
+            return "failed"
     has_non_required_new = any(
         c.status == "failed" and not c.required and c.failure_kind == "net_new" for c in report.commands
     )
@@ -167,6 +199,10 @@ def _net_new_status(report: VerifyReport) -> str:
     if not _any_ran(report):
         return "skipped"
     return "passed"
+
+
+def _any_of_ran(report: VerifyReport) -> bool:
+    return any(c.id in report.required_any_of and c.status != "skipped" for c in report.commands)
 
 
 def write_json(report: VerifyReport, path: Path) -> None:
@@ -190,6 +226,12 @@ def write_markdown(report: VerifyReport, path: Path) -> None:
     lines.append(f"**Status:** `{report.status}`")
     if has_baseline_classification:
         lines.append(f"**Net-new status:** `{report.net_new_status}`")
+    if report.required_any_of and not _any_of_ran(report):
+        lines.append(
+            f"**Note:** none of the expected test commands ran "
+            f"({', '.join(f'`{cid}`' for cid in report.required_any_of)}) — "
+            "verification cannot vouch for the change."
+        )
     lines.append("")
 
     if has_baseline_classification:
