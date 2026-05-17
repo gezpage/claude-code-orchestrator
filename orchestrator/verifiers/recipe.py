@@ -27,8 +27,13 @@ class Command:
 class Recipe:
     toolchain: str
     priority: int
-    markers: tuple[str, ...]
-    commands: tuple[Command, ...]
+    # All entries in `markers` must be present in the repo for the recipe to match.
+    # When `any_markers` is non-empty, at least one of its entries must also be present.
+    # Ecosystems like Python where any of several files (`pyproject.toml`,
+    # `requirements.txt`, `setup.py`, ...) signals project type use `any_markers`.
+    markers: tuple[str, ...] = ()
+    any_markers: tuple[str, ...] = ()
+    commands: tuple[Command, ...] = ()
     probes: tuple[str, ...] = field(default_factory=tuple)
     # IDs of commands that form an "at least one must run" group — usually the
     # toolchain's test runners. Per-command ``required`` covers "if it ran, did
@@ -60,8 +65,9 @@ def _parse_recipe(raw: dict) -> Recipe:
     if "priority" not in raw:
         raise ValueError(f"recipe '{raw['toolchain']}' missing required field 'priority'")
     markers = raw.get("markers") or []
-    if not markers:
-        raise ValueError(f"recipe '{raw['toolchain']}' must declare at least one marker")
+    any_markers = raw.get("any_markers") or []
+    if not markers and not any_markers:
+        raise ValueError(f"recipe '{raw['toolchain']}' must declare at least one marker or any_markers entry")
     commands = tuple(_parse_command(c) for c in raw.get("commands", []))
     required_any_of = tuple(raw.get("required_any_of") or ())
     declared_ids = {c.id for c in commands}
@@ -72,6 +78,7 @@ def _parse_recipe(raw: dict) -> Recipe:
         toolchain=raw["toolchain"],
         priority=int(raw["priority"]),
         markers=tuple(markers),
+        any_markers=tuple(any_markers),
         commands=commands,
         probes=tuple(raw.get("probes", [])),
         required_any_of=required_any_of,
