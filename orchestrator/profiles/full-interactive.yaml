@@ -1,4 +1,7 @@
 name: full-interactive
+
+executive_summary: {}
+
 stages:
   - stage: discovery
     expansion: tracks

@@ -41,12 +41,18 @@ def _stub_preflight_and_sync():
 # ── helpers ──────────────────────────────────────────────────────────────────
 
 
-def _setup_docs(tmp_path, stages, profile_name="test", feature_path="feature"):
+def _setup_docs(tmp_path, stages, profile_name="test", feature_path="feature", executive_summary=True):
     project_dir = tmp_path / "projects" / "myproject"
     project_dir.mkdir(parents=True)
     (project_dir / "project.yaml").write_text("repo-root: /tmp\nlog_level: DEBUG\n")
     profile_path = tmp_path / f"{profile_name}.yaml"
-    profile_path.write_text(yaml.dump({"name": profile_name, "stages": stages}))
+    # Default to opted-in so existing tests that exercise finalisation keep working
+    # without per-test changes. Tests that want to assert the opt-out path pass
+    # ``executive_summary=False`` to omit the block. See ADR-036.
+    profile_doc: dict = {"name": profile_name, "stages": stages}
+    if executive_summary:
+        profile_doc["executive_summary"] = {}
+    profile_path.write_text(yaml.dump(profile_doc))
     feature_dir = tmp_path / feature_path
     feature_dir.mkdir(parents=True, exist_ok=True)
     (feature_dir / "overview.md").write_text("# Feature Overview\n")
@@ -3240,6 +3246,125 @@ def test_executive_summary_passes_pr_url_into_variables(tmp_path):
         )
 
     assert mock_rs2.call_args.args[2]["pr_url"] == "not created"
+
+
+# ── ADR-036: executive summary is profile-declared, not implicit ──────────────
+
+
+def test_executive_summary_skipped_when_profile_omits_it(tmp_path):
+    """A profile without an ``executive_summary`` block must not dispatch the
+    finalisation stage. Absence is opt-out; the orchestrator must not warn or
+    block on it."""
+    stages = [{"stage": "discovery", "prompt": "prompts/discovery/default.md"}]
+    docs_root = _setup_docs(tmp_path, stages, executive_summary=False)
+    run_folder_path = tmp_path / "projects" / "myproject" / "workflow" / "runs" / "feat" / "2026-01-01-run-1"
+    run_folder_path.mkdir(parents=True)
+    discovery_passed = {"stage": "discovery", "status": "passed", "findings_files": []}
+
+    with (
+        patch("orchestrator.orchestrate.run_stage", return_value=discovery_passed),
+        patch("orchestrator.orchestrate.update_plan_md"),
+        patch("orchestrator.orchestrate.subprocess.run", return_value=_git_ok()),
+        patch("orchestrator.orchestrate._resolve_run_folder", return_value=run_folder_path),
+        patch("orchestrator.orchestrate._finalize_summary") as mock_summary,
+    ):
+        orchestrate.run_pipeline(docs_root, "myproject", "feature", "feat/test", str(tmp_path / "test.yaml"))
+
+    mock_summary.assert_not_called()
+
+
+def test_executive_summary_skipped_on_blocked_stage_when_profile_omits_it(tmp_path):
+    """Opting out of the executive_summary block must also disable the always-on
+    finalisation behaviour on failure paths (sys.exit(1))."""
+    stages = [{"stage": "discovery", "prompt": "prompts/discovery/default.md"}]
+    docs_root = _setup_docs(tmp_path, stages, executive_summary=False)
+    run_folder_path = tmp_path / "projects" / "myproject" / "workflow" / "runs" / "feat" / "2026-01-01-run-1"
+    run_folder_path.mkdir(parents=True)
+
+    with (
+        patch("orchestrator.orchestrate.run_stage", return_value=BLOCKED_SIGNAL),
+        patch("orchestrator.orchestrate.update_plan_md"),
+        patch("orchestrator.orchestrate.mark_pr_blocked"),
+        patch("orchestrator.orchestrate.subprocess.run", return_value=_git_ok()),
+        patch("orchestrator.orchestrate._resolve_run_folder", return_value=run_folder_path),
+        patch("orchestrator.orchestrate._finalize_summary") as mock_summary,
+    ):
+        with pytest.raises(SystemExit) as exc_info:
+            orchestrate.run_pipeline(docs_root, "myproject", "feature", "feat/test", str(tmp_path / "test.yaml"))
+
+    assert exc_info.value.code == 1
+    mock_summary.assert_not_called()
+
+
+def test_executive_summary_node_omitted_from_plan_when_profile_omits_it(tmp_path):
+    """A profile without the ``executive_summary`` block must not render a
+    finalisation node in the diagram — the last profile stage flows directly
+    into Done."""
+    from orchestrator.plan import init_plan_md as plan_init
+    from orchestrator.profile import Profile, StageConfig
+
+    run_folder = tmp_path / "run"
+    run_folder.mkdir()
+    profile = Profile(
+        name="test",
+        stages=(StageConfig(name="discovery", prompt="prompts/discovery/default.md"),),
+        # executive_summary omitted — no finalisation node.
+    )
+    plan_init(run_folder, profile)
+    content = (run_folder / "plan.md").read_text()
+    # Restrict the assertion to the mermaid block so the test directory name
+    # (which contains "executive_summary") doesn't cause a spurious match.
+    mermaid_start = content.find("```mermaid")
+    mermaid_end = content.find("```", mermaid_start + 10)
+    mermaid_block = content[mermaid_start:mermaid_end]
+    assert "executive_summary" not in mermaid_block
+    assert "discovery_panel --> Done" in mermaid_block
+
+
+def test_executive_summary_agent_override_merged_on_finalisation(tmp_path):
+    """A profile-level ``executive_summary.agent`` block must override the
+    profile-level ``agent`` for the finalisation step, the same way
+    ``pr_draft.agent`` overrides for PR draft."""
+    from orchestrator.agent_runner import AgentConfig
+
+    stages = [{"stage": "discovery", "prompt": "prompts/discovery/default.md"}]
+    profile_path = tmp_path / "test.yaml"
+    profile_path.write_text(
+        yaml.dump(
+            {
+                "name": "test",
+                "agent": {"backend": "claude_code", "model": "claude-opus-4-7"},
+                "executive_summary": {"agent": {"model": "claude-sonnet-4-6"}},
+                "stages": stages,
+            }
+        )
+    )
+    project_dir = tmp_path / "projects" / "myproject"
+    project_dir.mkdir(parents=True)
+    (project_dir / "project.yaml").write_text("repo-root: /tmp\nlog_level: DEBUG\n")
+    feature_dir = tmp_path / "feature"
+    feature_dir.mkdir(parents=True, exist_ok=True)
+    (feature_dir / "overview.md").write_text("# Overview\n")
+
+    run_folder_path = tmp_path / "projects" / "myproject" / "workflow" / "runs" / "feat" / "2026-01-01-run-1"
+    run_folder_path.mkdir(parents=True)
+    discovery_passed = {"stage": "discovery", "status": "passed", "findings_files": []}
+
+    with (
+        patch("orchestrator.orchestrate.run_stage", return_value=discovery_passed),
+        patch("orchestrator.orchestrate.update_plan_md"),
+        patch("orchestrator.orchestrate.subprocess.run", return_value=_git_ok()),
+        patch("orchestrator.orchestrate._resolve_run_folder", return_value=run_folder_path),
+        patch("orchestrator.orchestrate._finalize_summary") as mock_summary,
+    ):
+        orchestrate.run_pipeline(str(tmp_path), "myproject", "feature", "feat/test", str(profile_path))
+
+    mock_summary.assert_called_once()
+    agent_config = mock_summary.call_args.kwargs["agent_config"]
+    assert isinstance(agent_config, AgentConfig)
+    # Override wins over the profile-level model.
+    assert agent_config.model == "claude-sonnet-4-6"
+    assert agent_config.backend == "claude_code"
 
 
 # ── discovery unresolved-items aggregation (ADR-032) ──────────────────────────

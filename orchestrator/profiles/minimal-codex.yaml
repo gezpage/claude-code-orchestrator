@@ -5,6 +5,8 @@ agent:
   sterile_context: true
   permission_mode: workspace-write
 
+executive_summary: {}
+
 stages:
   - stage: specification
     prompt: prompts/specification/minimal.md

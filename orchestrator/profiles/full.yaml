@@ -1,4 +1,7 @@
 name: full
+
+executive_summary: {}
+
 stages:
   - stage: discovery
     expansion: tracks

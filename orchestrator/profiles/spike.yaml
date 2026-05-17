@@ -1,4 +1,7 @@
 name: spike
+
+executive_summary: {}
+
 stages:
   - stage: discovery
     expansion: tracks

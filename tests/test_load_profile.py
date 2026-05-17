@@ -309,6 +309,65 @@ def test_pr_draft_agent_must_be_mapping(tmp_path):
         load_profile(str(p))
 
 
+# ── executive_summary (ADR-036) ───────────────────────────────────────────────
+
+
+def test_executive_summary_absent_yields_none(tmp_path):
+    """Absence of the block means the profile opts out of summary generation."""
+    p = tmp_path / "p.yaml"
+    p.write_text(yaml.dump({"name": "p", "stages": [{"stage": "discovery"}]}))
+    profile = load_profile(str(p))
+    assert profile.executive_summary is None
+
+
+def test_executive_summary_empty_block_enables_with_defaults(tmp_path):
+    """``executive_summary: {}`` is the canonical opt-in: enabled, no agent override."""
+    p = tmp_path / "p.yaml"
+    p.write_text(yaml.dump({"name": "p", "executive_summary": {}, "stages": [{"stage": "discovery"}]}))
+    profile = load_profile(str(p))
+    assert profile.executive_summary is not None
+    assert profile.executive_summary.agent is None
+
+
+def test_executive_summary_agent_override_parsed(tmp_path):
+    p = tmp_path / "p.yaml"
+    p.write_text(
+        yaml.dump(
+            {
+                "name": "p",
+                "agent": {"backend": "claude_code", "model": "claude-opus-4-7"},
+                "executive_summary": {"agent": {"model": "claude-sonnet-4-6"}},
+                "stages": [{"stage": "discovery"}],
+            }
+        )
+    )
+    profile = load_profile(str(p))
+    assert profile.executive_summary is not None
+    assert profile.executive_summary.agent == {"model": "claude-sonnet-4-6"}
+
+
+def test_executive_summary_must_be_mapping(tmp_path):
+    p = tmp_path / "bad.yaml"
+    p.write_text(yaml.dump({"name": "p", "executive_summary": ["nope"], "stages": []}))
+    with pytest.raises(ValueError, match="'executive_summary' must be a mapping"):
+        load_profile(str(p))
+
+
+def test_executive_summary_agent_must_be_mapping(tmp_path):
+    p = tmp_path / "bad.yaml"
+    p.write_text(yaml.dump({"name": "p", "executive_summary": {"agent": "nope"}, "stages": []}))
+    with pytest.raises(ValueError, match=r"'executive_summary\.agent' must be a mapping"):
+        load_profile(str(p))
+
+
+def test_all_bundled_profiles_opt_in_to_executive_summary():
+    """The bundled profiles preserve the pre-ADR-036 always-on UX by explicitly
+    declaring the block — implicit always-on behaviour is gone."""
+    for name in ("full", "full-interactive", "minimal", "minimal-claude", "minimal-codex", "spike"):
+        profile = load_profile(name)
+        assert profile.executive_summary is not None, f"{name} should opt in to executive_summary"
+
+
 # ── wave_verification (ADR-030) ───────────────────────────────────────────────
 
 
