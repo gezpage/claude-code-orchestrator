@@ -519,6 +519,64 @@ def test_expand_nodes_slices_noop_when_no_slices(tmp_path):
     assert (run_folder / "plan.md").read_text() == original
 
 
+def _impl_stage_with_wave_verification() -> StageConfig:
+    from orchestrator.profile import WaveVerification
+
+    return StageConfig(
+        name="implementation",
+        expansion=ExpansionKind.SLICES,
+        slices_from_stage="decomposition",
+        wave_verification=WaveVerification(enabled=True, on_failure="warn"),
+    )
+
+
+def test_expand_nodes_slices_inserts_wave_verify_node_per_wave(tmp_path):
+    """Wave verification nodes sit between slice waves so integration health is its own node.
+
+    See ADR-031: slice nodes represent local completion; wave_verify_N nodes
+    represent merged-branch verification — they must not collapse into one.
+    """
+    from orchestrator.plan._graph import load_graph
+
+    run_folder = _make_run_folder(tmp_path)
+    profile = _simple_profile("decomposition", "implementation", "qa")
+    init_plan_md(run_folder, profile)
+    expand_nodes(
+        run_folder,
+        _impl_stage_with_wave_verification(),
+        slice_files=["slice-1.md", "slice-2.md"],
+        slice_groups=[["slice-1.md"], ["slice-2.md"]],
+    )
+    graph = load_graph(run_folder)
+    assert graph is not None
+    assert "wave_verify_1" in graph.nodes
+    assert "wave_verify_2" in graph.nodes
+    # Wave nodes are deterministic — no prompt input, no LLM dispatch.
+    assert graph.nodes["wave_verify_1"].mode == "deterministic"
+    # Slice node and wave node are independent (slice→wave→next-slice chain).
+    # Source ids carry _panel; target ids carry _prompt only when the node has a
+    # prompt input — wave nodes are deterministic so their incoming edge lands
+    # on the bare id, not wave_verify_1_prompt.
+    content = (run_folder / "plan.md").read_text()
+    assert "impl_1_panel --> wave_verify_1" in content
+    assert "wave_verify_1_panel --> impl_2_prompt" in content
+    assert "wave_verify_2_panel --> qa_prompt" in content
+
+
+def test_expand_nodes_slices_no_wave_nodes_when_disabled(tmp_path):
+    """When wave_verification is None, no wave nodes are inserted — preserving the old layout."""
+    from orchestrator.plan._graph import load_graph
+
+    run_folder = _make_run_folder(tmp_path)
+    profile = _simple_profile("decomposition", "implementation", "qa")
+    init_plan_md(run_folder, profile)
+    expand_nodes(run_folder, _impl_stage(), slice_files=["slice-1.md", "slice-2.md"])
+    graph = load_graph(run_folder)
+    assert graph is not None
+    assert "wave_verify_1" not in graph.nodes
+    assert "wave_verify_2" not in graph.nodes
+
+
 # --- update_plan_md ---
 
 

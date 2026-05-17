@@ -583,15 +583,41 @@ def _maybe_run_wave_verification(
         if wv.on_failure == "block" and vstatus == "failed":
             sig["status"] = "blocked"
             sig["message"] = f"wave {wave_idx} integration verification failed: {summary}"
+
+        # Always stamp the wave node as ``blocked`` on a failed integration check —
+        # even when the policy is ``warn`` or ``fix_then_retry`` and the pipeline
+        # continues. The slice nodes report local completion; this node is the
+        # only place a reader sees integration health. See ADR-031.
+        node_status = "blocked"
     else:
         ctx.logger.log(
             "wave-verification",
             "INFO",
             f"wave {wave_idx} {vstatus} ({_fmt_elapsed(elapsed)}) — {summary}",
         )
+        node_status = "passed" if vstatus == "passed" else "skipped"
 
+    _stamp_wave_node(run_folder, wave_idx, node_status, elapsed)
     _append_wave_verification_section(run_folder, wave_idx, sig)
     return sig
+
+
+def _stamp_wave_node(run_folder: Path, wave_idx: int, status: str, elapsed: float) -> None:
+    """Stamp the wave_verify_{N} graph node with the integration-check outcome.
+
+    The slice nodes (``impl_{N}``) keep their local "passed" status to represent
+    slice completion; this node carries the merged-branch verdict so a passing
+    slice and a failed wave render side-by-side without one masking the other.
+    No-op when the run's plan graph never expanded a wave node (e.g. wave
+    verification was disabled by config at expansion time). See ADR-031.
+    """
+    from orchestrator.plan._graph import load_graph
+
+    wave_id = f"wave_verify_{wave_idx}"
+    graph = load_graph(run_folder)
+    if graph is None or wave_id not in graph.nodes:
+        return
+    update_plan_md(run_folder, wave_id, status, elapsed_secs=elapsed)
 
 
 def _wave_fix_then_retry(

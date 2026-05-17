@@ -586,7 +586,12 @@ def _scan_files(
             continue
         stage_dir = parts[0]
         nodes = by_stage_dir.get(stage_dir, [])
-        target = _match_node(rel.name, stage_dir, nodes)
+        # Try deeper match first (e.g. ``wave-verification/wave-2/VERIFY.md``
+        # attaches to the node with file_suffix=="wave-2"). Falls back to the
+        # standard depth-2 match so existing layouts are unaffected.
+        target = _match_subdir_node(parts, nodes) if len(parts) >= 3 else None
+        if target is None:
+            target = _match_node(rel.name, stage_dir, nodes)
         if target is not None:
             node_files.setdefault(target.id, []).append(rel)
         else:
@@ -597,6 +602,22 @@ def _scan_files(
         files.sort(key=_file_sort_key)
     legend_files.sort(key=_file_sort_key)
     return node_files, legend_files
+
+
+def _match_subdir_node(parts: tuple[str, ...], nodes: list[Node]) -> Node | None:
+    """Match a depth ≥ 3 path against a node whose file_suffix equals the second segment.
+
+    Used so artefacts that live in per-instance subdirectories (e.g.
+    ``wave-verification/wave-2/VERIFY.md``) attach to the corresponding
+    ``wave_verify_2`` node instead of all collapsing onto a single stage node.
+    """
+    if len(parts) < 3 or not nodes:
+        return None
+    subdir = parts[1]
+    for node in nodes:
+        if node.file_suffix and node.file_suffix == subdir:
+            return node
+    return None
 
 
 def _match_node(file_name: str, stage_dir: str, nodes: list[Node]) -> Node | None:
