@@ -10,6 +10,12 @@ the fake run-stage:
     default to their first allowed value, and a small convention table fills
     structured fields the schema can't describe (tracks, slice_files,
     commit_hashes, reviewer_statuses, branch).
+  - For stages whose downstream consumers read specific headings or markers,
+    a small per-stage writer overwrites the stub with the contract-shaped
+    content (e.g. PRD/context section headings, slice file bodies, an
+    implementation plan for the minimal decomposition flow, a glossary term
+    that round-trips through `orchestrator.glossary.reconcile`). The intent is
+    contract fidelity — not simulated agent prose.
   - Writes the same `{stage}{tag}-prompt.md` and `{stage}{tag}-output.md` the
     real `run_stage()` writes, so glob-based assertions keep working.
   - Returns the signal dict.
@@ -107,6 +113,126 @@ def _route_key(stage: str, implementation: str, schema_name: str | None, variabl
     return stage
 
 
+_SPEC_PRD_TEMPLATE = """\
+# PRD
+
+## Problem Statement
+
+Synthesised stub problem statement.
+
+## Goals
+
+- goal 1
+- goal 2
+
+## Non-Goals
+
+- non-goal 1
+
+## Success Criteria
+
+- criterion 1
+
+## Constraints
+
+- constraint 1
+
+## Out of Scope
+
+- out-of-scope 1
+"""
+
+_SPEC_CONTEXT_TEMPLATE = """\
+# Context
+
+## Quality Bar and Standards
+
+Synthesised stub quality bar.
+
+## Standing Constraints
+
+- constraint 1
+
+## Domain Context
+
+Synthesised stub domain context.
+
+## Decisions
+
+### Stub decision
+
+**Decision:** stub
+**Rationale:** stub
+**Consequences:** stub
+
+## Assumptions
+
+- assumption 1
+"""
+
+_SLICE_TEMPLATE = """\
+# {slice_id}: auto slice
+
+## What to build
+
+Synthesised stub slice {slice_id}.
+
+## Acceptance criteria
+
+- criterion 1
+- criterion 2
+
+## Blocked by
+
+- None — can start immediately
+"""
+
+_MINIMAL_PLAN_TEMPLATE = """\
+# Implementation plan
+
+## Non-negotiable constraints
+
+- constraint 1
+
+## Architectural invariants
+
+- invariant 1
+
+## Quality bar expectations
+
+Synthesised stub quality bar.
+
+## Acceptance criteria
+
+- criterion 1
+
+## Testing expectations
+
+- unit
+- integration
+
+## Build order
+
+1. step 1
+
+## Known risks / ambiguities
+
+None.
+"""
+
+_REVIEW_TEMPLATE = """\
+# Review
+
+## Findings
+
+- (none)
+
+## Non-blocking findings
+
+- (none)
+"""
+
+
 def _synthesise(
     schema: dict[str, Any],
     *,
@@ -117,7 +243,13 @@ def _synthesise(
     variables: Mapping[str, Any],
     call_idx: int,
 ) -> dict[str, Any]:
-    """Build a minimum passing signal for `schema`. Writes any path-shaped files."""
+    """Build a minimum passing signal for `schema`. Writes any path-shaped files.
+
+    Stub files materialised for ``*_path`` / ``*_file`` schema fields are then
+    overwritten by per-stage writers with the headings/markers downstream
+    consumers (and human inspectors) actually expect — never realistic prose.
+    The goal is contract-shaped fakes, not simulated agent output.
+    """
     sig: dict[str, Any] = {"stage": stage_name, "status": "passed"}
     props = schema.get("properties", {})
 
@@ -152,17 +284,36 @@ def _synthesise(
             tracks.append({"name": track_name, "prompt_file": str(prompt_file), "focus": "auto"})
         sig["tracks"] = tracks
 
-    if "slice_files" in props:
-        sf_paths = []
+    # Decomposition has two flows. The default slice-flow emits slice_files +
+    # slice_groups; the minimal flow emits a single plan_file. Selecting on
+    # `implementation` here replaces the per-test `_decomposition_override`
+    # shim that minimal-profile tests previously had to supply.
+    is_minimal_decomp = stage_name == "decomposition" and implementation == "minimal"
+    if "slice_files" in props and not is_minimal_decomp:
+        sf_paths: list[str] = []
+        sf_inputs: list[list[str]] = []
         for i in (1, 2):
             p = output_dir / f"S-{i:02d}-auto.md"
-            p.write_text(f"# S-{i:02d} auto slice\n")
+            p.write_text(_SLICE_TEMPLATE.format(slice_id=f"S-{i:02d}"))
             sf_paths.append(str(p))
+            sf_inputs.append([str(p)])
         sig["slice_files"] = sf_paths
         # Emit one parallel wave containing both slices so the rendered
         # diagram exercises the slice fan-out path (vs sequential default).
         if "slice_groups" in props:
             sig["slice_groups"] = [sf_paths]
+        if "slice_inputs" in props:
+            sig["slice_inputs"] = sf_inputs
+    elif is_minimal_decomp:
+        # Drop the auto-stub plan_file path the schema loop created — minimal
+        # writes to a fixed name, not the field-name-derived stub.
+        sig.pop("plan_file", None)
+        plan_path = output_dir / "implementation-plan.md"
+        plan_path.write_text(_MINIMAL_PLAN_TEMPLATE)
+        sig["plan_file"] = str(plan_path)
+        # Remove any stray auto-stub slice files left over from a previous call.
+        for stub in output_dir.glob("S-*.md"):
+            stub.unlink()
 
     if "commit_hashes" in props:
         sig["commit_hashes"] = [f"c0mm{call_idx + 1:04d}"]
@@ -174,7 +325,34 @@ def _synthesise(
         sig["reviewer_statuses"] = {implementation: "approved"}
         sig["changes_requested"] = []
 
+    _enrich_stub_content(sig, stage_name=stage_name)
+
     return sig
+
+
+def _enrich_stub_content(sig: dict[str, Any], *, stage_name: str) -> None:
+    """Overwrite path-shaped stubs with contract-shaped content.
+
+    Writers are stage-keyed and contract-oriented: headings/markers downstream
+    consumers actually read, plus a glossary payload that round-trips through
+    `orchestrator.glossary.reconcile`. Deliberately not a registry — adding a
+    new ecosystem-style hook would push this past the lightweight-fake remit.
+    """
+    if stage_name == "specification":
+        for field, body in (("prd_path", _SPEC_PRD_TEMPLATE), ("context_path", _SPEC_CONTEXT_TEMPLATE)):
+            path = sig.get(field)
+            if isinstance(path, str):
+                Path(path).write_text(body)
+    elif stage_name == "review":
+        path = sig.get("review_md")
+        if isinstance(path, str):
+            Path(path).write_text(_REVIEW_TEMPLATE)
+    elif stage_name == "harvest" and "proposed_glossary_terms" in sig:
+        # One term, formatted to match what `glossary.reconcile` expects so a
+        # configured `domain_language.path` exercises the append-only path.
+        sig["proposed_glossary_terms"] = {
+            "Synthesised Term": "A stub glossary term produced by the e2e harness for reconciliation tests.",
+        }
 
 
 Override = dict[str, Any] | Callable[[dict[str, Any], dict[str, Any]], dict[str, Any]]
