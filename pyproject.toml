@@ -39,7 +39,7 @@ where = ["."]
 include = ["orchestrator*"]
 
 [tool.setuptools.package-data]
-orchestrator = ["prompts/**/*.md", "schemas/*.json", "profiles/*.yaml"]
+orchestrator = ["prompts/**/*.md", "schemas/*.json", "profiles/*.yaml", "verifiers/recipes/*.yaml"]
 
 [dependency-groups]
 dev = [

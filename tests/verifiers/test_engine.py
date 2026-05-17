@@ -109,6 +109,74 @@ def test_no_toolchain_returns_skipped_not_blocked(tmp_path: Path):
     assert (run_folder / "verification" / "VERIFY.md").exists()
 
 
+def _make_python_repo(tmp_path: Path, marker: str = "pyproject.toml") -> Path:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / marker).write_text("")
+    return repo
+
+
+def test_python_repo_detected_and_pytest_invoked(tmp_path: Path):
+    repo = _make_python_repo(tmp_path, "pyproject.toml")
+    run_folder = _make_run_folder(tmp_path)
+    with patch("orchestrator.verifiers.engine.subprocess.run", return_value=_completed(0)) as mock_run:
+        sig = verify(repo, run_folder)
+    assert sig["toolchain"] == "python"
+    assert sig["verification_status"] == "passed"
+    assert sig["command_ids"] == ["test"]
+    invoked = [c.kwargs.get("cmd") or c.args[0] for c in mock_run.call_args_list]
+    assert any("python -m pytest" in cmd for cmd in invoked)
+
+
+def test_python_repo_detected_via_test_file_glob(tmp_path: Path):
+    # A `.py` file under tests/ is enough to identify the project as Python — bare
+    # `tests/` is intentionally not a marker on its own.
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "tests").mkdir()
+    (repo / "tests" / "test_quote.py").write_text("")
+    run_folder = _make_run_folder(tmp_path)
+    with patch("orchestrator.verifiers.engine.subprocess.run", return_value=_completed(0)):
+        sig = verify(repo, run_folder)
+    assert sig["toolchain"] == "python"
+
+
+def test_python_bare_tests_dir_alone_does_not_select_python(tmp_path: Path):
+    # Bare `tests/` with no .py files inside must not mis-detect as Python; the
+    # verifier falls through to skipped instead of dispatching pytest.
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "tests").mkdir()
+    run_folder = _make_run_folder(tmp_path)
+    sig = verify(repo, run_folder)
+    assert sig["toolchain"] == "none"
+    assert sig["verification_status"] == "skipped"
+
+
+def test_python_failing_pytest_marks_failed(tmp_path: Path):
+    repo = _make_python_repo(tmp_path, "pyproject.toml")
+    run_folder = _make_run_folder(tmp_path)
+    with patch("orchestrator.verifiers.engine.subprocess.run", return_value=_completed(1)):
+        sig = verify(repo, run_folder)
+    assert sig["verification_status"] == "failed"
+    assert "test" in sig["failed_command_ids"]
+
+
+def test_python_verify_json_records_command(tmp_path: Path):
+    repo = _make_python_repo(tmp_path, "requirements.txt")
+    run_folder = _make_run_folder(tmp_path)
+    with patch("orchestrator.verifiers.engine.subprocess.run", return_value=_completed(0)):
+        verify(repo, run_folder)
+    data = json.loads((run_folder / "verification" / "verify.json").read_text())
+    assert data["toolchain"] == "python"
+    assert data["status"] == "passed"
+    assert any(c["command"] == "python -m pytest" for c in data["commands"])
+    test_cmd = next(c for c in data["commands"] if c["id"] == "test")
+    assert test_cmd["status"] == "passed"
+    assert test_cmd["exit_code"] == 0
+    assert "duration_seconds" in test_cmd
+
+
 def test_unknown_pinned_toolchain_raises(tmp_path: Path):
     """A `.cco.yaml` pin for a recipe that doesn't exist is a user config error, not a benign skip."""
     repo = _make_repo(tmp_path)

@@ -1,0 +1,24 @@
+toolchain: python
+priority: 50
+
+# Python projects can be marked by any of several files. The recipe matches when
+# at least one of these is present; no single file is required.
+#
+# Entries containing glob characters (*, ?, [) are matched against the repo with
+# Path.glob — so `tests/**/*.py` matches when any Python file lives under tests/.
+# Bare `tests/` is intentionally excluded: it shows up in non-Python repos too
+# (Go, Node) and would mis-detect them as Python on alphabetical tiebreak.
+any_markers:
+  - pyproject.toml
+  - requirements.txt
+  - setup.py
+  - setup.cfg
+  - pytest.ini
+  - tox.ini
+  - tests/**/*.py
+  - "*_test.py"
+
+commands:
+  - id: test
+    command: python -m pytest
+    required: true
