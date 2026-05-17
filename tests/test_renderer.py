@@ -149,3 +149,80 @@ def test_review_prompts_render_without_verification_context(tmp_path, reviewer):
     result = render_prompt("review", reviewer, review_vars, str(tmp_path), "myproject")
 
     assert "Deterministic verification context" not in result
+
+
+@pytest.mark.parametrize("reviewer", ["architecture", "implementation", "tests"])
+def test_review_prompts_include_blocking_policy(tmp_path, reviewer):
+    review_vars = {
+        **VARS,
+        "review_md": "/tmp/run/review/review-log.md",
+        "diff": "/tmp/run/review/diff-round-1.patch",
+        "round": "1",
+        "context_path": "/tmp/run/specification/context.md",
+    }
+
+    result = render_prompt("review", reviewer, review_vars, str(tmp_path), "myproject")
+
+    assert "## Blocking policy" in result
+    assert "confirmed violation" in result
+    assert "PRD" in result
+    assert "context.md" in result
+    assert "acceptance criteria" in result
+    assert "deterministic verification" in result
+    assert "documented user-facing behaviour" in result
+    # The "do not downgrade" framing must be present so reviewers know the
+    # listed excuses (happy path works, tests pass, edge case is uncommon, fix
+    # is small, found manually) do not justify dropping a confirmed violation.
+    assert "downgrade" in result
+    assert "happy path" in result
+    assert "edge case is uncommon" in result
+    assert "found manually" in result
+    # Confirmed-only — speculative concerns are still non-blocking.
+    assert "Speculative" in result or "speculative" in result
+
+
+def test_implementation_review_calls_out_unhandled_exception_5xx(tmp_path):
+    review_vars = {
+        **VARS,
+        "review_md": "/tmp/run/review/review-log.md",
+        "diff": "/tmp/run/review/diff-round-1.patch",
+        "round": "1",
+        "context_path": "/tmp/run/specification/context.md",
+    }
+
+    result = render_prompt("review", "implementation", review_vars, str(tmp_path), "myproject")
+
+    # The bug class that motivated this rule: user-controlled input parsing into
+    # infinity/NaN, then producing an unhandled exception or 5xx.
+    assert "unhandled exception" in result
+    assert "5xx" in result
+    assert "1e500" in result
+
+
+@pytest.mark.parametrize("template", ["default", "minimal"])
+def test_decomposition_prompts_include_numeric_edge_cases(tmp_path, template):
+    decomposition_vars = {
+        **VARS,
+        "prd_path": "/tmp/run/specification/prd.md",
+        "context_path": "/tmp/run/specification/context.md",
+        "run_glossary_path": "",
+        "canonical_glossary_path": "",
+    }
+
+    result = render_prompt("decomposition", template, decomposition_vars, str(tmp_path), "myproject")
+
+    assert "Numeric input edge cases" in result
+    # The full edge-case checklist must appear so implementation plans can
+    # explicitly enumerate or justify omission.
+    for needle in (
+        "negative values",
+        "zero where disallowed",
+        "non-numeric text",
+        "decimal values where integers are required",
+        "NaN",
+        "Infinity",
+        "1e500",
+        "extremely large values",
+        "whitespace",
+    ):
+        assert needle in result, f"missing edge case wording: {needle!r}"

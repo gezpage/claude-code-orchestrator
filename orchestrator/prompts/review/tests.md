@@ -107,12 +107,26 @@ A missing test is blocking if it would expose a confirmed bug or protect a docum
 - Any test that could pass or fail depending on execution order, timing, or environment state is a flakiness risk.
 - Flag these explicitly; they erode trust in the whole suite.
 
+## Blocking policy
+
+A finding **MUST** be blocking if it is a confirmed violation of any of:
+
+- the PRD
+- `context.md` binding constraints (including the "Quality Bar and Standards" section's testing requirements)
+- the slice spec or implementation-plan acceptance criteria
+- deterministic verification requirements
+- documented user-facing behaviour
+
+In test-review terms: an acceptance criterion with no corresponding test is a confirmed coverage violation and must be blocking — do **not** downgrade it because the happy path is covered, the edge case is uncommon, the missing test would be small, the gap was found manually rather than by automated verification, or the rest of the suite is good. Speculative or unconfirmed concerns still belong in non-blocking findings — this rule applies only to violations you have *confirmed* from the diff, the test files, or referenced documents.
+
+This rule overrides the triage caps below — a confirmed requirement violation is always blocking, even if it is the sixth finding.
+
 ## Triage and scope
 
 You are triaging, not exhaustively cataloguing.
 
-- Report **at most 5 blocking findings** (Critical or High). If more than 5 exist, keep the highest-leverage gaps — uncovered acceptance criteria and untested error paths take priority over assertion-quality nits.
-- Block only on coverage gaps for acceptance criteria, untested error/edge paths that materially affect correctness, or tests so weak they would not catch a realistic regression. Naming preferences and stylistic test concerns are **not** blocking.
+- Report **at most 5 blocking findings** (Critical or High). If more than 5 exist, keep the highest-leverage gaps — uncovered acceptance criteria and untested error paths take priority over assertion-quality nits — except that confirmed requirement violations under the Blocking policy above are never dropped.
+- Outside the Blocking policy, block only on coverage gaps for acceptance criteria, untested error/edge paths that materially affect correctness, or tests so weak they would not catch a realistic regression. Naming preferences and stylistic test concerns are **not** blocking.
 - Non-blocking findings: cap at 5. Skip anything that would be a one-line drive-by comment.
 - If nothing blocking is found, approve. Do not invent borderline issues to justify the review.
 

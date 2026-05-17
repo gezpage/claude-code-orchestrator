@@ -136,12 +136,36 @@ Block on:
 - Are configuration values externalised, not hard-coded?
 - Would this change degrade gracefully under load or partial failure?
 
+## Blocking policy
+
+A finding **MUST** be blocking if it is a confirmed violation of any of:
+
+- the PRD
+- `context.md` binding constraints (including "Quality Bar and Standards" and "Standing Constraints")
+- the slice spec or implementation-plan acceptance criteria
+- deterministic verification requirements
+- documented user-facing behaviour
+
+Do **not** downgrade a confirmed requirement violation to non-blocking because:
+
+- the happy path works
+- automated tests currently pass
+- the edge case is uncommon
+- the fix is small
+- the issue was found manually rather than by automated verification
+- the implementation is otherwise good
+
+In particular: any user-controlled input that can produce an unhandled exception or a 5xx response is blocking when the context requires graceful validation or "no 5xx for invalid input" behaviour. Treat parser quirks that accept exotic numeric literals (e.g. `1e500` → infinity, `NaN`, hex/octal forms, whitespace-padded values) as user-controlled input for this rule.
+
+This rule overrides the triage caps below — a confirmed requirement violation is always blocking, even if it is the sixth finding.
+
 ## Triage and scope
 
 You are triaging, not exhaustively cataloguing.
 
-- Report **at most 5 blocking findings** (Critical or High). If more than 5 exist, keep the highest-leverage ones and drop the rest.
-- Block only on issues that materially threaten correctness, security, data integrity, or production stability. Style preferences, naming nits, and speculative refactors are **not** blocking.
+- Report **at most 5 blocking findings** (Critical or High). If more than 5 exist, keep the highest-leverage ones and drop the rest — except that confirmed requirement violations under the Blocking policy above are never dropped.
+- Outside the Blocking policy, block only on issues that materially threaten correctness, security, data integrity, or production stability. Style preferences, naming nits, and speculative refactors are **not** blocking.
+- Speculative or unconfirmed concerns belong in non-blocking findings, not blocking ones. The Blocking policy applies only to violations you have *confirmed* from the diff, the code, or the verification report — not to suspicions.
 - Non-blocking findings: cap at 5. Skip anything that would be a one-line drive-by comment.
 - If nothing blocking is found, approve. Do not invent borderline issues to justify the review.
 
