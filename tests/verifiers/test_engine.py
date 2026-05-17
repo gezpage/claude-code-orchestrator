@@ -193,9 +193,10 @@ def test_explicit_toolchain_via_cco_yaml(tmp_path: Path):
     (repo / ".cco.yaml").write_text(yaml.dump({"verification": {"toolchain": "node", "commands": [], "probes": []}}))
     run_folder = _make_run_folder(tmp_path)
     sig = verify(repo, run_folder)
-    # No commands, no probes → trivially passed.
+    # No commands, no probes → no signal was produced. Surface as skipped, not
+    # passed: an empty pin must not masquerade as a clean verification.
     assert sig["toolchain"] == "node"
-    assert sig["verification_status"] == "passed"
+    assert sig["verification_status"] == "skipped"
 
 
 def test_command_override_replaces_recipe_commands(tmp_path: Path):

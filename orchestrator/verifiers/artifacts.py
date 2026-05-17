@@ -72,6 +72,12 @@ def aggregate_status(report: VerifyReport) -> str:
     A non-required command that was *skipped* because its precondition was not
     met (e.g. `if_script_exists` missed) is the recipe's own gating logic — not
     a warning. Only an outright `failed` non-required command warrants a warn.
+
+    When a recipe matched but every command and probe was skipped — i.e. zero
+    actual signal was produced — the status is ``skipped`` rather than
+    ``passed``. Reporting green for a run that never executed anything would
+    let detection-only matches (e.g. a stray source-tree marker without the
+    accompanying build files) silently masquerade as a clean verification.
     """
     has_required_failure = any(c.status == "failed" and c.required for c in report.commands)
     has_probe_failure = any(p.status == "failed" for p in report.probes)
@@ -80,7 +86,16 @@ def aggregate_status(report: VerifyReport) -> str:
     has_non_required_failure = any(c.status == "failed" and not c.required for c in report.commands)
     if has_non_required_failure:
         return "warned"
+    if not _any_ran(report):
+        return "skipped"
     return "passed"
+
+
+def _any_ran(report: VerifyReport) -> bool:
+    """True if any command or probe actually executed (passed or failed)."""
+    if any(c.status in {"passed", "failed"} for c in report.commands):
+        return True
+    return any(p.status in {"passed", "failed"} for p in report.probes)
 
 
 def classify_against_baseline(
@@ -149,6 +164,8 @@ def _net_new_status(report: VerifyReport) -> str:
     )
     if has_non_required_new:
         return "warned"
+    if not _any_ran(report):
+        return "skipped"
     return "passed"
 
 

@@ -19,6 +19,9 @@ def test_bundled_java_recipe_loads():
     assert "build.gradle" in recipe.any_markers
     assert "gradlew" in recipe.any_markers
     assert "mvnw" in recipe.any_markers
+    # `src/test/java` must NOT be a marker — every command is gated on a build
+    # file, so a repo with only source dirs would detect as Java and run nothing.
+    assert "src/test/java" not in recipe.any_markers
     cmd_ids = {c.id for c in recipe.commands}
     assert cmd_ids == {"test_mvnw", "test_maven", "test_gradlew", "test_gradle"}
 
@@ -200,7 +203,12 @@ def test_gradle_failing_tests_produce_failed_verification(tmp_path: Path):
 
 
 def test_java_project_with_only_settings_gradle_has_no_runnable_command(tmp_path: Path):
-    """settings.gradle alone detects Java but produces no runnable test command."""
+    """settings.gradle alone detects Java but produces no runnable test command.
+
+    All commands skip because the required build files are absent. The aggregate
+    status must surface as ``skipped`` — not ``passed`` — so a recipe match
+    that ran nothing cannot masquerade as a clean verification.
+    """
     repo = tmp_path / "repo"
     repo.mkdir()
     (repo / "settings.gradle").write_text("rootProject.name = 'x'")
@@ -211,10 +219,27 @@ def test_java_project_with_only_settings_gradle_has_no_runnable_command(tmp_path
         sig = verify(repo, run_folder)
 
     assert sig["toolchain"] == "java"
-    # No commands should run — all skipped due to missing prerequisite files.
     assert mock_run.call_count == 0
-    # All required commands skipped → not a hard failure.
-    assert sig["verification_status"] in {"passed", "warned", "skipped"}
+    assert sig["verification_status"] == "skipped"
+
+
+def test_bare_src_test_java_does_not_select_java_recipe(tmp_path: Path):
+    """A repo with only `src/test/java` (no build files) must not be detected as Java.
+
+    Regression for the original blocker: with `src/test/java` in `any_markers`,
+    Java was selected, all four commands skipped, and the report came back
+    green — masking the fact that nothing actually ran.
+    """
+    repo = tmp_path / "repo"
+    (repo / "src" / "test" / "java").mkdir(parents=True)
+
+    run_folder = _make_run_folder(tmp_path)
+    with patch("orchestrator.verifiers.engine.subprocess.run") as mock_run:
+        sig = verify(repo, run_folder)
+
+    assert mock_run.call_count == 0
+    assert sig["toolchain"] == "none"
+    assert sig["verification_status"] == "skipped"
 
 
 # ---------------------------------------------------------------------------

@@ -3,6 +3,9 @@ priority: 50
 
 # Java projects are identified by the presence of any common Maven or Gradle
 # build marker. No single file is required — any one match is sufficient.
+# `src/test/java` is deliberately NOT a marker: every command below is gated on
+# a Maven/Gradle build file, so a repo with only `src/test/java` would detect
+# as Java but run zero commands and still report green.
 any_markers:
   - pom.xml
   - build.gradle
@@ -11,7 +14,6 @@ any_markers:
   - settings.gradle.kts
   - gradlew
   - mvnw
-  - src/test/java
 
 commands:
   # Maven wrapper — preferred over plain `mvn` when the wrapper script is present.
