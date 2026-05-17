@@ -63,7 +63,7 @@ def test_required_any_of_unknown_id_raises(tmp_path: Path):
 def test_load_bundled_returns_all_recipes():
     recipes = load_bundled_recipes()
     names = {r.toolchain for r in recipes}
-    assert {"node", "go", "php", "python"} <= names
+    assert {"node", "go", "php", "python", "java"} <= names
 
 
 def test_bundled_python_recipe_loads():

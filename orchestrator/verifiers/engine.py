@@ -289,13 +289,30 @@ def _run_command(cmd: Command, repo_root: Path) -> CommandResult:
     )
 
 
+_GLOB_CHARS = frozenset("*?[")
+
+
+def _file_present(repo_root: Path, pattern: str) -> bool:
+    """Return True if `pattern` matches at least one path under `repo_root`.
+
+    Glob characters (`*`, `?`, `[`) trigger Path.glob; literal paths use .exists().
+    """
+    if any(ch in pattern for ch in _GLOB_CHARS):
+        return next(iter(repo_root.glob(pattern)), None) is not None
+    return (repo_root / pattern).exists()
+
+
 def _evaluate_precondition(cmd: Command, repo_root: Path) -> str | None:
     """Return a skip reason if any of the command's preconditions is not met, else None.
 
-    Three preconditions are supported, each gating on a different ecosystem signal:
+    Four preconditions are supported, each gating on a different ecosystem signal:
     - ``if_script_exists`` — Node ``package.json`` ``scripts`` map.
     - ``if_composer_script_exists`` — PHP ``composer.json`` ``scripts`` map.
-    - ``if_file_exists`` — any path relative to repo root.
+    - ``if_file_exists`` — any path or glob relative to repo root (used to gate
+      a command on the presence of a build file).
+    - ``if_file_not_exists`` — any path or glob relative to repo root (used to
+      prefer wrapper scripts like ``./mvnw`` over plain ``mvn`` when both could
+      run).
 
     All declared preconditions must pass; the first failure decides the reason.
     The checks themselves are mechanical (read JSON, look up a key, stat a path)
@@ -307,7 +324,10 @@ def _evaluate_precondition(cmd: Command, repo_root: Path) -> str | None:
     reason = _check_composer_script(cmd, repo_root)
     if reason is not None:
         return reason
-    return _check_file_exists(cmd, repo_root)
+    reason = _check_file_exists(cmd, repo_root)
+    if reason is not None:
+        return reason
+    return _check_file_not_exists(cmd, repo_root)
 
 
 def _check_node_script(cmd: Command, repo_root: Path) -> str | None:
@@ -345,8 +365,16 @@ def _check_composer_script(cmd: Command, repo_root: Path) -> str | None:
 def _check_file_exists(cmd: Command, repo_root: Path) -> str | None:
     if cmd.if_file_exists is None:
         return None
-    if not (repo_root / cmd.if_file_exists).exists():
-        return f"file not found: {cmd.if_file_exists}"
+    if not _file_present(repo_root, cmd.if_file_exists):
+        return f"required file not found: {cmd.if_file_exists}"
+    return None
+
+
+def _check_file_not_exists(cmd: Command, repo_root: Path) -> str | None:
+    if cmd.if_file_not_exists is None:
+        return None
+    if _file_present(repo_root, cmd.if_file_not_exists):
+        return f"skipped: {cmd.if_file_not_exists} present (prefer wrapper)"
     return None
 
 
