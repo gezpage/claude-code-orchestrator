@@ -19,11 +19,13 @@ You are addressing reviewer feedback on branch `{{ branch }}` in `$REPO_ROOT`. Y
 5. For each issue you fix:
    - Re-read the reviewer's exact wording before writing code to confirm you are addressing it accurately.
    - Apply the minimum change needed to resolve the concern — no more.
+   - If the issue is a bug (incorrect behaviour, unhandled input, broken contract), add or update a test that would have caught it. The test must fail before the fix and pass after. If a test cannot reasonably be written for the specific concern (e.g. a documentation finding), state why in the commit body.
    - Commit the fix with a message that references the reviewer and the concern (e.g. `fix: resolve architecture reviewer concern on layer boundary in auth.py`).
    - One commit per reviewer concern — do not bundle multiple fixes into one commit.
 6. Do not refactor opportunistically. Do not improve code the reviewer did not flag.
 7. Do not introduce new functionality during a fix cycle.
-8. After all fixes are applied, confirm the git working tree is clean before emitting the signal.
+8. After all fixes are applied, rerun the project's tests (use the command the implementation stage ran, or the closest equivalent) and confirm they pass before emitting the signal. Confirm the git working tree is clean.
+9. In the final agent message — before the `SIGNAL_JSON:` line — write a short summary listing each blocking finding you addressed and the commit hash that addressed it. Do not list non-blocking findings unless you chose to fix one under rule 3. The summary is for the reviewer who will run the next round; keep it to one line per finding.
 
 ## Output
 
