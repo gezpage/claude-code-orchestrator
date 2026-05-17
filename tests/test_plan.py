@@ -188,8 +188,10 @@ def test_init_plan_md_start_done_nodes(tmp_path):
     # Start now passes through the overview input before the first stage's prompt.
     assert "Start --> overview" in content
     assert "overview --> discovery_prompt" in content
-    # Done is reached from the last stage's panel, not the stage node.
-    assert "specification_panel --> Done" in content
+    # The executive_summary finalisation stage sits between the last profile
+    # stage and Done, so the last profile stage flows into it (not Done).
+    assert "specification_panel --> executive_summary_prompt" in content
+    assert "executive_summary_panel --> Done" in content
 
 
 def test_init_plan_md_start_done_single_stage(tmp_path):
@@ -199,11 +201,13 @@ def test_init_plan_md_start_done_single_stage(tmp_path):
     content = (run_folder / "plan.md").read_text()
     assert "Start --> overview" in content
     assert "overview --> discovery_prompt" in content
-    assert "discovery_panel --> Done" in content
+    assert "discovery_panel --> executive_summary_prompt" in content
+    assert "executive_summary_panel --> Done" in content
 
 
 def test_init_plan_md_start_done_with_review(tmp_path):
-    """Done should connect from the stage after review fan-in, not from review parent."""
+    """Done should connect via the executive_summary finalisation node, not from
+    the last profile stage's panel directly."""
     run_folder = _make_run_folder(tmp_path)
     profile = Profile(
         name="test",
@@ -215,7 +219,8 @@ def test_init_plan_md_start_done_with_review(tmp_path):
     )
     init_plan_md(run_folder, profile)
     content = (run_folder / "plan.md").read_text()
-    assert "harvest_panel --> Done" in content
+    assert "harvest_panel --> executive_summary_prompt" in content
+    assert "executive_summary_panel --> Done" in content
     assert "review --> Done" not in content
     assert "review_panel --> Done" not in content
 
@@ -1132,8 +1137,10 @@ def test_set_pr_node_splices_after_fix_cycle_predecessor(tmp_path):
     # PR node exists and links to the supplied URL.
     assert "pr([" in content
     assert "/pull/77" in content
-    # The re-review node from the fix cycle is the predecessor of pr (not Done).
-    assert "review_tests_2_panel --> pr" in content
+    # The re-review node from the fix cycle still flows into the executive_summary
+    # finalisation stage; pr splices in between executive_summary and Done.
+    assert "review_tests_2_panel --> executive_summary_prompt" in content
+    assert "executive_summary_panel --> pr" in content
     assert "pr --> Done" in content
     # Nothing else should still point directly at Done.
     assert "review_tests_2_panel --> Done" not in content
@@ -1146,7 +1153,7 @@ def test_set_pr_node_splices_after_fix_cycle_predecessor(tmp_path):
 def test_init_plan_md_renders_pr_stage_when_create_pr_true(tmp_path):
     """With create_pr=True, the PR stage node appears in the diagram alongside
     other stages (rect shape, prompt/panel partners) — spliced between the last
-    stage and Done."""
+    profile stage and the always-on executive_summary finalisation node."""
     run_folder = _make_run_folder(tmp_path)
     profile = _simple_profile("specification", "implementation")
     init_plan_md(run_folder, profile, create_pr=True)
@@ -1155,21 +1162,72 @@ def test_init_plan_md_renders_pr_stage_when_create_pr_true(tmp_path):
     assert "pr[" in content
     assert "pr([" not in content
     assert "pr --> pr_panel" in content
-    # Last stage panel flows into pr; pr_panel flows into Done.
+    # Last profile stage panel flows into pr; pr panel flows into executive_summary;
+    # executive_summary panel flows into Done.
     assert "implementation_panel --> pr" in content
-    assert "pr_panel --> Done" in content
+    assert "pr_panel --> executive_summary_prompt" in content
+    assert "executive_summary_panel --> Done" in content
     # Direct last-stage→Done edge must not survive the splice.
     assert "implementation_panel --> Done" not in content
 
 
 def test_init_plan_md_omits_pr_stage_when_create_pr_false(tmp_path):
-    """With create_pr=False (default), no PR node is added to the diagram."""
+    """With create_pr=False (default), no PR node is added to the diagram. The
+    always-on executive_summary node is still emitted between the last profile
+    stage and Done."""
     run_folder = _make_run_folder(tmp_path)
     profile = _simple_profile("specification", "implementation")
     init_plan_md(run_folder, profile)
     content = (run_folder / "plan.md").read_text()
+    # "pr_panel" must not match "executive_summary..." substrings: require the
+    # exact pr-rect declaration to be absent.
     assert "pr[" not in content
-    assert "pr_panel" not in content
+    assert "    pr_panel@" not in content
+    # executive_summary still bridges the last profile stage and Done.
+    assert "implementation_panel --> executive_summary_prompt" in content
+    assert "executive_summary_panel --> Done" in content
+
+
+def test_executive_summary_node_renders_as_stage(tmp_path):
+    """The always-on executive_summary finalisation node renders with the same
+    rect shape, Input parallelogram, and JSON output panel as profile stages,
+    and is wired between the last profile stage and Done."""
+    run_folder = _make_run_folder(tmp_path)
+    profile = _simple_profile("specification")
+    init_plan_md(run_folder, profile)
+    content = (run_folder / "plan.md").read_text()
+    # Rect-shape stage with both partners.
+    assert "executive_summary[" in content
+    assert "executive_summary([" not in content
+    assert "executive_summary_prompt@{ shape: card" in content
+    assert "executive_summary_panel@{ shape: doc" in content
+    # Internal partner edges wired up.
+    assert "executive_summary_prompt --> executive_summary" in content
+    assert "executive_summary --> executive_summary_panel" in content
+    # Display label is "Executive Summary" (not "Executive_summary").
+    assert "Executive Summary" in content
+
+
+def test_executive_summary_node_claims_root_summary_file(tmp_path):
+    """The executive_summary.md artefact at the run folder root attaches to the
+    executive_summary panel rather than appearing in the trailing other-files
+    button strip."""
+    run_folder = _make_run_folder(tmp_path)
+    profile = _simple_profile("harvest")
+    init_plan_md(run_folder, profile)
+    (run_folder / "executive_summary.md").write_text("# Executive Summary\n")
+    rerender_plan_md(run_folder)
+    content = (run_folder / "plan.md").read_text()
+    # The other-files button strip must not surface executive_summary.md.
+    if "<!-- other-files-begin -->" in content:
+        legend_start = content.find("<!-- other-files-begin -->")
+        legend_end = content.find("<!-- other-files-end -->")
+        assert "executive_summary.md" not in content[legend_start:legend_end]
+    # The panel for the executive_summary node should contain a link to it.
+    panel_start = content.find("executive_summary_panel@")
+    panel_end = content.find("\n", panel_start)
+    panel_decl = content[panel_start:panel_end]
+    assert "executive_summary.md" in panel_decl
 
 
 def test_set_pr_node_updates_existing_pr_stage_panel(tmp_path):
@@ -1189,19 +1247,20 @@ def test_set_pr_node_updates_existing_pr_stage_panel(tmp_path):
     assert "class pr complete" in content
 
 
-def test_bold_link_style_appears_for_passed_stages(tmp_path):
-    """Once a stage transitions to passed, the edges on its completed path
-    render with a thicker stroke via a linkStyle directive."""
+def test_all_edges_render_with_uniform_thin_stroke(tmp_path):
+    """All edges render with the default thin stroke (lineColor from the init
+    directive) — no linkStyle directive should appear even after stages pass."""
     run_folder = _make_run_folder(tmp_path)
     profile = _simple_profile("specification", "implementation")
     init_plan_md(run_folder, profile)
-    # No passed stages yet → no linkStyle directive in the rendered block.
-    assert "linkStyle" not in (run_folder / "plan.md").read_text()
+    initial = (run_folder / "plan.md").read_text()
+    assert "linkStyle" not in initial
+    assert "stroke-width:3px" not in initial
 
     update_plan_md(run_folder, "specification", "passed", elapsed_secs=10)
     content = (run_folder / "plan.md").read_text()
-    assert "linkStyle" in content
-    assert "stroke-width:3px" in content
+    assert "linkStyle" not in content
+    assert "stroke-width:3px" not in content
 
 
 def test_mark_pipeline_done_flips_done_node_to_complete(tmp_path):

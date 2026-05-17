@@ -1454,6 +1454,13 @@ def run_pipeline(
     if preflight.create_pr:
         pr_notice = f"_will be created on completion (base: `{preflight.base_branch}`)_"
     runners, agent_metadata = _build_stage_runners(profile)
+    # Resolved here (not in the post-loop section) so the initial diagram can
+    # stamp the executive_summary node with the runner that will write it.
+    finalisation_agent = resolve_agent_config(profile.agent, None)
+    agent_metadata.setdefault(
+        "executive_summary",
+        {"backend": finalisation_agent.backend, "model": finalisation_agent.model},
+    )
     init_plan_md(
         run_folder,
         profile,
@@ -1502,9 +1509,6 @@ def run_pipeline(
         resume=resume,
     )
 
-    # Resolved once so the finalisation phase honours the configured backend
-    # (e.g. codex_cli) instead of silently falling back to the default runner.
-    finalisation_agent = resolve_agent_config(profile.agent, None)
     # pr_draft can carry its own profile-level override so a cheaper model
     # (e.g. Sonnet) can draft the PR while heavy stages stay on Opus. See ADR-029.
     pr_draft_agent_config = resolve_agent_config(profile.agent, profile.pr_draft_agent)
@@ -1811,6 +1815,7 @@ def _finalize_summary(
         "pr_url": pr_url or "not created",
         "repo_root": repo_root,
     }
+    t0 = time.monotonic()
     try:
         sig = run_stage(
             "executive_summary",
@@ -1824,18 +1829,23 @@ def _finalize_summary(
         )
     except Exception as exc:
         logger.log("pipeline", "WARN", f"executive summary skipped: {exc}")
+        update_plan_md(run_folder, "executive_summary", "blocked", elapsed_secs=time.monotonic() - t0)
         return
 
-    if sig.get("status") != "passed":
+    elapsed_secs = time.monotonic() - t0
+    status = sig.get("status", "blocked")
+    if status != "passed":
         logger.log(
             "pipeline",
             "WARN",
-            f"executive summary not produced: {sig.get('message', sig.get('status'))}",
+            f"executive summary not produced: {sig.get('message', status)}",
         )
+        update_plan_md(run_folder, "executive_summary", status, elapsed_secs=elapsed_secs)
         return
 
     state_mod.save_stage_signal(run_folder, "executive_summary", sig)
     state_mod.save_stage_agent(run_folder, "executive_summary", agent_config.backend, agent_config.model)
+    update_plan_md(run_folder, "executive_summary", "passed", elapsed_secs=elapsed_secs, signal=sig)
     logger.log("pipeline", "INFO", f"executive summary written: {summary_path}")
 
 
