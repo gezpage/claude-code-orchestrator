@@ -63,7 +63,26 @@ def test_required_any_of_unknown_id_raises(tmp_path: Path):
 def test_load_bundled_returns_all_recipes():
     recipes = load_bundled_recipes()
     names = {r.toolchain for r in recipes}
-    assert {"node", "go", "php", "python", "java"} <= names
+    assert {"node", "go", "php", "python", "java", "typescript"} <= names
+
+
+def test_bundled_typescript_recipe_loads():
+    recipe = load_recipe_by_toolchain("typescript")
+    assert recipe.toolchain == "typescript"
+    assert "package.json" in recipe.markers
+    assert recipe.priority > 50  # must beat Node
+    # TypeScript signal can come from any of several files/globs.
+    assert "tsconfig.json" in recipe.any_markers
+    assert "vite.config.ts" in recipe.any_markers
+    # test command is required, gated on the npm script existing.
+    test_cmd = next(c for c in recipe.commands if c.id == "test")
+    assert test_cmd.required
+    assert test_cmd.if_script_exists == "test"
+    # typecheck is optional but explicitly present.
+    tc_cmd = next(c for c in recipe.commands if c.id == "typecheck")
+    assert not tc_cmd.required
+    assert tc_cmd.if_script_exists == "typecheck"
+    assert "node_manifest_sanity" in recipe.probes
 
 
 def test_bundled_python_recipe_loads():
