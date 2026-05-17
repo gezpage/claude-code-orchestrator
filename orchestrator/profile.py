@@ -15,6 +15,20 @@ class ExpansionKind(StrEnum):
     PROMPTS = "prompts"  # fan-out to named prompt sub-nodes (e.g. multi-reviewer)
 
 
+_WAVE_VERIFICATION_POLICIES: tuple[str, ...] = ("warn", "fix_then_retry", "block")
+
+
+@dataclass(frozen=True)
+class WaveVerification:
+    """Per-stage policy for deterministic verification between slice waves.
+
+    Triggered by slice expansion/config — never by profile name. See ADR-030.
+    """
+
+    enabled: bool = False
+    on_failure: Literal["warn", "fix_then_retry", "block"] = "warn"
+
+
 @dataclass(frozen=True)
 class StageConfig:
     name: str
@@ -26,6 +40,7 @@ class StageConfig:
     expansion: ExpansionKind = ExpansionKind.NONE
     slices_from_stage: str | None = None  # SLICES: which prior signal carries slice_files
     cwd_from_repo_root: bool = False
+    wave_verification: WaveVerification | None = None
     # Raw agent config; merged with the profile-level default at dispatch time so
     # profile parsing stays oblivious to the agent_runner module.
     agent: dict[str, object] | None = None
@@ -64,6 +79,8 @@ def _parse_stage(raw: dict) -> StageConfig:
     if agent is not None and not isinstance(agent, dict):
         raise ValueError(f"Stage {raw.get('stage')!r}: 'agent' must be a mapping")
 
+    wave_verification = _parse_wave_verification(raw, expansion)
+
     return StageConfig(
         name=raw["stage"],
         mode=mode,
@@ -74,7 +91,35 @@ def _parse_stage(raw: dict) -> StageConfig:
         expansion=expansion,
         slices_from_stage=raw.get("slices_from_stage"),
         cwd_from_repo_root=bool(raw.get("cwd_from_repo_root", False)),
+        wave_verification=wave_verification,
         agent=dict(agent) if agent else None,
+    )
+
+
+def _parse_wave_verification(raw: dict, expansion: ExpansionKind) -> WaveVerification | None:
+    """Parse the optional ``wave_verification`` block on a stage.
+
+    Default-on for slice-expansion stages with ``on_failure: warn`` — keyed off the
+    expansion kind, never a profile name. See ADR-030. Stages can disable explicitly
+    by setting ``wave_verification: {enabled: false}``; non-slice stages return None
+    so the dispatcher loop short-circuits.
+    """
+    raw_wv = raw.get("wave_verification")
+    if raw_wv is None:
+        if expansion == ExpansionKind.SLICES:
+            return WaveVerification(enabled=True, on_failure="warn")
+        return None
+    if not isinstance(raw_wv, dict):
+        raise ValueError(f"Stage {raw.get('stage')!r}: 'wave_verification' must be a mapping")
+    on_failure = raw_wv.get("on_failure", "warn")
+    if on_failure not in _WAVE_VERIFICATION_POLICIES:
+        raise ValueError(
+            f"Stage {raw.get('stage')!r}: 'wave_verification.on_failure' must be one of "
+            f"{list(_WAVE_VERIFICATION_POLICIES)}; got {on_failure!r}"
+        )
+    return WaveVerification(
+        enabled=bool(raw_wv.get("enabled", True)),
+        on_failure=on_failure,
     )
 
 

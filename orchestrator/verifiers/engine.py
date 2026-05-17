@@ -29,10 +29,14 @@ class VerificationError(RuntimeError):
     """Raised when verification cannot start (no toolchain resolvable)."""
 
 
-def verify(repo_root: Path, run_folder: Path) -> dict:
-    """Run deterministic verification against `repo_root`, write artifacts under `run_folder/verification/`.
+def verify(repo_root: Path, run_folder: Path, *, artifact_subdir: str = "verification") -> dict:
+    """Run deterministic verification against `repo_root`, write artifacts under `run_folder/<artifact_subdir>/`.
 
     Returns a signal dict matching `schemas/verification.json`.
+
+    ``artifact_subdir`` lets callers route per-wave runs into distinct folders
+    (e.g. ``wave-verification/wave-1``) so wave-level reports do not overwrite
+    the post-implementation ``verification/`` report. See ADR-030.
 
     If no toolchain can be detected and there is no `.cco.yaml` pin, returns a
     benign "skipped" report — verification is not a hard gate, and a repo
@@ -46,7 +50,7 @@ def verify(repo_root: Path, run_folder: Path) -> dict:
     project_cfg = load_project_config(repo_root)
     recipe = _resolve_recipe(repo_root, project_cfg)
     if recipe is None:
-        return _skipped_report(run_folder)
+        return _skipped_report(run_folder, artifact_subdir)
     commands, probe_names = _apply_overrides(recipe, project_cfg)
 
     report = VerifyReport(status="passed", toolchain=recipe.toolchain)
@@ -65,7 +69,7 @@ def verify(repo_root: Path, run_folder: Path) -> dict:
 
     report.status = aggregate_status(report)
 
-    artifacts_dir = run_folder / "verification"
+    artifacts_dir = run_folder / artifact_subdir
     verify_md = artifacts_dir / "VERIFY.md"
     verify_json = artifacts_dir / "verify.json"
     write_markdown(report, verify_md)
@@ -104,10 +108,10 @@ def _resolve_recipe(repo_root: Path, cfg: ProjectVerifyConfig | None) -> Recipe 
     return detect_toolchain(repo_root, recipes)
 
 
-def _skipped_report(run_folder: Path) -> dict:
+def _skipped_report(run_folder: Path, artifact_subdir: str = "verification") -> dict:
     """Build a benign skipped report for repos with no detectable toolchain."""
     report = VerifyReport(status="passed", toolchain="none")
-    artifacts_dir = run_folder / "verification"
+    artifacts_dir = run_folder / artifact_subdir
     verify_md = artifacts_dir / "VERIFY.md"
     verify_json = artifacts_dir / "verify.json"
     write_markdown(report, verify_md)

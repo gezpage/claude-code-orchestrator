@@ -307,3 +307,152 @@ def test_pr_draft_agent_must_be_mapping(tmp_path):
     p.write_text(yaml.dump({"name": "p", "pr_draft": {"agent": "nope"}, "stages": []}))
     with pytest.raises(ValueError, match=r"'pr_draft\.agent' must be a mapping"):
         load_profile(str(p))
+
+
+# ── wave_verification (ADR-030) ───────────────────────────────────────────────
+
+
+def test_slice_stage_default_enables_wave_verification_with_warn(tmp_path):
+    """Default is on for slice expansion with on_failure=warn, no profile-name keying."""
+    p = tmp_path / "p.yaml"
+    p.write_text(
+        yaml.dump(
+            {
+                "name": "p",
+                "stages": [
+                    {"stage": "impl", "expansion": "slices", "slices_from_stage": "decomp"},
+                ],
+            }
+        )
+    )
+    profile = load_profile(str(p))
+    wv = profile.stages[0].wave_verification
+    assert wv is not None
+    assert wv.enabled is True
+    assert wv.on_failure == "warn"
+
+
+def test_non_slice_stage_has_no_wave_verification(tmp_path):
+    p = tmp_path / "p.yaml"
+    p.write_text(yaml.dump({"name": "p", "stages": [{"stage": "spec"}]}))
+    profile = load_profile(str(p))
+    assert profile.stages[0].wave_verification is None
+
+
+def test_slice_stage_can_disable_wave_verification(tmp_path):
+    p = tmp_path / "p.yaml"
+    p.write_text(
+        yaml.dump(
+            {
+                "name": "p",
+                "stages": [
+                    {
+                        "stage": "impl",
+                        "expansion": "slices",
+                        "wave_verification": {"enabled": False},
+                    },
+                ],
+            }
+        )
+    )
+    profile = load_profile(str(p))
+    wv = profile.stages[0].wave_verification
+    assert wv is not None
+    assert wv.enabled is False
+
+
+def test_wave_verification_block_policy_parsed(tmp_path):
+    p = tmp_path / "p.yaml"
+    p.write_text(
+        yaml.dump(
+            {
+                "name": "p",
+                "stages": [
+                    {
+                        "stage": "impl",
+                        "expansion": "slices",
+                        "wave_verification": {"enabled": True, "on_failure": "block"},
+                    },
+                ],
+            }
+        )
+    )
+    profile = load_profile(str(p))
+    wv = profile.stages[0].wave_verification
+    assert wv is not None
+    assert wv.on_failure == "block"
+
+
+def test_wave_verification_fix_then_retry_policy_parsed(tmp_path):
+    p = tmp_path / "p.yaml"
+    p.write_text(
+        yaml.dump(
+            {
+                "name": "p",
+                "stages": [
+                    {
+                        "stage": "impl",
+                        "expansion": "slices",
+                        "wave_verification": {"on_failure": "fix_then_retry"},
+                    },
+                ],
+            }
+        )
+    )
+    profile = load_profile(str(p))
+    wv = profile.stages[0].wave_verification
+    assert wv is not None
+    assert wv.enabled is True
+    assert wv.on_failure == "fix_then_retry"
+
+
+def test_wave_verification_unknown_policy_raises(tmp_path):
+    p = tmp_path / "p.yaml"
+    p.write_text(
+        yaml.dump(
+            {
+                "name": "p",
+                "stages": [
+                    {
+                        "stage": "impl",
+                        "expansion": "slices",
+                        "wave_verification": {"on_failure": "panic"},
+                    },
+                ],
+            }
+        )
+    )
+    with pytest.raises(ValueError, match=r"on_failure"):
+        load_profile(str(p))
+
+
+def test_wave_verification_must_be_mapping(tmp_path):
+    p = tmp_path / "p.yaml"
+    p.write_text(
+        yaml.dump(
+            {
+                "name": "p",
+                "stages": [
+                    {"stage": "impl", "expansion": "slices", "wave_verification": ["nope"]},
+                ],
+            }
+        )
+    )
+    with pytest.raises(ValueError, match=r"'wave_verification' must be a mapping"):
+        load_profile(str(p))
+
+
+def test_full_profile_implementation_has_wave_verification():
+    """The full profile uses slice expansion, so it gets the default-on policy."""
+    profile = load_profile("full")
+    impl = next(s for s in profile.stages if s.name == "implementation")
+    assert impl.wave_verification is not None
+    assert impl.wave_verification.enabled is True
+    assert impl.wave_verification.on_failure == "warn"
+
+
+def test_minimal_profile_implementation_has_no_wave_verification():
+    """Minimal does not slice — wave verification stays off, no profile-name branching."""
+    profile = load_profile("minimal")
+    impl = next(s for s in profile.stages if s.name == "implementation")
+    assert impl.wave_verification is None
