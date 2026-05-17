@@ -256,10 +256,14 @@ def test_full_happy_path(tmp_path):
 
     git_mock = MagicMock(return_value=_git_ok())
 
+    mock_plan = MagicMock()
     with (
         patch("orchestrator.orchestrate.run_stage", side_effect=fake_run_stage) as mock_rs,
         patch("orchestrator.orchestrate.run_interactive_stage") as mock_ris,
-        patch("orchestrator.orchestrate.update_plan_md") as mock_plan,
+        patch("orchestrator.orchestrate.update_plan_md", mock_plan),
+        # plan_updates helpers (e.g. stamp_node_passed_with_commits) also call
+        # update_plan_md — patch both bindings so the mock sees every stamp.
+        patch("orchestrator.plan_updates.update_plan_md", mock_plan),
         patch("orchestrator.orchestrate.subprocess.run", return_value=_git_ok()),
         _patch_safe_git_state(),
     ):
@@ -1827,6 +1831,9 @@ def test_wave_verification_section_appended_to_plan_md(tmp_path):
         patch("orchestrator.orchestrate._create_branch"),
         patch("orchestrator.orchestrate.run_stage", return_value={"status": "passed", "commit_hashes": ["a1"]}),
         patch("orchestrator.orchestrate.update_plan_md"),
+        # The slice-passed stamp now flows through plan_updates; silence that
+        # binding too so this test's hand-written plan.md is not mutated.
+        patch("orchestrator.plan_updates.update_plan_md"),
         patch("orchestrator.orchestrate.expand_nodes"),
         patch("orchestrator.verifiers.engine.verify", return_value=verify_sig),
     ):

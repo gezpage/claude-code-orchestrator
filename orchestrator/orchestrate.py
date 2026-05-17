@@ -18,14 +18,15 @@ from orchestrator import state as state_mod
 from orchestrator._git import GitStateError
 from orchestrator.agent_runner import AgentConfig, AgentRunner, build_runner, resolve_agent_config
 from orchestrator.logger import OrchestratorLogger
-from orchestrator.plan import (
-    expand_nodes,
+from orchestrator.plan import expand_nodes
+from orchestrator.plan_updates import (
     init_plan_md,
     mark_pipeline_done,
     mark_pr_blocked,
     resolve_review_subnode_statuses,
     set_pr_node,
     set_pr_notice,
+    stamp_node_passed_with_commits,
     update_plan_md,
 )
 from orchestrator.profile import ExpansionKind, Profile, StageConfig, load_profile
@@ -693,12 +694,11 @@ def _dispatch_slices(
                 return {"stage": stage.name, "status": sig["status"], "message": sig.get("message", "")}
             commits = sig.get("commit_hashes", [])
             all_commits.extend(commits)
-            update_plan_md(
+            stamp_node_passed_with_commits(
                 run_folder,
                 sub_id,
-                "passed",
                 elapsed_secs=elapsed,
-                output_summary=f"{len(commits)} commit{'s' if len(commits) != 1 else ''}" if commits else None,
+                commits=commits,
                 signal=sig,
                 impl_name=impl,
                 repo_root=variables.get("repo_root"),
@@ -783,14 +783,11 @@ def _dispatch_slices(
                             continue
                         commits = sig.get("commit_hashes", [])
                         all_commits.extend(commits)
-                        update_plan_md(
+                        stamp_node_passed_with_commits(
                             run_folder,
                             sub_id,
-                            "passed",
                             elapsed_secs=elapsed,
-                            output_summary=f"{len(commits)} commit{'s' if len(commits) != 1 else ''}"
-                            if commits
-                            else None,
+                            commits=commits,
                             signal=sig,
                             impl_name=impl,
                             repo_root=variables.get("repo_root"),
