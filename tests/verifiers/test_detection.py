@@ -4,11 +4,12 @@ from orchestrator.verifiers.detection import detect_toolchain
 from orchestrator.verifiers.recipe import Command, Recipe
 
 
-def _recipe(name: str, priority: int, markers: tuple[str, ...]) -> Recipe:
+def _recipe(name: str, priority: int, markers: tuple[str, ...], any_markers: tuple[str, ...] = ()) -> Recipe:
     return Recipe(
         toolchain=name,
         priority=priority,
         markers=markers,
+        any_markers=any_markers,
         commands=(Command(id="t", command="true", required=True),),
         probes=(),
     )
@@ -56,3 +57,38 @@ def test_tiebreak_deterministic_on_equal_priority(tmp_path: Path):
     chosen = detect_toolchain(tmp_path, [node, go])
     assert chosen is not None
     assert chosen.toolchain == "go"  # alphabetical
+
+
+def test_any_markers_matches_when_one_present(tmp_path: Path):
+    # any_markers semantics: at least one entry must be present.
+    (tmp_path / "pyproject.toml").write_text("")
+    py = _recipe("python", 50, markers=(), any_markers=("pyproject.toml", "requirements.txt", "setup.py"))
+    chosen = detect_toolchain(tmp_path, [py])
+    assert chosen is not None
+    assert chosen.toolchain == "python"
+
+
+def test_any_markers_no_match_when_none_present(tmp_path: Path):
+    py = _recipe("python", 50, markers=(), any_markers=("pyproject.toml", "requirements.txt"))
+    chosen = detect_toolchain(tmp_path, [py])
+    assert chosen is None
+
+
+def test_any_markers_directory_entry_matches(tmp_path: Path):
+    # `tests/` is a directory marker — Path.exists() returns True for dirs too.
+    (tmp_path / "tests").mkdir()
+    py = _recipe("python", 50, markers=(), any_markers=("pyproject.toml", "tests"))
+    chosen = detect_toolchain(tmp_path, [py])
+    assert chosen is not None
+    assert chosen.toolchain == "python"
+
+
+def test_markers_and_any_markers_combine_with_and(tmp_path: Path):
+    # `markers` must all be present AND at least one `any_markers` entry must be present.
+    (tmp_path / "foo.lock").write_text("")
+    # Only `markers` present, none of `any_markers` → no match.
+    r = _recipe("hybrid", 50, markers=("foo.lock",), any_markers=("alt1", "alt2"))
+    assert detect_toolchain(tmp_path, [r]) is None
+    # Adding one any_markers entry satisfies the recipe.
+    (tmp_path / "alt2").write_text("")
+    assert detect_toolchain(tmp_path, [r]) is not None

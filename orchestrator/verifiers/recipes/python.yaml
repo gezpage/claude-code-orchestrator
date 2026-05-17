@@ -1,0 +1,18 @@
+toolchain: python
+priority: 50
+
+# Python projects can be marked by any of several files. The recipe matches when
+# at least one of these is present; no single file is required.
+any_markers:
+  - pyproject.toml
+  - requirements.txt
+  - setup.py
+  - setup.cfg
+  - pytest.ini
+  - tox.ini
+  - tests
+
+commands:
+  - id: test
+    command: python -m pytest
+    required: true
