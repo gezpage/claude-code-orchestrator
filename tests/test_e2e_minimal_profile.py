@@ -19,31 +19,6 @@ from orchestrator import orchestrate
 from tests import e2e_harness as h
 
 
-def _decomposition_override(default_sig, ctx):
-    """Force the synthesised decomposition signal to match the real prompt contract.
-
-    The real `prompts/decomposition/minimal.md` writes one plan at
-    `$RUN_FOLDER/decomposition/implementation-plan.md` and emits no
-    slice_files / slice_groups. We materialise that file here so the
-    downstream assertion that the path exists is meaningful, and we clean
-    up the harness's auto-synthesised `S-NN-auto.md` stubs (which the
-    real minimal prompt never produces) so the "no slice naming anywhere"
-    assertion reflects orchestrator behaviour only.
-    """
-    run_folder = ctx["run_folder"]
-    decomp_dir = run_folder / "decomposition"
-    decomp_dir.mkdir(parents=True, exist_ok=True)
-    for stub in decomp_dir.glob("S-*.md"):
-        stub.unlink()
-    plan_path = decomp_dir / "implementation-plan.md"
-    plan_path.write_text("# Implementation plan (synthesised)\n")
-    out = dict(default_sig)
-    out["plan_file"] = str(plan_path)
-    out["slice_files"] = []
-    out["slice_groups"] = []
-    return out
-
-
 def test_minimal_profile_e2e_happy_path(tmp_path):
     out_dir = h.resolve_output_dir(tmp_path)
     docs_root, feature_path = h.setup_docs(out_dir)
@@ -53,7 +28,7 @@ def test_minimal_profile_e2e_happy_path(tmp_path):
     subprocess_mock = MagicMock(return_value=h.git_ok())
 
     with (
-        h.patch_run_stage(overrides={"decomposition": _decomposition_override}) as fake,
+        h.patch_run_stage() as fake,
         patch("orchestrator.orchestrate.subprocess.run", subprocess_mock),
         patch("orchestrator.orchestrate._resolve_run_folder", return_value=run_folder),
     ):
