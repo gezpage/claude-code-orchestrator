@@ -46,6 +46,8 @@ Developer-facing reference. Read before touching any orchestrator code.
 
 - **Wave-level deterministic verification is keyed off `StageConfig.wave_verification` — never off profile or stage name.** Stages with `expansion: slices` default to `wave_verification: {enabled: true, on_failure: warn}`; `_maybe_run_wave_verification` in `orchestrate.py` is called from `_dispatch_slices` after each slice group merges, writing artifacts under `wave-verification/wave-{N}/` via the existing verifier engine. Policy values are `warn` (default — log and continue), `block` (return a blocked signal so the pipeline halts at the wave boundary), and `fix_then_retry` (dispatch the `fix-verification` agent then re-verify under `wave-verification/wave-{N}/retry/`; on still-failing retry, behave as `warn`). Adding profile-name branching in orchestration code to trigger this hook violates the invariant. See ADR-030.
 
+- **Slice completion and wave integration health are distinct graph nodes.** When wave verification is enabled, `_expand_slices` inserts a `wave_verify_{N}` deterministic node after each wave so per-slice `impl_{N}` nodes carry only local-completion status while `wave_verify_{N}` nodes carry the merged-branch verdict. `_maybe_run_wave_verification` stamps `wave_verify_{N}` as `blocked` on any failed integration check — even under `warn` / `fix_then_retry` policy where the pipeline continues — so a passing slice can never visually imply repo health. Collapsing the two concepts back into a single node (e.g. by stamping the slice node with the wave verdict) violates this invariant. See ADR-031.
+
 ---
 
 ## Path Resolution Rules
