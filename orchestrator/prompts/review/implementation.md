@@ -97,6 +97,21 @@ Block on:
 - package scripts pointing to missing files (e.g. `"start": "node src/server.js"` when `src/server.js` does not exist)
 - unused production dependencies introduced or left by the change
 - dependency ranges that unintentionally allow major-version drift
+- lockfile / declared-dependency mismatches that would break a clean install (e.g. `vitest` and `@vitest/coverage-v8` pinned to incompatible majors). Cross-check `package.json` against `package-lock.json` / `yarn.lock` / `pnpm-lock.yaml` when present; deterministic verification's `clean-install` command also flags this — if it does, the corresponding blocking finding is required.
+
+**Placeholder runtime adapters on the primary user path**
+
+Any code that backs the user-facing flow with a constant-stub or "TODO wire real adapter" implementation is blocking. Look for:
+
+- functions whose only behaviour is a constant return (`exists: () => Promise.resolve(false)`, `readFile: () => Promise.resolve("")`, `list: () => []`)
+- explicit not-wired markers (`TODO: implement`, `// stub`, `throw new Error("not implemented")`)
+- in-memory or no-op implementations of an interface that the documented primary workflow depends on, without a real implementation wired alongside
+
+A placeholder on a *test-only* path or behind a config flag that is off by default is **not** blocking — call it out as non-blocking with the path. A placeholder on the *primary user path* is blocking even when unit tests pass against the stub, because the tests are exercising the stub, not the product.
+
+**README deliverable**
+
+For generated applications (new repos, fresh greenfield work, or runs that produce a user-facing product), the README must reflect the finished product. A README that is still bootstrap-oriented after the run is a blocking finding. At minimum the README must include: what the app does, setup, how to run the primary workflow, how to run tests, and known limitations. Refactors and internal changes that do not alter user-facing behaviour are exempt.
 
 **Architecture**
 - Separation of concerns: is logic spread across the right layers?

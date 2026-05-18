@@ -46,6 +46,16 @@ Render exactly this markdown structure, in this order:
 
 <Bullet list mirroring the acceptance criteria from the feature overview. Mark each with [x] (done), [ ] (not done), or [~] (partial). If the overview has no AC, omit this section.>
 
+## Product readiness
+
+This section is the honesty gate. Fill in each line with what the run actually demonstrated — not what the tests/build implied. Distinguish clearly between *verified internals* and *product usability*; the difference is the point of this section.
+
+- **Verified internals:** <what unit/component tests, typecheck, lint, and build actually cover. Be specific (e.g. "graph rendering, plan loader, signal parser") rather than "tests pass".>
+- **Product usability:** <state plainly whether the finished product is usable for its primary purpose by an end user, or whether it is a partially-wired skeleton. "V1 usable" / "demoable only with stubbed data" / "not yet usable end-to-end" are all acceptable answers; "complete" is only acceptable when primary workflow evidence below is present.>
+- **Primary workflow evidence:** <quote or link the QA report's "Primary workflow evidence" section. If QA recorded "not exercised", say so here too — do not paraphrase it as "covered by tests".>
+- **Skipped / warned verification:** <list any verification commands that were skipped or warned (e.g. "clean-install skipped — no lockfile", "wave verification warned — baseline failures"). Write "none" only when verification status is `passed` with no skipped required-any-of group.>
+- **Unresolved blockers:** <reviewer findings that were not addressed, alignment items still unresolved, placeholder adapters on the primary path that survived. Write "none" only when no such items exist.>
+
 ## Commands & tests
 
 - **Commands run:** <list of significant commands executed by the pipeline — verification, test runners, linters. Skip trivial git/`mkdir` plumbing.>
@@ -77,7 +87,7 @@ Render exactly this markdown structure, in this order:
 - Do not override or contradict the status recorded in `_state.yaml` / `plan.md`. The `Status:` line at the top must match whatever those files say.
 - Link to underlying artifacts (e.g. `[review log](review/review-log.md)`, `[plan](plan.md)`) rather than restating their contents at length.
 - Do not include the `Co-Authored-By` trailer or any signature.
-- **No overclaiming.** Do not describe the change as "production ready", "fully tested", or "complete" unless deterministic verification passed, every requirement is checked `[x]`, and no reviewer left blocking findings. If verification was skipped or warned, or reviewers flagged unresolved risks, say so in `## Open risks & known limitations` — do not bury it.
+- **No overclaiming.** Do not describe the change as "production ready", "fully tested", "V1 ready", or "complete" unless: deterministic verification passed (not skipped, not warned), every requirement is checked `[x]`, no reviewer left blocking findings, and the QA report records primary workflow evidence for any user-facing surface. Internal tests passing is not the same thing as the product being usable — keep the two separate in `## Product readiness`. If verification was skipped or warned, or reviewers flagged unresolved risks, say so in `## Product readiness` and `## Open risks & known limitations` — do not bury it.
 - **Surface unresolved alignment items.** If alignment recorded accepted assumptions or unresolved-remaining items, list them under `## Open risks & known limitations`. An accepted assumption is not a failure, but it must be visible so the reader knows what was *not* confirmed.
 
 ## Signal
