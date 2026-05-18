@@ -7,6 +7,15 @@ Schema:
       probes: [...]              # optional — REPLACES recipe probes when present
 
 Overrides replace rather than merge (see ADR-017).
+
+Note: for Node and TypeScript projects, the verifier engine emits a non-blocking
+``clean-install-audit`` warning when ``commands`` is overridden but contains no
+``npm ci`` / ``yarn install --frozen-lockfile`` / ``pnpm install --frozen-lockfile``
+step. The bundled recipes ship lockfile-gated clean-install commands precisely
+to catch lockfile/dependency drift; replacing the recipe wholesale loses that
+protection unless the override puts it back. The audit lifts ``verification_status``
+to ``warned`` so the executive summary surfaces it, but never to ``failed`` —
+it's an advisory, not a gate.
 """
 
 from __future__ import annotations
