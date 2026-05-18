@@ -334,6 +334,121 @@ def test_executive_summary_calls_out_verification_honestly(tmp_path):
     assert "accepted assumptions" in result.lower()
 
 
+def test_executive_summary_separates_internals_from_product_usability(tmp_path):
+    """Issue #200: the executive summary must distinguish verified internals
+    from product usability and link primary workflow evidence — passing unit
+    tests cannot be paraphrased as a working product."""
+    summary_vars = {
+        **VARS,
+        "plan_md_path": "/tmp/run/plan.md",
+        "overview_md_path": "/tmp/docs/projects/myproject/feature/overview.md",
+        "state_yaml_path": "/tmp/run/_state.yaml",
+        "summary_path": "/tmp/run/executive_summary.md",
+        "pr_url": "not created",
+        "base_branch": "main",
+        "branch": "feature/test",
+        "feature_path": "myfeature",
+        "project": "myproject",
+    }
+
+    result = render_prompt("executive_summary", "default", summary_vars, str(tmp_path), "myproject")
+
+    assert "## Product readiness" in result
+    assert "Verified internals" in result
+    assert "Product usability" in result
+    assert "Primary workflow evidence" in result
+    assert "Skipped / warned verification" in result
+    assert "Unresolved blockers" in result
+    # The no-overclaim rule must call out product usability as distinct from
+    # tests passing.
+    assert "V1 ready" in result or "Internal tests passing is not the same" in result
+
+
+def test_qa_prompt_requires_primary_workflow_evidence(tmp_path):
+    qa_vars = {
+        **VARS,
+        "branch": "feature/test",
+        "base_branch": "main",
+        "slice_files": ["/tmp/run/decomposition/slice-1.md"],
+        "context_path": "/tmp/run/specification/context.md",
+    }
+
+    result = render_prompt("qa", "default", qa_vars, str(tmp_path), "myproject")
+
+    assert "## Primary user workflow evidence" in result
+    # Pure unit coverage without primary-workflow evidence is blocking for
+    # user-facing projects.
+    assert "blocking" in result
+    assert "primary user workflow" in result.lower()
+    # Three evidence tiers must be enumerated so QA does not have to invent
+    # a policy each time.
+    assert "integration or component-level test" in result
+    assert "documented manual repro" in result
+
+
+def test_qa_prompt_treats_placeholder_adapters_as_blocking(tmp_path):
+    qa_vars = {
+        **VARS,
+        "branch": "feature/test",
+        "base_branch": "main",
+        "slice_files": ["/tmp/run/decomposition/slice-1.md"],
+        "context_path": "/tmp/run/specification/context.md",
+    }
+
+    result = render_prompt("qa", "default", qa_vars, str(tmp_path), "myproject")
+
+    assert "## Placeholder runtime adapters" in result
+    # The concrete idioms that motivated the rule (issue #200) must be named.
+    assert "Promise.resolve(false)" in result
+    assert "TODO: wire real adapter" in result or "TODO: implement" in result
+    assert 'throw new Error("not implemented")' in result
+
+
+def test_qa_prompt_has_readme_deliverable_check(tmp_path):
+    qa_vars = {
+        **VARS,
+        "branch": "feature/test",
+        "base_branch": "main",
+        "slice_files": ["/tmp/run/decomposition/slice-1.md"],
+        "context_path": "/tmp/run/specification/context.md",
+    }
+
+    result = render_prompt("qa", "default", qa_vars, str(tmp_path), "myproject")
+
+    assert "## README deliverable check" in result
+    for needle in (
+        "what the app does",
+        "setup instructions",
+        "run instructions",
+        "test instructions",
+        "known limitations",
+    ):
+        assert needle in result, f"missing README requirement wording: {needle!r}"
+
+
+def test_implementation_review_blocks_on_placeholder_adapters_and_lockfile_mismatch(tmp_path):
+    review_vars = {
+        **VARS,
+        "review_md": "/tmp/run/review/review-log.md",
+        "diff": "/tmp/run/review/diff-round-1.patch",
+        "round": "1",
+        "context_path": "/tmp/run/specification/context.md",
+    }
+
+    result = render_prompt("review", "implementation", review_vars, str(tmp_path), "myproject")
+
+    # Lockfile / declared-dependency mismatch must be a named blocking case so
+    # reviewers cross-check package.json and the lockfile when the verifier
+    # also flags it.
+    assert "lockfile" in result.lower()
+    assert "clean install" in result.lower() or "clean-install" in result.lower()
+    # Placeholder adapters on the primary user path are blocking.
+    assert "Placeholder runtime adapters" in result
+    assert "primary user path" in result
+    # README deliverable rule for generated applications.
+    assert "README deliverable" in result
+
+
 def test_fix_implementation_requires_tests_and_summary(tmp_path):
     fix_vars = {
         **VARS,

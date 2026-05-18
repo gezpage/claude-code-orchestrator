@@ -5,6 +5,26 @@ markers:
   - package.json
 
 commands:
+  # Clean-install gates catch lockfile/dependency mismatches that local
+  # `npm install` / dev workflows mask (see issue #200). Each command is gated
+  # on the matching lockfile so only the install path the project actually
+  # uses runs; if no lockfile is present every gate skips and the recipe
+  # proceeds to the test/build commands as before.
+  - id: clean-install
+    command: npm ci
+    required: true
+    if_file_exists: package-lock.json
+
+  - id: clean-install-yarn
+    command: yarn install --frozen-lockfile
+    required: true
+    if_file_exists: yarn.lock
+
+  - id: clean-install-pnpm
+    command: pnpm install --frozen-lockfile
+    required: true
+    if_file_exists: pnpm-lock.yaml
+
   - id: test
     command: npm test
     required: true

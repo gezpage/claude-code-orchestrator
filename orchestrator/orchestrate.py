@@ -667,6 +667,12 @@ def run_pipeline(
 
         logger.log("pipeline", "INFO", "pipeline completed successfully")
 
+        # A resumed run that earlier blocked at an interactive or LLM stage will
+        # have ``blocked_at: <stage>`` persisted in state. Reaching this point
+        # means the pipeline finished — leaving the field intact misleads the
+        # executive summary into reading the run as still blocked. Issue #200.
+        state_mod.clear_blocked_at(run_folder)
+
         if glossary_paths is not None and "harvest" in signals:
             _reconcile_glossary(run_folder, glossary_paths, signals["harvest"], logger)
 
