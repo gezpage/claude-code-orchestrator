@@ -193,10 +193,14 @@ def test_explicit_toolchain_via_cco_yaml(tmp_path: Path):
     (repo / ".cco.yaml").write_text(yaml.dump({"verification": {"toolchain": "node", "commands": [], "probes": []}}))
     run_folder = _make_run_folder(tmp_path)
     sig = verify(repo, run_folder)
-    # No commands, no probes → no signal was produced. Surface as skipped, not
-    # passed: an empty pin must not masquerade as a clean verification.
+    # An empty Node override would normally produce no signal at all, but the
+    # clean-install audit fires for any Node/TS override missing an install
+    # step — so the report surfaces as `warned` instead of `skipped`. The
+    # appended `clean-install-audit` row lifts the status, preserving the
+    # core intent ("an empty pin must not masquerade as a clean verification").
     assert sig["toolchain"] == "node"
-    assert sig["verification_status"] == "skipped"
+    assert sig["verification_status"] == "warned"
+    assert "clean-install-audit" in sig["failed_command_ids"]
 
 
 def test_command_override_replaces_recipe_commands(tmp_path: Path):
@@ -205,7 +209,14 @@ def test_command_override_replaces_recipe_commands(tmp_path: Path):
         yaml.dump(
             {
                 "verification": {
-                    "commands": [{"id": "custom", "command": "true", "required": True}],
+                    # Include a clean-install command so the audit stays silent
+                    # for this test — the assertions below are about override
+                    # replacement, not the audit behaviour (see dedicated tests
+                    # further down).
+                    "commands": [
+                        {"id": "install", "command": "npm ci", "required": True},
+                        {"id": "custom", "command": "true", "required": True},
+                    ],
                 }
             }
         )
@@ -213,7 +224,7 @@ def test_command_override_replaces_recipe_commands(tmp_path: Path):
     run_folder = _make_run_folder(tmp_path)
     with patch("orchestrator.verifiers.engine.subprocess.run", return_value=_completed(0)) as mock_run:
         sig = verify(repo, run_folder)
-    assert sig["command_ids"] == ["custom"]
+    assert sig["command_ids"] == ["install", "custom"]
     # Recipe's `test` command must NOT have been invoked.
     invoked = [c.kwargs.get("cmd") or c.args[0] for c in mock_run.call_args_list]
     assert all("npm test" not in cmd for cmd in invoked)
@@ -526,3 +537,140 @@ def test_plain_js_repo_not_misdetected_as_typescript(tmp_path: Path):
     with patch("orchestrator.verifiers.engine.subprocess.run", return_value=_completed(0)):
         sig = verify(repo, run_folder)
     assert sig["toolchain"] == "node"
+
+
+# ---------------------------------------------------------------------------
+# Clean-install audit for custom Node/TS verification.commands (issue #200
+# follow-up to PR #201). A project that fully overrides the bundled recipe
+# bypasses the recipe-level npm ci protection; the audit catches the omission.
+# ---------------------------------------------------------------------------
+
+
+def _write_cco(repo: Path, commands: list[dict]) -> None:
+    (repo / ".cco.yaml").write_text(yaml.dump({"verification": {"commands": commands}}))
+
+
+def test_clean_install_audit_fires_for_node_override_without_clean_install(tmp_path: Path):
+    """Node project with custom verification.commands that omit npm ci must
+    surface a non-required failed audit row so the report aggregates to
+    `warned` and the executive summary's skipped/warned section catches it."""
+    repo = _make_repo(tmp_path, {"name": "x", "version": "0.0.1", "scripts": {"test": "jest"}})
+    _write_cco(repo, [{"id": "test", "command": "npm test", "required": True}])
+    run_folder = _make_run_folder(tmp_path)
+    with patch("orchestrator.verifiers.engine.subprocess.run", return_value=_completed(0)):
+        sig = verify(repo, run_folder)
+    assert "clean-install-audit" in sig["command_ids"]
+    assert "clean-install-audit" in sig["failed_command_ids"]
+    # Audit is non-required, real test passed → aggregate warned, not failed.
+    assert sig["verification_status"] == "warned"
+    data = json.loads((run_folder / "verification" / "verify.json").read_text())
+    audit = next(c for c in data["commands"] if c["id"] == "clean-install-audit")
+    assert audit["required"] is False
+    assert audit["note"] is not None
+    assert "npm ci" in audit["note"]
+    assert "yarn install --frozen-lockfile" in audit["note"]
+    assert "pnpm install --frozen-lockfile" in audit["note"]
+
+
+def test_clean_install_audit_silent_when_npm_ci_in_override(tmp_path: Path):
+    repo = _make_repo(tmp_path, {"name": "x", "version": "0.0.1", "scripts": {"test": "jest"}})
+    _write_cco(
+        repo,
+        [
+            {"id": "install", "command": "npm ci", "required": True},
+            {"id": "test", "command": "npm test", "required": True},
+        ],
+    )
+    run_folder = _make_run_folder(tmp_path)
+    with patch("orchestrator.verifiers.engine.subprocess.run", return_value=_completed(0)):
+        sig = verify(repo, run_folder)
+    assert "clean-install-audit" not in sig["command_ids"]
+    assert sig["verification_status"] == "passed"
+
+
+def test_clean_install_audit_silent_when_yarn_frozen_in_override(tmp_path: Path):
+    repo = _make_repo(tmp_path, {"name": "x", "version": "0.0.1", "scripts": {"test": "jest"}})
+    _write_cco(
+        repo,
+        [
+            {"id": "install", "command": "yarn install --frozen-lockfile", "required": True},
+            {"id": "test", "command": "yarn test", "required": True},
+        ],
+    )
+    run_folder = _make_run_folder(tmp_path)
+    with patch("orchestrator.verifiers.engine.subprocess.run", return_value=_completed(0)):
+        sig = verify(repo, run_folder)
+    assert "clean-install-audit" not in sig["command_ids"]
+
+
+def test_clean_install_audit_silent_when_pnpm_frozen_in_override(tmp_path: Path):
+    repo = _make_repo(tmp_path, {"name": "x", "version": "0.0.1", "scripts": {"test": "jest"}})
+    _write_cco(
+        repo,
+        [
+            {"id": "install", "command": "pnpm install --frozen-lockfile", "required": True},
+            {"id": "test", "command": "pnpm test", "required": True},
+        ],
+    )
+    run_folder = _make_run_folder(tmp_path)
+    with patch("orchestrator.verifiers.engine.subprocess.run", return_value=_completed(0)):
+        sig = verify(repo, run_folder)
+    assert "clean-install-audit" not in sig["command_ids"]
+
+
+def test_clean_install_audit_fires_for_typescript_override(tmp_path: Path):
+    repo = _make_ts_repo(tmp_path, {"name": "x", "version": "0.0.1", "scripts": {"test": "vitest"}})
+    _write_cco(repo, [{"id": "test", "command": "npm test", "required": True}])
+    run_folder = _make_run_folder(tmp_path)
+    with patch("orchestrator.verifiers.engine.subprocess.run", return_value=_completed(0)):
+        sig = verify(repo, run_folder)
+    assert sig["toolchain"] == "typescript"
+    assert "clean-install-audit" in sig["failed_command_ids"]
+    assert sig["verification_status"] == "warned"
+
+
+def test_clean_install_audit_silent_for_non_node_toolchain(tmp_path: Path):
+    """Python/Go/Java/PHP overrides must not fire the audit — they have no
+    bundled clean-install step and the audit semantics don't apply."""
+    repo = _make_python_repo(tmp_path, "pyproject.toml")
+    _write_cco(repo, [{"id": "test", "command": "python -m pytest", "required": True}])
+    run_folder = _make_run_folder(tmp_path)
+    with patch("orchestrator.verifiers.engine.subprocess.run", return_value=_completed(0)):
+        sig = verify(repo, run_folder)
+    assert sig["toolchain"] == "python"
+    assert "clean-install-audit" not in sig["command_ids"]
+
+
+def test_clean_install_audit_silent_when_no_override(tmp_path: Path):
+    """No .cco.yaml override → bundled recipe handles the clean install itself,
+    audit is unnecessary."""
+    repo = _make_repo(tmp_path, {"name": "x", "version": "0.0.1", "scripts": {"test": "jest"}})
+    run_folder = _make_run_folder(tmp_path)
+    with patch("orchestrator.verifiers.engine.subprocess.run", return_value=_completed(0)):
+        sig = verify(repo, run_folder)
+    assert "clean-install-audit" not in sig["command_ids"]
+
+
+def test_clean_install_audit_silent_when_probes_only_overridden(tmp_path: Path):
+    """Probe override without command override leaves the bundled commands in
+    place, so the bundled clean-install runs as normal — no audit needed."""
+    repo = _make_repo(tmp_path, {"name": "x", "version": "0.0.1", "scripts": {"test": "jest"}})
+    (repo / ".cco.yaml").write_text(yaml.dump({"verification": {"probes": []}}))
+    run_folder = _make_run_folder(tmp_path)
+    with patch("orchestrator.verifiers.engine.subprocess.run", return_value=_completed(0)):
+        sig = verify(repo, run_folder)
+    assert "clean-install-audit" not in sig["command_ids"]
+
+
+def test_clean_install_audit_note_appears_in_verify_md(tmp_path: Path):
+    """The audit's `note` field must render as a `- note: ...` line in
+    VERIFY.md so reviewers see the explanation, not just the failing row."""
+    repo = _make_repo(tmp_path, {"name": "x", "version": "0.0.1", "scripts": {"test": "jest"}})
+    _write_cco(repo, [{"id": "test", "command": "npm test", "required": True}])
+    run_folder = _make_run_folder(tmp_path)
+    with patch("orchestrator.verifiers.engine.subprocess.run", return_value=_completed(0)):
+        verify(repo, run_folder)
+    md = (run_folder / "verification" / "VERIFY.md").read_text()
+    assert "clean-install-audit" in md
+    assert "note:" in md
+    assert "npm ci" in md

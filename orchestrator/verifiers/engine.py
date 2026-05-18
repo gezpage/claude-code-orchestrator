@@ -11,6 +11,7 @@ Public API:
 from __future__ import annotations
 
 import json
+import re
 import subprocess
 import time
 from pathlib import Path
@@ -87,6 +88,10 @@ def verify(
         toolchain=recipe.toolchain,
         required_any_of=effective_any_of,
     )
+
+    audit = _audit_clean_install(recipe, commands, project_cfg)
+    if audit is not None:
+        report.commands.append(audit)
 
     for cmd in commands:
         report.commands.append(_run_command(cmd, repo_root))
@@ -238,6 +243,72 @@ def _apply_overrides(recipe: Recipe, cfg: ProjectVerifyConfig | None) -> tuple[t
     commands = recipe.commands if cfg is None or cfg.commands is None else cfg.commands
     probes = recipe.probes if cfg is None or cfg.probes is None else cfg.probes
     return commands, probes
+
+
+# Toolchains whose bundled recipes ship a clean-install step. When a project's
+# .cco.yaml fully replaces the command list, the audit fires unless the override
+# already contains an equivalent clean install — the original concern from PR
+# #201 was that lockfile/dependency drift slips through if the bundled
+# clean-install never runs.
+_CLEAN_INSTALL_AUDITED_TOOLCHAINS = frozenset({"node", "typescript"})
+
+# Match the three lockfile-respecting install idioms the bundled recipes use.
+# Custom commands need only contain one of these somewhere to satisfy the audit
+# (e.g. wrapping `npm ci --silent` in a shell pipeline is fine).
+_CLEAN_INSTALL_PATTERNS = (
+    re.compile(r"\bnpm\s+ci\b"),
+    re.compile(r"\byarn\s+install\b[^&;|]*--frozen-lockfile"),
+    re.compile(r"\bpnpm\s+install\b[^&;|]*--frozen-lockfile"),
+)
+
+
+def _looks_like_clean_install(command: str) -> bool:
+    return any(pat.search(command) for pat in _CLEAN_INSTALL_PATTERNS)
+
+
+def _audit_clean_install(
+    recipe: Recipe,
+    commands: tuple[Command, ...],
+    cfg: ProjectVerifyConfig | None,
+) -> CommandResult | None:
+    """Surface a warning when a Node/TS project replaces the bundled recipe with
+    custom verification.commands but forgets the clean-install step.
+
+    Returns ``None`` (audit silent) when:
+    - the project did not override commands (the bundled recipe runs and already
+      ships the clean install)
+    - the recipe is for a toolchain we don't audit (Python, Go, Java, PHP have
+      no analogous "install from lockfile" verifier yet)
+    - the override contains an `npm ci` / `yarn install --frozen-lockfile` /
+      `pnpm install --frozen-lockfile` command
+
+    Otherwise returns a synthetic non-required ``CommandResult`` with
+    ``status="failed"`` so :func:`aggregate_status` escalates the report to
+    ``warned`` (not ``failed`` — the audit is advisory). The QA/review prompts
+    and executive summary will then see the audit row in VERIFY.md and
+    verify.json. Follow-up to PR #201 / issue #200.
+    """
+    if cfg is None or cfg.commands is None:
+        return None
+    if recipe.toolchain not in _CLEAN_INSTALL_AUDITED_TOOLCHAINS:
+        return None
+    if any(_looks_like_clean_install(c.command) for c in commands):
+        return None
+    return CommandResult(
+        id="clean-install-audit",
+        command="(audit) clean-install command missing from custom verification.commands",
+        required=False,
+        status="failed",
+        exit_code=None,
+        duration_seconds=0.0,
+        note=(
+            "Custom .cco.yaml verification.commands fully replace the bundled "
+            f"'{recipe.toolchain}' recipe but contain no clean-install step. Add one of "
+            "`npm ci`, `yarn install --frozen-lockfile`, or `pnpm install --frozen-lockfile` "
+            "(matching the project's lockfile) to catch lockfile / dependency-range drift "
+            "that local `npm install` workflows mask."
+        ),
+    )
 
 
 def _run_command(cmd: Command, repo_root: Path) -> CommandResult:

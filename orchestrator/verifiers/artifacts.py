@@ -28,6 +28,11 @@ class CommandResult:
     exit_code: int | None
     duration_seconds: float
     skipped_reason: str | None = None
+    # Free-text explanation for a result that did not actually invoke a shell
+    # command — used by synthetic audit entries (e.g. clean-install audit) where
+    # ``skipped_reason`` would mislead readers because the status is ``failed``
+    # rather than ``skipped``.
+    note: str | None = None
     # ``baseline`` — the same command was already failing before the changes.
     # ``net_new`` — the command failed only after the changes.
     # ``None`` — no baseline was provided, classification not available.
@@ -263,6 +268,8 @@ def write_markdown(report: VerifyReport, path: Path) -> None:
             lines.append(f"| `{c.id}` | {req} | `{c.status}` | {kind} | {exit_code} | {duration} |")
             if c.skipped_reason:
                 lines.append(f"  - skipped: {c.skipped_reason}")
+            if c.note:
+                lines.append(f"  - note: {c.note}")
     lines.append("")
     lines.append("## Probes")
     if not report.probes:
