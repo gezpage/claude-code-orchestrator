@@ -55,3 +55,16 @@ def save_stage_agent(run_folder, stage: str, backend: str | None, model: str | N
     state = load_state(run_folder)
     state.setdefault("agent", {})[stage] = {"backend": backend, "model": model}
     save_state(run_folder, state)
+
+
+def clear_blocked_at(run_folder) -> None:
+    """Drop any ``blocked_at`` field from the persisted state.
+
+    Called on successful pipeline completion so a resumed run that earlier
+    recorded a blocked stage does not leave stale "blocked at <stage>" metadata
+    once the pipeline has reached the end. Issue #200.
+    """
+    state = load_state(run_folder)
+    if "blocked_at" in state:
+        del state["blocked_at"]
+        save_state(run_folder, state)

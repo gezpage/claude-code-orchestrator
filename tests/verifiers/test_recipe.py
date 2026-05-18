@@ -21,6 +21,43 @@ def test_bundled_node_recipe_loads():
     assert "node_manifest_sanity" in recipe.probes
 
 
+def test_bundled_node_recipe_has_clean_install_commands():
+    """Clean-install commands gate on the matching lockfile so we only run the
+    install path the project actually uses, and skip silently otherwise. See
+    issue #200."""
+    recipe = load_recipe_by_toolchain("node")
+    npm = next(c for c in recipe.commands if c.id == "clean-install")
+    assert npm.command == "npm ci"
+    assert npm.required
+    assert npm.if_file_exists == "package-lock.json"
+
+    yarn = next(c for c in recipe.commands if c.id == "clean-install-yarn")
+    assert yarn.command == "yarn install --frozen-lockfile"
+    assert yarn.required
+    assert yarn.if_file_exists == "yarn.lock"
+
+    pnpm = next(c for c in recipe.commands if c.id == "clean-install-pnpm")
+    assert pnpm.command == "pnpm install --frozen-lockfile"
+    assert pnpm.required
+    assert pnpm.if_file_exists == "pnpm-lock.yaml"
+
+
+def test_bundled_typescript_recipe_has_clean_install_commands():
+    recipe = load_recipe_by_toolchain("typescript")
+    npm = next(c for c in recipe.commands if c.id == "clean-install")
+    assert npm.command == "npm ci"
+    assert npm.required
+    assert npm.if_file_exists == "package-lock.json"
+
+    yarn = next(c for c in recipe.commands if c.id == "clean-install-yarn")
+    assert yarn.command == "yarn install --frozen-lockfile"
+    assert yarn.if_file_exists == "yarn.lock"
+
+    pnpm = next(c for c in recipe.commands if c.id == "clean-install-pnpm")
+    assert pnpm.command == "pnpm install --frozen-lockfile"
+    assert pnpm.if_file_exists == "pnpm-lock.yaml"
+
+
 def test_bundled_go_recipe_loads():
     recipe = load_recipe_by_toolchain("go")
     assert recipe.toolchain == "go"
